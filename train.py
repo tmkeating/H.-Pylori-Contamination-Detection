@@ -2,10 +2,11 @@ import os                       # Standard library for file path management
 import torch                    # Core library for deep learning
 import torch.nn as nn           # Tools for building neural network layers
 import torch.optim as optim     # Mathematical tools to "teach" the model
+from torch.optim.adam import Adam # The specific algorithm to adjust the brain
 import numpy as np               # Numeric library
 import pandas as pd              # Data manipulation library
 import matplotlib.pyplot as plt  # Drawing/plotting library
-from torch.utils.data import DataLoader, random_split # Tools to manage and split data
+from torch.utils.data import DataLoader, random_split, Dataset, Subset, WeightedRandomSampler # Tools to manage and split data
 from torchvision import transforms # Tools to prep images for the AI
 from sklearn.metrics import roc_curve, auc, confusion_matrix, ConfusionMatrixDisplay, classification_report 
 from dataset import HPyloriDataset # Our custom code that finds images/labels
@@ -13,7 +14,7 @@ from model import get_model        # Our custom code that builds the AI brain
 from tqdm import tqdm              # A library that shows a "progress bar"
 
 # This helper class allows us to have different transforms for train and validation split
-class TransformedSubset(torch.utils.data.Dataset):
+class TransformedSubset(Dataset):
     def __init__(self, subset, transform=None):
         self.subset = subset
         self.transform = transform
@@ -39,12 +40,18 @@ def train_model():
     print(f"Using device: {device}")
 
     # --- Step 2: Set the paths to our data ---
-    # We check if the local path exists; if not, we use a relative path for the server
-    base_data_path = "/home/twyla/Documents/Classes/aprenentatgeProfund/Code/HelicoDataSet"
+    # The dataset is located on the shared cluster path
+    base_data_path = "/import/fhome/vlia/HelicoDataSet"
     if not os.path.exists(base_data_path):
-        # On the server, we assume the dataset folder is at the same level as the code folder
-        base_data_path = os.path.abspath(os.path.join(os.getcwd(), "..", "HelicoDataSet"))
-        print(f"Local path not found. Switching to server path: {base_data_path}")
+        # Fallback for local development or different environments
+        local_path = "/home/twyla/Documents/Classes/aprenentatgeProfund/Code/HelicoDataSet"
+        if os.path.exists(local_path):
+            base_data_path = local_path
+        else:
+            # Last resort: look in the parent directory
+            base_data_path = os.path.abspath(os.path.join(os.getcwd(), "..", "HelicoDataSet"))
+        
+        print(f"Primary path not found. Using: {base_data_path}")
 
     patient_csv = os.path.join(base_data_path, "PatientDiagnosis.csv")
     patch_csv = os.path.join(base_data_path, "HP_WSI-CoordAnnotatedAllPatches.csv")
@@ -86,12 +93,12 @@ def train_model():
     
     # Re-apply our study habits for each split
     # Training gets random flips, validation stays as is
-    train_data = torch.utils.data.Subset(full_dataset, train_indices)
-    val_data = torch.utils.data.Subset(full_dataset, val_indices)
+    train_data = Subset(full_dataset, train_indices)
+    val_data = Subset(full_dataset, val_indices)
     
     # We assign the transforms to the original dataset temporarily during retrieval
     # or better, we use a custom class to apply them
-    class TransformDataset(torch.utils.data.Dataset):
+    class TransformDataset(Dataset):
         def __init__(self, subset, transform):
             self.subset = subset
             self.transform = transform
@@ -117,7 +124,7 @@ def train_model():
     # This ensures that every batch of 32 images is balanced (approx 16 Neg, 16 Pos)
     class_weights = [1.0/max(1, neg_count), 1.0/max(1, pos_count)]
     sample_weights = [class_weights[t] for t in train_labels]
-    sampler = torch.utils.data.WeightedRandomSampler(sample_weights, len(sample_weights))
+    sampler = WeightedRandomSampler(sample_weights, len(sample_weights))
 
     # DataLoaders are like "librarians" that hand the AI images in batches of 32
     # We use the 'sampler' to show contaminated images more frequently to the AI
@@ -135,7 +142,7 @@ def train_model():
     criterion = nn.CrossEntropyLoss(weight=loss_weights)
     
     # Optimizer: The "tutor" (the math that updates the model to make it less wrong)
-    optimizer = optim.Adam(model.parameters(), lr=1e-4)
+    optimizer = Adam(model.parameters(), lr=1e-4)
     
     # --- Step 6.5: Hardware Optimization (Optional) ---
     # Set this to True ONLY if you have an Intel CPU and compatible IPEX installed.
