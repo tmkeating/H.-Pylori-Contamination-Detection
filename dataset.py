@@ -113,4 +113,7 @@ if __name__ == "__main__":
     print(f"Total samples: {len(dataset)}")
     if len(dataset) > 0:
         img, lbl = dataset[0]
-        print(f"Sample 0 label: {lbl}, shape: {img.shape}")
+        # We use a cautious approach to printing dimensions to satisfy the linter
+        # as img could be a PIL Image (size) or a PyTorch Tensor (shape).
+        dims = getattr(img, 'shape', getattr(img, 'size', 'Unknown'))
+        print(f"Sample 0 label: {lbl}, dimensions: {dims}")
