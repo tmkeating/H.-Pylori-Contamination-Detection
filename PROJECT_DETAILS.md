@@ -31,9 +31,9 @@ Instead of trying to teach a brain to see from scratch, we use **Transfer Learni
 *   **Resolution**: Optimized at $448 \times 448$ input size.
 
 ### **Optimization Strategy**
-*   **Loss Function**: **Weighted Cross-Entropy Loss**. We assign a significantly higher weight ($w=10.0$) to the "Contaminated" class.
+*   **Loss Function**: **Weighted Cross-Entropy Loss**. We assign a specific weight to the "Contaminated" class.
 *   **Imbalance Handling**: 
-    *   **Weighted Loss ($1:10$)**: Penalizes misses heavily.
+    *   **Weighted Loss ($w=3.0$)**: Used to prioritize bacterial detection without compromising precision.
     *   **WeightedRandomSampler**: Manages the extreme $1:50$ imbalance in the raw data to ensure every training batch is statistically balanced ($1:1$ ratio).
 *   **Optimizer**: **Adam (Adaptive Moment Estimation)** with a Learning Rate of $1 \times 10^{-4}$.
 
@@ -55,4 +55,10 @@ Instead of trying to teach a brain to see from scratch, we use **Transfer Learni
 
 ## 3. Training Performance Estimations
 *   **Current Goal**: Achieve >80% Recall on the HoldOut set while maintaining >60% Precision.
-*   **Deployment**: Results are saved as machine-readable CSVs, confusion matrices (PNG), and ROC curves (PNG) for rapid clinical review.
+*   **Deployment & Visual Diagnostics**: 
+    *   **Standard Metrics**: Results are saved as machine-readable CSVs, Confusion Matrices (PNG), and ROC curves (PNG).
+    *   **Advanced Interpretability & Reporting**: 
+        *   **Grad-CAM Heatmaps**: Automatically generated for positive samples to show the specific tissue areas driving the "Contaminated" prediction.
+        *   **Precision-Recall (PR) Curves**: Critical for evaluating performance in highly imbalanced datasets.
+        *   **Probability Histograms**: Visualizes the model's confidence distribution across both classes.
+        *   **Learning Curves**: Used to monitor training stability and convergence across 10 epochs.
