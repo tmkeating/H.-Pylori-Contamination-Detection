@@ -2,11 +2,32 @@ import os                       # Standard library for file path management
 import torch                    # Core library for deep learning
 import torch.nn as nn           # Tools for building neural network layers
 import torch.optim as optim     # Mathematical tools to "teach" the model
+import numpy as np               # Numeric library
 from torch.utils.data import DataLoader, random_split # Tools to manage and split data
 from torchvision import transforms # Tools to prep images for the AI
 from dataset import HPyloriDataset # Our custom code that finds images/labels
 from model import get_model        # Our custom code that builds the AI brain
 from tqdm import tqdm              # A library that shows a "progress bar"
+
+# This helper class allows us to have different transforms for train and validation split
+class TransformedSubset(torch.utils.data.Dataset):
+    def __init__(self, subset, transform=None):
+        self.subset = subset
+        self.transform = transform
+        
+    def __getitem__(self, index):
+        # The base dataset usually provides raw images if no transform is passed to it,
+        # but here the original HPyloriDataset might already have a transform.
+        # We access the image and label from the subset
+        # We need to reach the original image data without the full_dataset's transform.
+        # Actually, if we just want to override, we should create the full_dataset with transform=None.
+        img, label = self.subset[index] # This currently uses train_transform because full_dataset has it
+        # If we really want to swap transforms, we should set full_dataset.transform = None 
+        # and apply them here.
+        return img, label
+
+    def __len__(self):
+        return len(self.subset)
 
 def train_model():
     # --- Step 1: Choose our study device ---
@@ -15,10 +36,10 @@ def train_model():
     print(f"Using device: {device}")
 
     # --- Step 2: Set the paths to our data ---
-    patient_csv = "../HelicoDataSet/PatientDiagnosis.csv" # General results
-    patch_csv = "../HelicoDataSet/HP_WSI-CoordAnnotatedAllPatches.csv" # Specific spot results
-    train_dir = "../HelicoDataSet/CrossValidation/Annotated" # Folder used for training
-    holdout_dir = "../HelicoDataSet/HoldOut" # Folder used for the final "final exam"
+    patient_csv = "/home/twyla/Documents/Classes/aprenentatgeProfund/Code/HelicoDataSet/PatientDiagnosis.csv"
+    patch_csv = "/home/twyla/Documents/Classes/aprenentatgeProfund/Code/HelicoDataSet/HP_WSI-CoordAnnotatedAllPatches.csv"
+    train_dir = "/home/twyla/Documents/Classes/aprenentatgeProfund/Code/HelicoDataSet/CrossValidation/Annotated"
+    holdout_dir = "/home/twyla/Documents/Classes/aprenentatgeProfund/Code/HelicoDataSet/HoldOut"
 
     # --- Step 3: Define "Study Habits" (Transforms) ---
     # Training habits: We resize and sometimes flip the image to make the AI more robust
@@ -39,20 +60,42 @@ def train_model():
     ])
 
     # --- Step 4: Load and split the data ---
-    # Create the full dataset object
-    full_dataset = HPyloriDataset(train_dir, patient_csv, patch_csv, transform=train_transform)
+    # Create the full dataset object without a transform initially
+    full_dataset = HPyloriDataset(train_dir, patient_csv, patch_csv, transform=None)
     
-    # Split the main data: 80% for studying (training), 20% for self-testing (validation)
+    # Split the main data: 80% for training, 20% for validation
+    indices = list(range(len(full_dataset)))
     train_size = int(0.8 * len(full_dataset))
-    val_size = len(full_dataset) - train_size
-    train_data, val_data = random_split(full_dataset, [train_size, val_size])
     
-    # Ensure the self-test data doesn't use the "flipping" study habits
-    val_data.dataset.transform = val_transform
+    # Shuffle indices manually for the split
+    np.random.seed(42)
+    np.random.shuffle(indices)
+    train_indices, val_indices = indices[:train_size], indices[train_size:]
+    
+    # Re-apply our study habits for each split
+    # Training gets random flips, validation stays as is
+    train_data = torch.utils.data.Subset(full_dataset, train_indices)
+    val_data = torch.utils.data.Subset(full_dataset, val_indices)
+    
+    # We assign the transforms to the original dataset temporarily during retrieval
+    # or better, we use a custom class to apply them
+    class TransformDataset(torch.utils.data.Dataset):
+        def __init__(self, subset, transform):
+            self.subset = subset
+            self.transform = transform
+        def __getitem__(self, index):
+            img, label = self.subset[index]
+            if self.transform:
+                img = self.transform(img)
+            return img, label
+        def __len__(self):
+            return len(self.subset)
+
+    train_transformed = TransformDataset(train_data, train_transform)
+    val_transformed = TransformDataset(val_data, val_transform)
 
     # --- Step 4.5: Improve Recall for Contaminated Samples ---
     # We calculate the distribution of our training data
-    train_indices = train_data.indices
     train_labels = [full_dataset.samples[i][1] for i in train_indices]
     neg_count = train_labels.count(0)
     pos_count = train_labels.count(1)
@@ -60,14 +103,14 @@ def train_model():
 
     # strategy A: Weighted Sampling (Oversampling)
     # This ensures that every batch of 32 images is balanced (approx 16 Neg, 16 Pos)
-    class_weights = [1.0/neg_count, 1.0/pos_count]
+    class_weights = [1.0/max(1, neg_count), 1.0/max(1, pos_count)]
     sample_weights = [class_weights[t] for t in train_labels]
     sampler = torch.utils.data.WeightedRandomSampler(sample_weights, len(sample_weights))
 
     # DataLoaders are like "librarians" that hand the AI images in batches of 32
     # We use the 'sampler' to show contaminated images more frequently to the AI
-    train_loader = DataLoader(train_data, batch_size=32, sampler=sampler, num_workers=4)
-    val_loader = DataLoader(val_data, batch_size=32, shuffle=False, num_workers=4)
+    train_loader = DataLoader(train_transformed, batch_size=32, sampler=sampler, num_workers=4)
+    val_loader = DataLoader(val_transformed, batch_size=32, shuffle=False, num_workers=4)
 
     # --- Step 5: Build the customized AI brain ---
     model = get_model(num_classes=2, pretrained=True).to(device)
@@ -82,13 +125,20 @@ def train_model():
     # Optimizer: The "tutor" (the math that updates the model to make it less wrong)
     optimizer = optim.Adam(model.parameters(), lr=1e-4)
     
-    # Optional Step: Use special Intel optimization if possible for faster speed
-    try:
-        import intel_extension_for_pytorch as ipex
-        model, optimizer = ipex.optimize(model, optimizer=optimizer)
-        print("Intel Extension for PyTorch optimization enabled.")
-    except Exception as e:
-        print(f"IPEX stabilization/matching skipped: {e}. Running on standard PyTorch.")
+    # --- Step 6.5: Hardware Optimization (Optional) ---
+    # Set this to True ONLY if you have an Intel CPU and compatible IPEX installed.
+    # Currently set to False to ensure compatibility across all systems.
+    USE_IPEX = False 
+    
+    if USE_IPEX:
+        try:
+            import intel_extension_for_pytorch as ipex
+            model, optimizer = ipex.optimize(model, optimizer=optimizer)
+            print("Intel Extension for PyTorch optimization enabled.")
+        except Exception as e:
+            print(f"IPEX failed to load: {e}. Falling back to standard PyTorch.")
+    else:
+        print("Running on standard PyTorch (IPEX disabled).")
 
     # --- Step 7: The Main Training Loop ---
     # We will go through the entire set of images 10 times (10 "Epochs")
@@ -118,10 +168,10 @@ def train_model():
             
             # Keep track of scores
             running_loss += loss.item() * inputs.size(0)
-            running_corrects += torch.sum(preds == labels.data)
+            running_corrects += torch.sum(preds == labels.data).item()
             
         epoch_loss = running_loss / train_size
-        epoch_acc = running_corrects.double() / train_size
+        epoch_acc = float(running_corrects) / train_size
         print(f"Train Loss: {epoch_loss:.4f} Acc: {epoch_acc:.4f}")
 
         # --- Self-Test Mode (Validation) ---
@@ -139,10 +189,10 @@ def train_model():
                 _, preds = torch.max(outputs, 1)
                 
                 val_loss += loss.item() * inputs.size(0)
-                val_corrects += torch.sum(preds == labels.data)
+                val_corrects += torch.sum(preds == labels.data).item()
                 
-        val_epoch_loss = val_loss / val_size
-        val_epoch_acc = val_corrects.double() / val_size
+        val_epoch_loss = val_loss / (len(full_dataset) - train_size)
+        val_epoch_acc = float(val_corrects) / (len(full_dataset) - train_size)
         print(f"Val Loss: {val_epoch_loss:.4f} Acc: {val_epoch_acc:.4f}")
 
         # --- Report Card: Save the best version ---
@@ -171,9 +221,9 @@ def train_model():
             labels = labels.to(device)
             outputs = model(inputs)
             _, preds = torch.max(outputs, 1)
-            h_corrects += torch.sum(preds == labels.data)
+            h_corrects += torch.sum(preds == labels.data).item()
             
-    print(f"HoldOut Accuracy: {h_corrects.double() / len(holdout_dataset):.4f}")
+    print(f"HoldOut Accuracy: {float(h_corrects) / len(holdout_dataset):.4f}")
 
 if __name__ == "__main__":
     train_model() # Run the whole process start to finish
