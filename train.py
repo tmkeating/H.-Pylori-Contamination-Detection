@@ -251,23 +251,41 @@ def train_model():
     report_dict = classification_report(all_labels, all_preds, target_names=['Negative', 'Contaminated'], output_dict=True)
     print(classification_report(all_labels, all_preds, target_names=['Negative', 'Contaminated']))
 
+    # Create results directory if it doesn't exist
+    results_dir = "results"
+    os.makedirs(results_dir, exist_ok=True)
+
     # 2. Save machine-readable CSV for AI evaluation
     results_df = pd.DataFrame(report_dict).transpose()
     fpr, tpr, thresholds = roc_curve(all_labels, all_probs)
     roc_auc = auc(fpr, tpr)
     results_df.loc['overall_auc', 'precision'] = roc_auc 
-    results_df.to_csv("evaluation_report_ai.csv")
-    print("Saved machine-readable report to evaluation_report_ai.csv")
+    results_csv_path = os.path.join(results_dir, "evaluation_report_ai.csv")
+    results_df.to_csv(results_csv_path)
+    print(f"Saved machine-readable report to {results_csv_path}")
 
     # 3. Save Confusion Matrix plot
     cm = confusion_matrix(all_labels, all_preds)
     disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=['Negative', 'Contaminated'])
     disp.plot(cmap='Blues') # Use the string name to avoid linter confusion
     plt.title("HoldOut Set: Confusion Matrix")
-    plt.savefig("confusion_matrix_final.png")
-    print("Saved confusion_matrix_final.png")
+    cm_path = os.path.join(results_dir, "confusion_matrix_final.png")
+    plt.savefig(cm_path)
+    print(f"Saved {cm_path}")
 
     # 4. Save ROC Curve plot
+    plt.figure()
+    plt.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC curve (area = {roc_auc:0.2f})')
+    plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.05])
+    plt.xlabel('False Positive Rate')
+    plt.ylabel('True Positive Rate')
+    plt.title('Receiver Operating Characteristic (ROC)')
+    plt.legend(loc="lower right")
+    roc_path = os.path.join(results_dir, "roc_curve_final.png")
+    plt.savefig(roc_path)
+    print(f"Saved {roc_path}")
     plt.figure()
     plt.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC curve (area = {roc_auc:.2f})')
     plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
