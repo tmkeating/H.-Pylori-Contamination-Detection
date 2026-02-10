@@ -39,10 +39,17 @@ def train_model():
     print(f"Using device: {device}")
 
     # --- Step 2: Set the paths to our data ---
-    patient_csv = "/home/twyla/Documents/Classes/aprenentatgeProfund/Code/HelicoDataSet/PatientDiagnosis.csv"
-    patch_csv = "/home/twyla/Documents/Classes/aprenentatgeProfund/Code/HelicoDataSet/HP_WSI-CoordAnnotatedAllPatches.csv"
-    train_dir = "/home/twyla/Documents/Classes/aprenentatgeProfund/Code/HelicoDataSet/CrossValidation/Annotated"
-    holdout_dir = "/home/twyla/Documents/Classes/aprenentatgeProfund/Code/HelicoDataSet/HoldOut"
+    # We check if the local path exists; if not, we use a relative path for the server
+    base_data_path = "/home/twyla/Documents/Classes/aprenentatgeProfund/Code/HelicoDataSet"
+    if not os.path.exists(base_data_path):
+        # On the server, we assume the dataset folder is at the same level as the code folder
+        base_data_path = os.path.abspath(os.path.join(os.getcwd(), "..", "HelicoDataSet"))
+        print(f"Local path not found. Switching to server path: {base_data_path}")
+
+    patient_csv = os.path.join(base_data_path, "PatientDiagnosis.csv")
+    patch_csv = os.path.join(base_data_path, "HP_WSI-CoordAnnotatedAllPatches.csv")
+    train_dir = os.path.join(base_data_path, "CrossValidation/Annotated")
+    holdout_dir = os.path.join(base_data_path, "HoldOut")
 
     # --- Step 3: Define "Study Habits" (Transforms) ---
     # Training habits: We resize and add variety to make the AI more robust
