@@ -1,6 +1,6 @@
 # H. Pylori Contamination Detection
 
-This project implements **Method 1: Fully Pre-trained Transfer Learning** to recognize contaminated samples of cell tissues (H. pylori).
+This project implements **Fully Pre-trained Transfer Learning** to recognize contaminated samples of cell tissues (H. pylori).
 
 ## Project Structure
 
