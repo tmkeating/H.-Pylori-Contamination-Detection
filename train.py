@@ -8,7 +8,11 @@ import pandas as pd              # Data manipulation library
 import matplotlib.pyplot as plt  # Drawing/plotting library
 from torch.utils.data import DataLoader, random_split, Dataset, Subset, WeightedRandomSampler # Tools to manage and split data
 from torchvision import transforms # Tools to prep images for the AI
-from sklearn.metrics import roc_curve, auc, confusion_matrix, ConfusionMatrixDisplay, classification_report 
+from sklearn.metrics import (
+    roc_curve, auc, confusion_matrix, ConfusionMatrixDisplay, 
+    classification_report, precision_recall_curve, 
+    average_precision_score, PrecisionRecallDisplay
+) 
 from dataset import HPyloriDataset # Our custom code that finds images/labels
 from model import get_model        # Our custom code that builds the AI brain
 from tqdm import tqdm              # A library that shows a "progress bar"
@@ -64,6 +68,8 @@ def train_model():
     results_csv_path = os.path.join(results_dir, f"{prefix}_evaluation_report.csv")
     cm_path = os.path.join(results_dir, f"{prefix}_confusion_matrix.png")
     roc_path = os.path.join(results_dir, f"{prefix}_roc_curve.png")
+    pr_path = os.path.join(results_dir, f"{prefix}_pr_curve.png")
+    history_path = os.path.join(results_dir, f"{prefix}_learning_curves.png")
 
     # --- Step 1: Choose our study device ---
     # Use a Graphics Card (CUDA) if available; otherwise, use the Main Processor (CPU)
@@ -196,6 +202,12 @@ def train_model():
     # We will go through the entire set of images 10 times (10 "Epochs")
     num_epochs = 10
     best_loss = float('inf')
+    
+    # Track the "History" to plot learning curves later
+    history = {
+        'train_loss': [], 'train_acc': [],
+        'val_loss': [], 'val_acc': []
+    }
 
     for epoch in range(num_epochs):
         print(f"Epoch {epoch+1}/{num_epochs}")
@@ -247,6 +259,12 @@ def train_model():
         val_epoch_acc = float(val_corrects) / (len(full_dataset) - train_size)
         print(f"Val Loss: {val_epoch_loss:.4f} Acc: {val_epoch_acc:.4f}")
 
+        # Store history
+        history['train_loss'].append(epoch_loss)
+        history['train_acc'].append(epoch_acc)
+        history['val_loss'].append(val_epoch_loss)
+        history['val_acc'].append(val_epoch_acc)
+
         # --- Report Card: Save the best version ---
         # If this epoch had the lowest loss yet (best performance considering weights), save it
         if val_epoch_loss < best_loss:
@@ -255,6 +273,22 @@ def train_model():
             print(f"Best model saved to {best_model_path} (Val Loss: {val_epoch_loss:.4f})")
 
     print(f"Training complete. Best Val Loss: {best_loss:.4f}")
+
+    # --- Step 7.5: Save Learning Curves ---
+    plt.figure(figsize=(12, 5))
+    plt.subplot(1, 2, 1)
+    plt.plot(history['train_loss'], label='Train Loss')
+    plt.plot(history['val_loss'], label='Val Loss')
+    plt.title('Loss over Epochs')
+    plt.legend()
+    
+    plt.subplot(1, 2, 2)
+    plt.plot(history['train_acc'], label='Train Acc')
+    plt.plot(history['val_acc'], label='Val Acc')
+    plt.title('Accuracy over Epochs')
+    plt.legend()
+    plt.savefig(history_path)
+    print(f"Saved learning curves to {history_path}")
 
     # --- Step 8: The Final Exam (HoldOut Test) ---
     # This is a set of data the AI has NEVER seen before during training
@@ -318,6 +352,18 @@ def train_model():
     plt.legend(loc="lower right")
     plt.savefig(roc_path)
     print(f"Saved {roc_path}")
+
+    # 5. Save PR Curve plot
+    precision_vals, recall_vals, _ = precision_recall_curve(all_labels, all_probs)
+    ap_score = average_precision_score(all_labels, all_probs)
+    plt.figure()
+    plt.plot(recall_vals, precision_vals, color='blue', lw=2, label=f'PR curve (AP = {ap_score:0.2f})')
+    plt.xlabel('Recall')
+    plt.ylabel('Precision')
+    plt.title('Precision-Recall Curve')
+    plt.legend(loc="lower left")
+    plt.savefig(pr_path)
+    print(f"Saved {pr_path}")
 
 if __name__ == "__main__":
     train_model() # Run the whole process start to finish
