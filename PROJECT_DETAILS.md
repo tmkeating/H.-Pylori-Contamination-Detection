@@ -49,6 +49,6 @@ Instead of trying to teach a baby brain to see from scratch, we use **Transfer L
 ---
 
 ## 3. Training Performance Estimations
-*   **Hardware**: Intel Core Ultra 7 258V (Lunar Lake).
-*   **Inference Latency**: Sub-10ms per image using iGPU/NPU acceleration via IPEX.
+*   **Hardware Compatibility**: Optimized for standard PyTorch on CPU/GPU. Includes optional **Intel Extension for PyTorch (IPEX)** support via a toggle in `train.py`.
+*   **Optimization**: IPEX acceleration can be enabled by setting `USE_IPEX = True` in `train.py` (requires compatible hardware and drivers).
 *   **Quantization Potential**: This model can be further optimized via INT8 quantization for real-time deployment on mobile pathology scanners.
