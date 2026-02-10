@@ -57,48 +57,59 @@ class HPyloriDataset(Dataset):
         
         # --- Step 3: Organize all file paths into a list ---
         self.samples = [] # This will be our master list of (image_path, label)
-        # Look through every patient folder in the directory
-        for patient_folder in os.listdir(root_dir):
-            if patient_folder == 'Thumbs.db': # Ignore hidden system files
-                continue
+
+        # We will look in multiple potential locations to expand the dataset
+        root_parent = os.path.dirname(root_dir)
+        search_dirs = [root_dir]
+        
+        # If we are pointed at 'Annotated', also look in 'Cropped' for extra negatives
+        if 'Annotated' in root_dir:
+            cropped_dir = os.path.join(root_parent, 'Cropped')
+            if os.path.exists(cropped_dir):
+                search_dirs.append(cropped_dir)
+
+        added_keys = set() # Track (patient, win_id) or (patient, img_name) to avoid dupes
+
+        for current_dir in search_dirs:
+            if not os.path.exists(current_dir): continue
             
-            # Extract the ID (like 'B22-101') from the folder name
-            patient_id = patient_folder.split('_')[0]
-            patient_path = os.path.join(root_dir, patient_folder)
-            
-            # If it's a folder, look inside it
-            if os.path.isdir(patient_path):
+            # Look through every patient folder in the directory
+            for patient_folder in os.listdir(current_dir):
+                if patient_folder == 'Thumbs.db': continue
+                
+                patient_id = patient_folder.split('_')[0]
+                patient_path = os.path.join(current_dir, patient_folder)
+                
+                if not os.path.isdir(patient_path): continue
+
                 for img_name in os.listdir(patient_path):
-                    # Only look for PNG images
-                    if not img_name.endswith('.png'):
-                        continue
+                    if not img_name.endswith('.png'): continue
                     
-                    # --- Step 4: Find the correct label for this specific image ---
-                    # In the 'Annotated' folder, the filename maps to WindowID in Excel.
-                    # We need to extract the ID correctly (e.g., 00902.png -> 902, 00902_Aug1.png -> 902_Aug1)
-                    base_name = img_name.split('.')[0] # Removes ".png"
-                    
-                    # Split into number and potential Aug suffix
+                    # Normalize ID for matching with Excel
+                    base_name = img_name.split('.')[0]
                     parts = base_name.split('_') 
                     try:
-                        # Attempt to normalize the number (e.g., '00902' -> '902')
                         parts[0] = str(int(parts[0]))
-                    except (ValueError, IndexError):
-                        pass
-                    
+                    except: pass
                     win_id_normalized = "_".join(parts)
                     
+                    match_key = (patient_id, win_id_normalized)
+                    
                     # Priority 1: Use the specific spot annotation if we have it
-                    if (patient_id, win_id_normalized) in self.patch_labels:
-                        label = self.patch_labels[(patient_id, win_id_normalized)]
-                        self.samples.append((os.path.join(patient_path, img_name), label))
+                    if match_key in self.patch_labels:
+                        if match_key not in added_keys:
+                            label = self.patch_labels[match_key]
+                            self.samples.append((os.path.join(patient_path, img_name), label))
+                            added_keys.add(match_key)
                     
-                    # Priority 2: If the patient is Negative, we can trust the patch even if not in Excel
+                    # Priority 2: Use overall Negative patient patches
                     elif patient_id in self.patient_densities and self.patient_densities[patient_id] == 'NEGATIVA':
-                        label = 0
-                        self.samples.append((os.path.join(patient_path, img_name), label))
+                        file_key = (patient_id, img_name)
+                        if file_key not in added_keys:
+                            self.samples.append((os.path.join(patient_path, img_name), 0))
+                            added_keys.add(file_key)
                     
-                    # Priority 3: Otherwise (Positive patient but unannotated patch), skip it
+                    # Priority 3: Otherwise skip
                     else:
                         continue
 
