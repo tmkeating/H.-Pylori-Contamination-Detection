@@ -440,12 +440,12 @@ def train_model():
                 cam, prob = generate_gradcam(model, img_tensor, target_layer)
             
             # Prepare image and CAM for display
-            img = img_tensor.squeeze().cpu().permute(1, 2, 0).numpy()
+            img = img_tensor.squeeze().detach().cpu().permute(1, 2, 0).numpy()
             # Un-normalize for display
             img = img * np.array([0.229, 0.224, 0.225]) + np.array([0.485, 0.456, 0.406])
             img = np.clip(img, 0, 1)
             
-            cam = cam.squeeze().cpu().numpy()
+            cam = cam.squeeze().detach().cpu().numpy()
             cam = (cam - cam.min()) / (cam.max() - cam.min() + 1e-8)
             
             plt.figure(figsize=(10, 5))
