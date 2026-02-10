@@ -12,7 +12,7 @@ This project implements **Fully Pre-trained Transfer Learning** to recognize con
 - `train.py`: Main training script that:
     - Splits the annotated data into training and validation sets.
     - Trains the model and saves the best version as `best_model.pth`.
-    - Evaluates the final results on the `HoldOut` test set.
+    - **Advanced Evaluation**: Automatically runs a full statistical report on the `HoldOut` test set after training, generating ROC curves, confusion matrices, and machine-readable CSVs.
 - `requirements.txt`: Python packages required.
 
 ## How to Get Started
@@ -23,14 +23,11 @@ This project implements **Fully Pre-trained Transfer Learning** to recognize con
    pip install -r requirements.txt
    ```
 
-2. **Training**:
-   Run the training script:
+2. **Training and Evaluation**:
+   Run the training script (this will automatically evaluate the model once finished):
    ```bash
    python train.py
    ```
-
-3. **Inference**:
-   The script will automatically evaluate on the `HoldOut` set after training completes.
 
 ## Customization
 

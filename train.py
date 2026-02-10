@@ -3,8 +3,11 @@ import torch                    # Core library for deep learning
 import torch.nn as nn           # Tools for building neural network layers
 import torch.optim as optim     # Mathematical tools to "teach" the model
 import numpy as np               # Numeric library
+import pandas as pd              # Data manipulation library
+import matplotlib.pyplot as plt  # Drawing/plotting library
 from torch.utils.data import DataLoader, random_split # Tools to manage and split data
 from torchvision import transforms # Tools to prep images for the AI
+from sklearn.metrics import roc_curve, auc, confusion_matrix, ConfusionMatrixDisplay, classification_report 
 from dataset import HPyloriDataset # Our custom code that finds images/labels
 from model import get_model        # Our custom code that builds the AI brain
 from tqdm import tqdm              # A library that shows a "progress bar"
@@ -206,7 +209,7 @@ def train_model():
 
     # --- Step 8: The Final Exam (HoldOut Test) ---
     # This is a set of data the AI has NEVER seen before during training
-    print("\nEvaluating on HoldOut set...")
+    print("\nEvaluating on HoldOut set (The Final Exam)...")
     holdout_dataset = HPyloriDataset(holdout_dir, patient_csv, patch_csv, transform=val_transform)
     holdout_loader = DataLoader(holdout_dataset, batch_size=32, shuffle=False, num_workers=4)
     
@@ -214,16 +217,58 @@ def train_model():
     model.load_state_dict(torch.load("best_model.pth"))
     model.eval()
     
-    h_corrects = 0
+    all_preds = []   # List to store the AI's final guesses (0 or 1)
+    all_labels = []  # List to store the actual correct answers
+    all_probs = []   # List to store how "sure" the AI was (e.g., 0.95 sure it's positive)
+
     with torch.no_grad():
-        for inputs, labels in tqdm(holdout_loader, desc="HoldOut"):
+        for inputs, labels in tqdm(holdout_loader, desc="Testing HoldOut"):
             inputs = inputs.to(device)
             labels = labels.to(device)
-            outputs = model(inputs)
-            _, preds = torch.max(outputs, 1)
-            h_corrects += torch.sum(preds == labels.data).item()
             
-    print(f"HoldOut Accuracy: {float(h_corrects) / len(holdout_dataset):.4f}")
+            outputs = model(inputs) # Get raw brain output
+            probs = torch.softmax(outputs, dim=1) # Convert output to 100% probabilities
+            _, preds = torch.max(outputs, 1) # Pick the highest probability class
+            
+            all_preds.extend(preds.cpu().numpy())
+            all_labels.extend(labels.cpu().numpy())
+            all_probs.extend(probs.cpu().numpy()[:, 1]) # Probability of being "Contaminated"
+
+    # --- Step 9: Detailed Reporting ---
+    
+    # 1. Classification Report (Precision, Recall, F1)
+    print("\nClassification Report:")
+    report_dict = classification_report(all_labels, all_preds, target_names=['Negative', 'Contaminated'], output_dict=True)
+    print(classification_report(all_labels, all_preds, target_names=['Negative', 'Contaminated']))
+
+    # 2. Save machine-readable CSV for AI evaluation
+    results_df = pd.DataFrame(report_dict).transpose()
+    fpr, tpr, thresholds = roc_curve(all_labels, all_probs)
+    roc_auc = auc(fpr, tpr)
+    results_df.loc['overall_auc', 'precision'] = roc_auc 
+    results_df.to_csv("evaluation_report_ai.csv")
+    print("Saved machine-readable report to evaluation_report_ai.csv")
+
+    # 3. Save Confusion Matrix plot
+    cm = confusion_matrix(all_labels, all_preds)
+    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=['Negative', 'Contaminated'])
+    disp.plot(cmap=plt.cm.Blues)
+    plt.title("HoldOut Set: Confusion Matrix")
+    plt.savefig("confusion_matrix_final.png")
+    print("Saved confusion_matrix_final.png")
+
+    # 4. Save ROC Curve plot
+    plt.figure()
+    plt.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC curve (area = {roc_auc:.2f})')
+    plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.05])
+    plt.xlabel('False Positive Rate')
+    plt.ylabel('True Positive Rate')
+    plt.title('Receiver Operating Characteristic (ROC)')
+    plt.legend(loc="lower right")
+    plt.savefig("roc_curve_final.png")
+    print("Saved roc_curve_final.png")
 
 if __name__ == "__main__":
     train_model() # Run the whole process start to finish
