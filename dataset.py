@@ -124,7 +124,7 @@ if __name__ == "__main__":
     train_dir = "../HelicoDataSet/CrossValidation/Annotated"
     
     transform = transforms.Compose([
-        transforms.Resize((448, 448)),
+        transforms.Resize((256, 256)),
         transforms.ToTensor(),
     ])
     
