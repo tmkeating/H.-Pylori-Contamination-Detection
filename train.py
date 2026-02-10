@@ -17,6 +17,47 @@ from dataset import HPyloriDataset # Our custom code that finds images/labels
 from model import get_model        # Our custom code that builds the AI brain
 from tqdm import tqdm              # A library that shows a "progress bar"
 import re                          # Regexp to handle file numbering
+import torch.nn.functional as F
+
+def generate_gradcam(model, input_batch, target_layer):
+    """Generates Grad-CAM heatmaps for a batch of images."""
+    model.eval()
+    
+    # Hooks to store activations and gradients
+    activations = []
+    gradients = []
+    
+    def save_activation(module, input, output):
+        activations.append(output)
+    
+    def save_gradient(module, grad_input, grad_output):
+        gradients.append(grad_output[0])
+    
+    # Attach hooks to the target layer
+    handle_a = target_layer.register_forward_hook(save_activation)
+    handle_g = target_layer.register_full_backward_hook(save_gradient)
+    
+    # Forward pass
+    logits = model(input_batch)
+    probs = F.softmax(logits, dim=1)
+    
+    # Use the class with highest probability as target
+    score = logits[:, logits.argmax(dim=1)]
+    model.zero_grad()
+    score.backward(torch.ones_like(score))
+    
+    # Remove hooks
+    handle_a.remove()
+    handle_g.remove()
+    
+    # Pool gradients across width/height
+    weights = torch.mean(gradients[0], dim=(2, 3), keepdim=True)
+    # Weighted sum of activations
+    cam = torch.sum(weights * activations[0], dim=1, keepdim=True)
+    # ReLU to keep only positive influence
+    cam = F.relu(cam)
+    
+    return cam, probs
 
 def get_next_run_number(results_dir="results"):
     """Finds the next available numeric prefix for output files."""
@@ -70,6 +111,9 @@ def train_model():
     roc_path = os.path.join(results_dir, f"{prefix}_roc_curve.png")
     pr_path = os.path.join(results_dir, f"{prefix}_pr_curve.png")
     history_path = os.path.join(results_dir, f"{prefix}_learning_curves.png")
+    hist_path = os.path.join(results_dir, f"{prefix}_probability_histogram.png")
+    gradcam_dir = os.path.join(results_dir, f"{prefix}_gradcam_samples")
+    os.makedirs(gradcam_dir, exist_ok=True)
 
     # --- Step 1: Choose our study device ---
     # Use a Graphics Card (CUDA) if available; otherwise, use the Main Processor (CPU)
@@ -303,6 +347,7 @@ def train_model():
     all_preds = []   # List to store the AI's final guesses (0 or 1)
     all_labels = []  # List to store the actual correct answers
     all_probs = []   # List to store how "sure" the AI was (e.g., 0.95 sure it's positive)
+    gradcam_samples = [] # Store a few images for visualization
 
     with torch.no_grad():
         for inputs, labels in tqdm(holdout_loader, desc="Testing HoldOut"):
@@ -316,6 +361,13 @@ def train_model():
             all_preds.extend(preds.cpu().numpy())
             all_labels.extend(labels.cpu().numpy())
             all_probs.extend(probs.cpu().numpy()[:, 1]) # Probability of being "Contaminated"
+            
+            # Save a few contaminated samples for Grad-CAM
+            if len(gradcam_samples) < 5:
+                pos_indices = (labels == 1).nonzero(as_tuple=True)[0]
+                if len(pos_indices) > 0:
+                    idx = pos_indices[0].item()
+                    gradcam_samples.append(inputs[idx:idx+1].clone())
 
     # --- Step 9: Detailed Reporting ---
     
@@ -364,6 +416,53 @@ def train_model():
     plt.legend(loc="lower left")
     plt.savefig(pr_path)
     print(f"Saved {pr_path}")
+
+    # 6. Save Probability Histograms
+    plt.figure()
+    all_probs = np.array(all_probs)
+    all_labels = np.array(all_labels)
+    plt.hist(all_probs[all_labels == 1], bins=20, alpha=0.5, label='Actual Positive', color='red')
+    plt.hist(all_probs[all_labels == 0], bins=20, alpha=0.5, label='Actual Negative', color='blue')
+    plt.xlabel('Probability of "Contaminated"')
+    plt.ylabel('Number of Samples')
+    plt.title('Predicted Probability Distribution')
+    plt.legend()
+    plt.savefig(hist_path)
+    print(f"Saved {hist_path}")
+
+    # 7. Generate Grad-CAM for saved samples
+    if gradcam_samples:
+        print("Generating Grad-CAM interpretability maps...")
+        # For ResNet18, the last conv layer is usually layer4
+        target_layer = model.layer4[-1]
+        for i, img_tensor in enumerate(gradcam_samples):
+            with torch.enable_grad(): # Grad-CAM needs gradients
+                cam, prob = generate_gradcam(model, img_tensor, target_layer)
+            
+            # Prepare image and CAM for display
+            img = img_tensor.squeeze().cpu().permute(1, 2, 0).numpy()
+            # Un-normalize for display
+            img = img * np.array([0.229, 0.224, 0.225]) + np.array([0.485, 0.456, 0.406])
+            img = np.clip(img, 0, 1)
+            
+            cam = cam.squeeze().cpu().numpy()
+            cam = (cam - cam.min()) / (cam.max() - cam.min() + 1e-8)
+            
+            plt.figure(figsize=(10, 5))
+            plt.subplot(1, 2, 1)
+            plt.imshow(img)
+            plt.title(f"Original Path (Prob: {prob[0,1]:.2f})")
+            plt.axis('off')
+            
+            plt.subplot(1, 2, 2)
+            plt.imshow(img)
+            plt.imshow(cam, cmap='jet', alpha=0.5)
+            plt.title("Grad-CAM Heatmap")
+            plt.axis('off')
+            
+            plt.savefig(os.path.join(gradcam_dir, f"sample_{i}.png"))
+            plt.close()
+        print(f"Saved Grad-CAM samples to {gradcam_dir}")
 
 if __name__ == "__main__":
     train_model() # Run the whole process start to finish
