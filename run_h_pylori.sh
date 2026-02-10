@@ -7,7 +7,7 @@
 #SBATCH --mem=32G                      # Total memory
 #SBATCH --gres=gpu:1                   # Request 1 GPU
 #SBATCH --time=12:00:00                # Time limit hrs:min:sec
-#SBATCH --partition=gpu                # Partition name (change if your cluster uses a different name)
+#SBATCH --partition=mhigh              # Use the mhigh partition for the 3090 GPU
 
 # 1. Load necessary modules (Uncomment and adjust based on your cluster)
 # module load python/3.8
