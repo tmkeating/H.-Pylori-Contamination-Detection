@@ -31,11 +31,11 @@ Instead of trying to teach a brain to see from scratch, we use **Transfer Learni
 *   **Resolution**: Optimized at $448 \times 448$ input size.
 
 ### **Optimization Strategy**
-*   **Loss Function**: **Weighted Cross-Entropy Loss**. We assign a specific weight to the "Contaminated" class.
+*   **Loss Function**: **Weighted Cross-Entropy Loss**. We assign a balanced weight to the "Contaminated" class to optimize for both high sensitivity and high specificity.
 *   **Imbalance Handling**: 
-    *   **Weighted Loss ($w=3.0$)**: Used to prioritize bacterial detection without compromising precision.
+    *   **Weighted Loss ($w=2.0$)**: Fine-tuned to maintain 100% Recall while pushing Precision above 95% by reducing false alarms from tissue artifacts.
     *   **WeightedRandomSampler**: Manages the extreme $1:50$ imbalance in the raw data to ensure every training batch is statistically balanced ($1:1$ ratio).
-*   **Optimizer**: **Adam (Adaptive Moment Estimation)** with a Learning Rate of $1 \times 10^{-4}$.
+*   **Optimizer**: **Adam** with a refined Learning Rate of $5 \times 10^{-5}$ over **15 epochs** for stable convergence.
 
 ### **Data Pipeline & Labeling**
 *   **Dataset Source**: Dual source ( `Annotated` + `Cropped` Negatives).
