@@ -218,9 +218,9 @@ def train_model():
 
     # --- Step 6: Define the Learning Rules ---
     # strategy B: Weighted Loss Function
-    # We assign a higher penalty (e.g., 10x) for missing a contaminated sample.
-    # This is critical now that we have a 10:1 imbalance.
-    loss_weights = torch.FloatTensor([1.0, 10.0]).to(device) 
+    # We assign a higher penalty (e.g., 5x) for missing a contaminated sample.
+    # This is critical now that we have a 50:1 imbalance.
+    loss_weights = torch.FloatTensor([1.0, 3.0]).to(device) 
     criterion = nn.CrossEntropyLoss(weight=loss_weights)
     
     # Optimizer: The "tutor" (the math that updates the model to make it less wrong)
