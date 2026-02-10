@@ -16,10 +16,10 @@ Instead of trying to teach a brain to see from scratch, we use **Transfer Learni
 3. **Upscaling**: We upscale the tissue patches from their original small size to $448 \times 448$ pixels. This allows the pre-trained ResNet filters to "zoom in" on the bacterial structures more effectively than the standard ImageNet resolution would.
 
 ### **Quick Summary of the Process**
-*   **Data Quality (Annotated Set)**: We use a high-fidelity dataset of ~2,700 patches where every image name maps directly to an entry in the pathologist's annotation Excel. This ensures every "1" (Contaminated) is a verified bacterial colony and every "0" (Negative) is confirmed healthy tissue.
-*   **Data Filtration**: We only train on patches that have specific coordinate-based annotations (**Verified Positives/Negatives**) or patches from patients confirmed to be entirely **Negative**. We skip unannotated regions from positive patients to prevent "label poisoning."
+*   **Data Scale (Expanded Training)**: We have expanded the dataset to ~54,000 images. This includes the ~2,700 "Annotated" high-fidelity patches supplemented by ~50,000 negative patches from the `Cropped` folders of confirmed healthy patients.
+*   **Data Quality**: We maintain a strict hierarchy of truth. Positive labels ONLY come from pathologist-verified annotations. Negative labels come from either verified annotations or from patients with a confirmed 100% negative diagnosis.
 *   **The Learning Process**: The computer looks at an image, makes a guess, and compares it to the "Answer Key" verified by pathologists. 
-*   **Evaluation (HoldOut split)**: Because the external HoldOut data lacks verified positive labels, we evaluate performance using a strictly separated 20% split of the **Annotated** dataset. This ensures our "Final Exam" actually tests the model's ability to find bacteria.
+*   **Evaluation (HoldOut split)**: Evaluation is performed on a 20% stratified split of the high-fidelity data, ensuring we have a balanced "Final Exam" that includes confirmed bacteria.
 
 ---
 
@@ -28,25 +28,23 @@ Instead of trying to teach a brain to see from scratch, we use **Transfer Learni
 ### **Architecture: ResNet18 (Residual Network)**
 *   **Type**: Convolutional Neural Network (CNN).
 *   **Unique Feature**: "Skip Connections" (Residuals).
-*   **Resolution**: Optimized at $448 \times 448$ input size. This increases the receptive field detail for detecting fine bacterial filaments while maintaining compatibility with ResNet's global average pooling.
-*   **Modification**: The original `fc` (fully connected) head was replaced with a binary output.
+*   **Resolution**: Optimized at $448 \times 448$ input size.
 
 ### **Optimization Strategy**
-*   **Loss Function**: **Weighted Cross-Entropy Loss**. We assign a significantly higher weight ($w=10.0$) to the "Contaminated" class. This prioritizes **Recall (Sensitivity)**, ensuring that the penalty for a False Negative (missed infection) is ten times higher than a False Positive.
+*   **Loss Function**: **Weighted Cross-Entropy Loss**. We assign a significantly higher weight ($w=10.0$) to the "Contaminated" class.
 *   **Imbalance Handling**: 
     *   **Weighted Loss ($1:10$)**: Penalizes misses heavily.
-    *   **WeightedRandomSampler**: Ensures every training batch is statistically balanced ($1:1$ ratio).
-    *   **Early Stopping Metric**: The model is saved based on **Minimum Validation Loss** (which considers the 10x penalty) rather than raw Accuracy.
+    *   **WeightedRandomSampler**: Manages the extreme $1:50$ imbalance in the raw data to ensure every training batch is statistically balanced ($1:1$ ratio).
 *   **Optimizer**: **Adam (Adaptive Moment Estimation)** with a Learning Rate of $1 \times 10^{-4}$.
 
 ### **Data Pipeline & Labeling**
-*   **Dataset Source**: `Annotated` folder (~2,700 verified images).
+*   **Dataset Source**: Dual source ( `Annotated` + `Cropped` Negatives).
 *   **Labeling Prioritization**:
-    1.  **Level 1 (Annotated)**: Window IDs (e.g., `00902.png` normalized to `902`) in the patch Excel are used directly.
-    2.  **Level 2 (Confirmed Negative)**: All patches from patients with "NEGATIVA" diagnosis are used as 0.
-    3.  **Level 3 (Ambiguous)**: Unannotated patches from positive patients are **discarded** to ensure zero label noise.
-*   **Normalization**: Standard ImageNet mean/std $(\mu, \sigma)$ applied via `torchvision.transforms`.
-*   **Augmentation**: Horizontal/Vertical flips, Random Rotations, and Color Jitter to handle stain variability.
+    1.  **Level 1 (Annotated)**: Top priority. Filenames map to Window IDs in Excel.
+    2.  **Level 2 (Healthy Supplementation)**: All patches from "NEGATIVA" patients are included to improve the model's ability to recognize various healthy tissue textures.
+    3.  **Level 3 (Silence)**: Unannotated patches from positive patients are discarded to prevent label noise.
+*   **Normalization**: Standard ImageNet $(\mu, \sigma)$.
+*   **Augmentation**: Horizontal/Vertical flips, Random Rotations, and Color Jitter.
 
 ### **Infrastructure & Deployment**
 *   **SLURM Integration**: Configured for high-memory clusters (tasks: 8 cores, 32GB RAM).
