@@ -18,8 +18,9 @@ Instead of trying to teach a brain to see from scratch, we use **Transfer Learni
 ### **Quick Summary of the Process**
 *   **Data Scale (Expanded Training)**: We have expanded the dataset to ~54,000 images. This includes the ~2,700 "Annotated" high-fidelity patches supplemented by ~50,000 negative patches from the `Cropped` folders of confirmed healthy patients.
 *   **Data Quality**: We maintain a strict hierarchy of truth. Positive labels ONLY come from pathologist-verified annotations. Negative labels come from either verified annotations or from patients with a confirmed 100% negative diagnosis.
+*   **Scientific Rigor (Patient-Level Split)**: Unlike simple random splits, we split data by **Patient ID**. A patient's tissue samples are either entirely in the "Study Set" (Training) or entirely in the "Exam Set" (Validation). This prevents the AI from "memorizing" specific patient tissues and ensures it learns the actual features of *H. pylori*.
 *   **The Learning Process**: The computer looks at an image, makes a guess, and compares it to the "Answer Key" verified by pathologists. 
-*   **Evaluation (HoldOut split)**: Evaluation is performed on a 20% stratified split of the high-fidelity data, ensuring we have a balanced "Final Exam" that includes confirmed bacteria.
+*   **Evaluation (Consensus)**: Final performance is measured not just by individual image accuracy, but by the model's ability to reach a correct majority-vote diagnosis for an entire patient.
 
 ---
 
@@ -28,6 +29,14 @@ Instead of trying to teach a brain to see from scratch, we use **Transfer Learni
 ### **Architecture: ResNet18 (Residual Network)**
 *   **Type**: Convolutional Neural Network (CNN).
 *   **Unique Feature**: "Skip Connections" (Residuals).
+*   **Validation Protocol**: Independent patient-level validation.
+    *   **Ratio**: 80% (Train) / 20% (Val) of unique Patient IDs.
+    *   **Class Imbalance Handling**:
+        1. **WeightedRandomSampler**: Ensures batches are balanced during training.
+        2. **Weighted Cross-Entropy Loss**: Penalizes missing a positive detection more heavily (default weight: 5.0) to maximize **Recall**.
+*   **Interpretability**:
+    *   **Grad-CAM**: Visualizes gradients in the final convolutional layer (`layer4`) to localise detection triggers.
+    *   **Patient consensus**: Mean and Max probability aggregation per patient ID.
 *   **Resolution**: Optimized at $448 \times 448$ input size.
 
 ### **Optimization Strategy**

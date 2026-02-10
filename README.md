@@ -10,13 +10,14 @@ This project implements **Fully Pre-trained Transfer Learning** to recognize con
     - Collects images from patient-specific folders.
 - `model.py`: Defines the transfer learning model using a pre-trained **ResNet18**.
 - `train.py`: Main training script that:
-    - Splits the annotated data into training and validation sets.
+    - **Patient-Level Splitting**: Implements a rigorous validation strategy where data is split by Patient ID. This ensures that patches from the same patient are never shared between training and validation sets, eliminating "Data Leakage."
     - Trains the model and saves the best version as `best_model.pth`.
     - **Advanced Evaluation & Interpretability**: 
-      - Automatically runs a full statistical report on the `HoldOut` test set.
+      - Automatically runs a full statistical report on the independent validation patients.
       - Generates ROC curves, Confusion Matrices, Precision-Recall curves, and Learning Curves.
       - **Grad-CAM**: Produces heatmaps showing exactly which bacterial structures the model is "looking at" to make its decisions.
       - **Probability Histograms**: Visualizes the confidence distribution of model predictions.
+      - **Patient Consensus**: Groups patch-level results to provide a final diagnostic prediction for the whole patient sample.
 - `requirements.txt`: Python packages required.
 
 ## Data Strategy (Expanded Training)

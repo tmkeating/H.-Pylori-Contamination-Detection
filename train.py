@@ -164,14 +164,29 @@ def train_model():
     # Create the full dataset object without a transform initially
     full_dataset = HPyloriDataset(train_dir, patient_csv, patch_csv, transform=None)
     
-    # Split the main data: 80% for training, 20% for validation
-    indices = list(range(len(full_dataset)))
-    train_size = int(0.8 * len(full_dataset))
+    # --- PATIENT-LEVEL SPLIT ---
+    # To prevent "Data Leakage", we must ensure that all patches from a single 
+    # patient are either in Traing OR Validation, but never both.
+    sample_patient_ids = []
+    for img_path, label in full_dataset.samples:
+        # Extract patient ID from folder name (e.g. "123_Annotated")
+        folder_name = os.path.basename(os.path.dirname(img_path))
+        patient_id = folder_name.split('_')[0]
+        sample_patient_ids.append(patient_id)
     
-    # Shuffle indices manually for the split
+    unique_patients = sorted(list(set(sample_patient_ids)))
     np.random.seed(42)
-    np.random.shuffle(indices)
-    train_indices, val_indices = indices[:train_size], indices[train_size:]
+    np.random.shuffle(unique_patients)
+    
+    num_train_pats = int(0.8 * len(unique_patients))
+    train_patients = set(unique_patients[:num_train_pats])
+    
+    train_indices = [i for i, pid in enumerate(sample_patient_ids) if pid in train_patients]
+    val_indices = [i for i, pid in enumerate(sample_patient_ids) if pid not in train_patients]
+    
+    print(f"Independent Patient-level split:")
+    print(f" - Train: {len(train_patients)} patients, {len(train_indices)} patches")
+    print(f" - Val:   {len(unique_patients)-len(train_patients)} patients, {len(val_indices)} patches")
     
     # Re-apply our study habits for each split
     # Training gets random flips, validation stays as is
@@ -218,8 +233,9 @@ def train_model():
 
     # --- Step 6: Define the Learning Rules ---
     # strategy B: Weighted Loss Function
-    # Reduced weight to 2.0 to improve Precision while maintaining high Recall
-    loss_weights = torch.FloatTensor([1.0, 2.0]).to(device) 
+    # Increased weight to 5.0 to prioritize Recall on the independent validation set.
+    # We use a higher weight because positive patches are rarer in some patients.
+    loss_weights = torch.FloatTensor([1.0, 5.0]).to(device) 
     criterion = nn.CrossEntropyLoss(weight=loss_weights)
     
     # Optimizer: Adjusted learning rate for finer final convergence
@@ -277,8 +293,8 @@ def train_model():
             running_loss += loss.item() * inputs.size(0)
             running_corrects += torch.sum(preds == labels.data).item()
             
-        epoch_loss = running_loss / train_size
-        epoch_acc = float(running_corrects) / train_size
+        epoch_loss = running_loss / len(train_indices)
+        epoch_acc = float(running_corrects) / len(train_indices)
         print(f"Train Loss: {epoch_loss:.4f} Acc: {epoch_acc:.4f}")
 
         # --- Self-Test Mode (Validation) ---
@@ -298,8 +314,8 @@ def train_model():
                 val_loss += loss.item() * inputs.size(0)
                 val_corrects += torch.sum(preds == labels.data).item()
                 
-        val_epoch_loss = val_loss / (len(full_dataset) - train_size)
-        val_epoch_acc = float(val_corrects) / (len(full_dataset) - train_size)
+        val_epoch_loss = val_loss / len(val_indices)
+        val_epoch_acc = float(val_corrects) / len(val_indices)
         print(f"Val Loss: {val_epoch_loss:.4f} Acc: {val_epoch_acc:.4f}")
 
         # Store history
@@ -333,10 +349,10 @@ def train_model():
     plt.savefig(history_path)
     print(f"Saved learning curves to {history_path}")
 
-    # --- Step 8: The Final Exam (HoldOut Test) ---
-    # This is a set of data the AI has NEVER seen before during training
-    print("\nEvaluating on HoldOut set (The Final Exam)...")
-    # Using validation set as the "Final Exam" since it contains verified positive labels
+    # --- Step 8: Final Evaluation (Independent Patients) ---
+    # This set contains patients that the AI has NEVER seen during training.
+    # This is the "Gold Standard" test for avoiding Data Leakage.
+    print("\nEvaluating on Independent Validation set (Patient-level Split)...")
     holdout_loader = DataLoader(val_transformed, batch_size=32, shuffle=False, num_workers=8)
     
     # Load our best saved brain
@@ -349,7 +365,7 @@ def train_model():
     gradcam_samples = [] # Store a few images for visualization
 
     with torch.no_grad():
-        for inputs, labels in tqdm(holdout_loader, desc="Testing HoldOut"):
+        for inputs, labels in tqdm(holdout_loader, desc="Patient-Independent Test"):
             inputs = inputs.to(device)
             labels = labels.to(device)
             
@@ -462,6 +478,60 @@ def train_model():
             plt.savefig(os.path.join(gradcam_dir, f"sample_{i}.png"))
             plt.close()
         print(f"Saved Grad-CAM samples to {gradcam_dir}")
+
+    # --- Step 9: Patient-Level Consensus Analysis ---
+    # In the real world, a doctor doesn't care about one patch; they care if the PATIENT has H. Pylori.
+    # We group all validation patches by Patient ID and check if the AI is consistent.
+    print("\n--- Patient-Level Consensus Report ---")
+    patient_probs = {} # { patientID: [prob_p1, prob_p2, ...] }
+    patient_gt = {}    # { patientID: label }
+    
+    # We use the validation set samples and the probabilities we just calculated
+    # Note: all_probs and the val_indices correspond 1:1
+    for idx, prob in enumerate(all_probs):
+        orig_idx = val_indices[idx]
+        img_path, _ = full_dataset.samples[orig_idx]
+        label = all_labels[idx]
+        
+        # Extract patient ID from path like ".../PatientID_Annotated/..."
+        path_parts = img_path.split(os.sep)
+        pat_id = "Unknown"
+        for part in path_parts:
+            if "_Annotated" in part:
+                pat_id = part.replace("_Annotated", "")
+                break
+        
+        if pat_id not in patient_probs:
+            patient_probs[pat_id] = []
+            patient_gt[pat_id] = label
+        patient_probs[pat_id].append(prob)
+    
+    consensus_data = []
+    for pat_id, probs in patient_probs.items():
+        avg_prob = np.mean(probs)
+        max_prob = np.max(probs)
+        pred_label = 1 if avg_prob > 0.5 else 0 # 50% average threshold
+        actual_label = patient_gt[pat_id]
+        
+        consensus_data.append({
+            "PatientID": pat_id,
+            "Actual": "Positive" if actual_label == 1 else "Negative",
+            "Predicted": "Positive" if pred_label == 1 else "Negative",
+            "Mean_Prob": f"{avg_prob:.4f}",
+            "Max_Prob": f"{max_prob:.4f}",
+            "Patch_Count": len(probs),
+            "Correct": "Yes" if pred_label == actual_label else "No"
+        })
+    
+    consensus_df = pd.DataFrame(consensus_data)
+    consensus_report_path = os.path.join(results_dir, f"{prefix}_patient_consensus.csv")
+    consensus_df.to_csv(consensus_report_path, index=False)
+    print(f"Patient Consensus Report saved to: {consensus_report_path}")
+    print(consensus_df.to_string(index=False))
+
+    # Calculate Patient-Level Accuracy
+    pat_acc = (consensus_df["Correct"] == "Yes").mean() * 100
+    print(f"\nFinal Patient-Level Accuracy: {pat_acc:.2f}%")
 
 if __name__ == "__main__":
     train_model() # Run the whole process start to finish
