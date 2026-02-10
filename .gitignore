@@ -20,3 +20,4 @@ best_model.pth
 *.csv
 *.png
 results/
+guide.txt
