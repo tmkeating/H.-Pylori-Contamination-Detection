@@ -6,17 +6,36 @@ from torchvision import transforms # Tools to resize and modify images
 
 # This class tells the computer how to find your images and their correct labels
 class HPyloriDataset(Dataset):
+    def _load_flexible_df(self, file_path):
+        """
+        Helper to load either .xlsx or .csv. 
+        Prioritizes .xlsx if both exist.
+        """
+        base_path = os.path.splitext(file_path)[0]
+        xlsx_path = base_path + ".xlsx"
+        csv_path = base_path + ".csv"
+        
+        if os.path.exists(xlsx_path):
+            return pd.read_excel(xlsx_path)
+        elif os.path.exists(csv_path):
+            return pd.read_csv(csv_path)
+        else:
+            # If neither the inferred paths exist, try the original path provided
+            if file_path.endswith('.xlsx'):
+                return pd.read_excel(file_path)
+            return pd.read_csv(file_path)
+
     def __init__(self, root_dir, patient_csv, patch_csv, transform=None):
         """
         Initialization: This runs once when you create the dataset.
-        It links the CSV files with the image folders.
+        It links the data files with the image folders.
         """
         self.root_dir = root_dir   # The folder where images are stored
         self.transform = transform # Any changes we want to make to images (resizing, etc.)
         
         # --- Step 1: Load Patient-level data ---
         # Read the file that tells us if a patient's overall sample is negative or positive
-        self.patient_df = pd.read_csv(patient_csv)
+        self.patient_df = self._load_flexible_df(patient_csv)
         # Convert text labels into numbers: NEGATIVA becomes 0, others become 1 (contaminated)
         self.label_map = {'NEGATIVA': 0, 'BAIXA': 1, 'ALTA': 1}
         # Create a dictionary for quick lookup: { "PatientID": 0 or 1 }
@@ -24,7 +43,7 @@ class HPyloriDataset(Dataset):
         
         # --- Step 2: Load Patch-level data ---
         # Read the specialized file that looks at specific windows/spots within a sample
-        self.patch_df = pd.read_csv(patch_csv)
+        self.patch_df = self._load_flexible_df(patch_csv)
         # Create a dictionary for specific spots: { ("PatientID", "WindowID"): 0 or 1 }
         self.patch_labels = {}
         for _, row in self.patch_df.iterrows():
