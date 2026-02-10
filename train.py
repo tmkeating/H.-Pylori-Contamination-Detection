@@ -12,6 +12,21 @@ from sklearn.metrics import roc_curve, auc, confusion_matrix, ConfusionMatrixDis
 from dataset import HPyloriDataset # Our custom code that finds images/labels
 from model import get_model        # Our custom code that builds the AI brain
 from tqdm import tqdm              # A library that shows a "progress bar"
+import re                          # Regexp to handle file numbering
+
+def get_next_run_number(results_dir="results"):
+    """Finds the next available numeric prefix for output files."""
+    if not os.path.exists(results_dir):
+        return 0
+    
+    files = os.listdir(results_dir)
+    prefixes = []
+    for f in files:
+        match = re.match(r"^(\d+)_", f)
+        if match:
+            prefixes.append(int(match.group(1)))
+    
+    return max(prefixes) + 1 if prefixes else 0
 
 # This helper class allows us to have different transforms for train and validation split
 class TransformedSubset(Dataset):
@@ -34,6 +49,22 @@ class TransformedSubset(Dataset):
         return len(self.subset)
 
 def train_model():
+    # --- Step 0: Prepare output directories ---
+    results_dir = "results"
+    os.makedirs(results_dir, exist_ok=True)
+    
+    # Get the numeric run ID and the SLURM job ID (if it exists)
+    run_id = f"{get_next_run_number(results_dir):02d}"
+    slurm_id = os.environ.get("SLURM_JOB_ID", "local")
+    prefix = f"{run_id}_{slurm_id}"
+    print(f"--- Starting Run ID: {run_id} (SLURM Job: {slurm_id}) ---")
+
+    # Define versioned file paths
+    best_model_path = os.path.join(results_dir, f"{prefix}_model_brain.pth")
+    results_csv_path = os.path.join(results_dir, f"{prefix}_evaluation_report.csv")
+    cm_path = os.path.join(results_dir, f"{prefix}_confusion_matrix.png")
+    roc_path = os.path.join(results_dir, f"{prefix}_roc_curve.png")
+
     # --- Step 1: Choose our study device ---
     # Use a Graphics Card (CUDA) if available; otherwise, use the Main Processor (CPU)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -55,7 +86,7 @@ def train_model():
 
     patient_csv = os.path.join(base_data_path, "PatientDiagnosis.csv")
     patch_csv = os.path.join(base_data_path, "HP_WSI-CoordAnnotatedAllPatches.csv")
-    train_dir = os.path.join(base_data_path, "CrossValidation/Annotated")
+    train_dir = os.path.join(base_data_path, "CrossValidation/Cropped")
     holdout_dir = os.path.join(base_data_path, "HoldOut")
 
     # --- Step 3: Define "Study Habits" (Transforms) ---
@@ -128,8 +159,8 @@ def train_model():
 
     # DataLoaders are like "librarians" that hand the AI images in batches of 32
     # We use the 'sampler' to show contaminated images more frequently to the AI
-    train_loader = DataLoader(train_transformed, batch_size=32, sampler=sampler, num_workers=4)
-    val_loader = DataLoader(val_transformed, batch_size=32, shuffle=False, num_workers=4)
+    train_loader = DataLoader(train_transformed, batch_size=32, sampler=sampler, num_workers=8)
+    val_loader = DataLoader(val_transformed, batch_size=32, shuffle=False, num_workers=8)
 
     # --- Step 5: Build the customized AI brain ---
     model = get_model(num_classes=2, pretrained=True).to(device)
@@ -219,8 +250,8 @@ def train_model():
         # If this epoch was the best yet, save the brain's state to a file
         if val_epoch_acc > best_acc:
             best_acc = val_epoch_acc
-            torch.save(model.state_dict(), "best_model.pth")
-            print("Best model saved.")
+            torch.save(model.state_dict(), best_model_path)
+            print(f"Best model saved to {best_model_path}")
 
     print(f"Training complete. Best Val Acc: {best_acc:.4f}")
 
@@ -228,10 +259,10 @@ def train_model():
     # This is a set of data the AI has NEVER seen before during training
     print("\nEvaluating on HoldOut set (The Final Exam)...")
     holdout_dataset = HPyloriDataset(holdout_dir, patient_csv, patch_csv, transform=val_transform)
-    holdout_loader = DataLoader(holdout_dataset, batch_size=32, shuffle=False, num_workers=4)
+    holdout_loader = DataLoader(holdout_dataset, batch_size=32, shuffle=False, num_workers=8)
     
     # Load our best saved brain
-    model.load_state_dict(torch.load("best_model.pth"))
+    model.load_state_dict(torch.load(best_model_path))
     model.eval()
     
     all_preds = []   # List to store the AI's final guesses (0 or 1)
@@ -258,16 +289,11 @@ def train_model():
     report_dict = classification_report(all_labels, all_preds, target_names=['Negative', 'Contaminated'], output_dict=True)
     print(classification_report(all_labels, all_preds, target_names=['Negative', 'Contaminated']))
 
-    # Create results directory if it doesn't exist
-    results_dir = "results"
-    os.makedirs(results_dir, exist_ok=True)
-
     # 2. Save machine-readable CSV for AI evaluation
     results_df = pd.DataFrame(report_dict).transpose()
     fpr, tpr, thresholds = roc_curve(all_labels, all_probs)
     roc_auc = auc(fpr, tpr)
     results_df.loc['overall_auc', 'precision'] = roc_auc 
-    results_csv_path = os.path.join(results_dir, "evaluation_report_ai.csv")
     results_df.to_csv(results_csv_path)
     print(f"Saved machine-readable report to {results_csv_path}")
 
@@ -276,7 +302,6 @@ def train_model():
     disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=['Negative', 'Contaminated'])
     disp.plot(cmap='Blues') # Use the string name to avoid linter confusion
     plt.title("HoldOut Set: Confusion Matrix")
-    cm_path = os.path.join(results_dir, "confusion_matrix_final.png")
     plt.savefig(cm_path)
     print(f"Saved {cm_path}")
 
@@ -290,20 +315,8 @@ def train_model():
     plt.ylabel('True Positive Rate')
     plt.title('Receiver Operating Characteristic (ROC)')
     plt.legend(loc="lower right")
-    roc_path = os.path.join(results_dir, "roc_curve_final.png")
     plt.savefig(roc_path)
     print(f"Saved {roc_path}")
-    plt.figure()
-    plt.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC curve (area = {roc_auc:.2f})')
-    plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
-    plt.xlim([0.0, 1.0])
-    plt.ylim([0.0, 1.05])
-    plt.xlabel('False Positive Rate')
-    plt.ylabel('True Positive Rate')
-    plt.title('Receiver Operating Characteristic (ROC)')
-    plt.legend(loc="lower right")
-    plt.savefig("roc_curve_final.png")
-    print("Saved roc_curve_final.png")
 
 if __name__ == "__main__":
     train_model() # Run the whole process start to finish
