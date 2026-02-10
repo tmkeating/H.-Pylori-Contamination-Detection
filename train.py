@@ -45,19 +45,21 @@ def train_model():
     holdout_dir = "/home/twyla/Documents/Classes/aprenentatgeProfund/Code/HelicoDataSet/HoldOut"
 
     # --- Step 3: Define "Study Habits" (Transforms) ---
-    # Training habits: We resize and sometimes flip the image to make the AI more robust
+    # Training habits: We resize and add variety to make the AI more robust
     train_transform = transforms.Compose([
-        transforms.Resize((224, 224)), # Make every image the same size
-        transforms.RandomHorizontalFlip(), # Flip it sideways (helps model generalize)
-        transforms.RandomVerticalFlip(), # Flip it upside down
-        transforms.ToTensor(), # Convert the image into numbers (a "tensor")
+        transforms.Resize((448, 448)), # Increased resolution to see tiny bacteria better
+        transforms.RandomHorizontalFlip(), 
+        transforms.RandomVerticalFlip(),
+        transforms.RandomRotation(15), # Small rotations to handle slide orientation
+        transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.05), # Handle stain variation
+        transforms.ToTensor(), 
         # Standardize colors so they are easier for the AI to understand
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
 
-    # Validation habits: No flipping here, we want to see the images as they really are
+    # Validation habits: No random variety here, just high resolution
     val_transform = transforms.Compose([
-        transforms.Resize((224, 224)),
+        transforms.Resize((448, 448)),
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
