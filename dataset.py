@@ -40,6 +40,8 @@ class HPyloriDataset(Dataset):
         self.label_map = {'NEGATIVA': 0, 'BAIXA': 1, 'ALTA': 1}
         # Create a dictionary for quick lookup: { "PatientID": 0 or 1 }
         self.patient_labels = {row['CODI']: self.label_map[row['DENSITAT']] for _, row in self.patient_df.iterrows()}
+        # Keep track of the actual density for logic filtering
+        self.patient_densities = {row['CODI']: row['DENSITAT'] for _, row in self.patient_df.iterrows()}
         
         # --- Step 2: Load Patch-level data ---
         # Read the specialized file that looks at specific windows/spots within a sample
@@ -71,33 +73,34 @@ class HPyloriDataset(Dataset):
                     if not img_name.endswith('.png'):
                         continue
                     
-                    # Extract the specific "Window ID" from the filename
-                    # Files are named like "00180.png" or "00902_Aug1.png"
+                    # --- Step 4: Find the correct label for this specific image ---
+                    # In the 'Annotated' folder, the filename maps to WindowID in Excel.
+                    # We need to extract the ID correctly (e.g., 00902.png -> 902, 00902_Aug1.png -> 902_Aug1)
                     base_name = img_name.split('.')[0] # Removes ".png"
-                    parts = base_name.split('_') # Splits "00902" and "Aug1" if present
                     
-                    # Remove leading zeros so "00902" becomes "902" to match the CSV
+                    # Split into number and potential Aug suffix
+                    parts = base_name.split('_') 
                     try:
+                        # Attempt to normalize the number (e.g., '00902' -> '902')
                         parts[0] = str(int(parts[0]))
-                    except ValueError:
-                        pass # If it's not a number, leave it alone
+                    except (ValueError, IndexError):
+                        pass
                     
-                    # Put the pieces back together (e.g., "902_Aug1")
                     win_id_normalized = "_".join(parts)
                     
-                    # --- Step 4: Find the correct label for this specific image ---
                     # Priority 1: Use the specific spot annotation if we have it
                     if (patient_id, win_id_normalized) in self.patch_labels:
                         label = self.patch_labels[(patient_id, win_id_normalized)]
-                    # Priority 2: Use the overall patient diagnosis as a fallback
-                    elif patient_id in self.patient_labels:
-                        label = self.patient_labels[patient_id]
-                    # Priority 3: If no data exists, skip this image
+                        self.samples.append((os.path.join(patient_path, img_name), label))
+                    
+                    # Priority 2: If the patient is Negative, we can trust the patch even if not in Excel
+                    elif patient_id in self.patient_densities and self.patient_densities[patient_id] == 'NEGATIVA':
+                        label = 0
+                        self.samples.append((os.path.join(patient_path, img_name), label))
+                    
+                    # Priority 3: Otherwise (Positive patient but unannotated patch), skip it
                     else:
                         continue
-                    
-                    # Add the final path and label to our master list
-                    self.samples.append((os.path.join(patient_path, img_name), label))
 
     def __len__(self):
         # This tells the computer how many total images we have found

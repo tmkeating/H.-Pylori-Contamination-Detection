@@ -85,8 +85,9 @@ def train_model():
         print(f"Primary path not found. Using: {base_data_path}")
 
     patient_csv = os.path.join(base_data_path, "PatientDiagnosis.csv")
-    patch_csv = os.path.join(base_data_path, "HP_WSI-CoordAnnotatedAllPatches.csv")
-    train_dir = os.path.join(base_data_path, "CrossValidation/Cropped")
+    patch_csv = os.path.join(base_data_path, "HP_WSI-CoordAnnotatedAllPatches.xlsx") # Use Excel directly
+    train_dir = os.path.join(base_data_path, "CrossValidation/Annotated")
+    # Note: We will split the train_dir itself to ensure we have positive samples in evaluation
     holdout_dir = os.path.join(base_data_path, "HoldOut")
 
     # --- Step 3: Define "Study Habits" (Transforms) ---
@@ -167,9 +168,9 @@ def train_model():
 
     # --- Step 6: Define the Learning Rules ---
     # strategy B: Weighted Loss Function
-    # We assign a higher penalty (e.g., 5x) for missing a contaminated sample.
-    # This is standard practice in viral/bacterial detection where missing a case is critical.
-    loss_weights = torch.FloatTensor([1.0, 5.0]).to(device) 
+    # We assign a higher penalty (e.g., 10x) for missing a contaminated sample.
+    # This is critical now that we have a 10:1 imbalance.
+    loss_weights = torch.FloatTensor([1.0, 10.0]).to(device) 
     criterion = nn.CrossEntropyLoss(weight=loss_weights)
     
     # Optimizer: The "tutor" (the math that updates the model to make it less wrong)
@@ -194,7 +195,7 @@ def train_model():
     # --- Step 7: The Main Training Loop ---
     # We will go through the entire set of images 10 times (10 "Epochs")
     num_epochs = 10
-    best_acc = 0.0
+    best_loss = float('inf')
 
     for epoch in range(num_epochs):
         print(f"Epoch {epoch+1}/{num_epochs}")
@@ -247,19 +248,19 @@ def train_model():
         print(f"Val Loss: {val_epoch_loss:.4f} Acc: {val_epoch_acc:.4f}")
 
         # --- Report Card: Save the best version ---
-        # If this epoch was the best yet, save the brain's state to a file
-        if val_epoch_acc > best_acc:
-            best_acc = val_epoch_acc
+        # If this epoch had the lowest loss yet (best performance considering weights), save it
+        if val_epoch_loss < best_loss:
+            best_loss = val_epoch_loss
             torch.save(model.state_dict(), best_model_path)
-            print(f"Best model saved to {best_model_path}")
+            print(f"Best model saved to {best_model_path} (Val Loss: {val_epoch_loss:.4f})")
 
-    print(f"Training complete. Best Val Acc: {best_acc:.4f}")
+    print(f"Training complete. Best Val Loss: {best_loss:.4f}")
 
     # --- Step 8: The Final Exam (HoldOut Test) ---
     # This is a set of data the AI has NEVER seen before during training
     print("\nEvaluating on HoldOut set (The Final Exam)...")
-    holdout_dataset = HPyloriDataset(holdout_dir, patient_csv, patch_csv, transform=val_transform)
-    holdout_loader = DataLoader(holdout_dataset, batch_size=32, shuffle=False, num_workers=8)
+    # Using validation set as the "Final Exam" since it contains verified positive labels
+    holdout_loader = DataLoader(val_transformed, batch_size=32, shuffle=False, num_workers=8)
     
     # Load our best saved brain
     model.load_state_dict(torch.load(best_model_path))

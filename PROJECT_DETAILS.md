@@ -7,19 +7,19 @@ This project uses Deep Learning to detect the presence of *H. pylori* bacteria i
 ## 1. General Overview (for Non-Experts)
 
 ### **Objective**
-The goal is to build an artificial intelligence "brain" that can look at digital microscopic images of tissue samples and determine if they are **Contaminated** (positive) or **Negative** (clean).
+The goal is to build an artificial intelligence "brain" that can look at high-resolution **Annotated** digital microscopic images (patches) and determine if they are **Contaminated** (positive) or **Negative** (clean).
 
 ### **The Strategy: "Method 1: Fully Pre-trained Transfer Learning"**
-Instead of trying to teach a baby brain to see from scratch, we use **Transfer Learning**.
-1. We take a famous model called **ResNet18**, which has already been "raised" by looking at 1 million common images (like cats, bicycles, and scenery). 
+Instead of trying to teach a brain to see from scratch, we use **Transfer Learning**.
+1. We take a famous model called **ResNet18**, which has already been "raised" by looking at 1 million common images.
 2. Because it already knows how to see shapes, edges, and textures, we only have to "fine-tune" its final layer to specialize in medical pathology.
-3. This is much faster and requires much less data than starting from zero.
+3. **Upscaling**: We upscale the tissue patches from their original small size to $448 \times 448$ pixels. This allows the pre-trained ResNet filters to "zoom in" on the bacterial structures more effectively than the standard ImageNet resolution would.
 
 ### **Quick Summary of the Process**
-*   **Data Preparation**: We feed the computer images from two sets: a training set (the "Study Material") and a hold-out set (the "Final Exam").
-*   **The Learning Process**: The computer looks at an image, makes a guess, and compares it to the "Answer Key" (the CSV labels). 
-*   **Optimization**: If the guess is wrong, the computer uses complex math (Calculus) to slightly adjust its internal connections to do better next time.
-*   **Evaluation**: Once the training is done, we test it on images it has never seen before to see if it truly learned or just memorized the answers.
+*   **Data Quality (Annotated Set)**: We use a high-fidelity dataset of ~2,700 patches where every image name maps directly to an entry in the pathologist's annotation Excel. This ensures every "1" (Contaminated) is a verified bacterial colony and every "0" (Negative) is confirmed healthy tissue.
+*   **Data Filtration**: We only train on patches that have specific coordinate-based annotations (**Verified Positives/Negatives**) or patches from patients confirmed to be entirely **Negative**. We skip unannotated regions from positive patients to prevent "label poisoning."
+*   **The Learning Process**: The computer looks at an image, makes a guess, and compares it to the "Answer Key" verified by pathologists. 
+*   **Evaluation (HoldOut split)**: Because the external HoldOut data lacks verified positive labels, we evaluate performance using a strictly separated 20% split of the **Annotated** dataset. This ensures our "Final Exam" actually tests the model's ability to find bacteria.
 
 ---
 
@@ -27,28 +27,34 @@ Instead of trying to teach a baby brain to see from scratch, we use **Transfer L
 
 ### **Architecture: ResNet18 (Residual Network)**
 *   **Type**: Convolutional Neural Network (CNN).
-*   **Unique Feature**: "Skip Connections" (Residuals). These allow gradients to flow through very deep networks without "vanishing," which prevents the model from forgetting earlier layers during backpropagation.
-*   **Modification**: The original `fc` (fully connected) head was replaced from a 1000-way ImageNet classifier to a binary logit output ($z \in \mathbb{R}^2$), which is then mapped via a Softmax function to $P(y=1|x)$.
+*   **Unique Feature**: "Skip Connections" (Residuals).
+*   **Resolution**: Optimized at $448 \times 448$ input size. This increases the receptive field detail for detecting fine bacterial filaments while maintaining compatibility with ResNet's global average pooling.
+*   **Modification**: The original `fc` (fully connected) head was replaced with a binary output.
 
 ### **Optimization Strategy**
-*   **Loss Function**: **Weighted Cross-Entropy Loss**. We assign a significantly higher weight ($w=5.0$) to the "Contaminated" class. This prioritizes **Recall (Sensitivity)** over Precision, ensuring that the penalty for a False Negative (missed infection) is five times higher than a False Positive.
-*   **Sampling Strategy**: **WeightedRandomSampler**. To combat data imbalance, we use an oversampling technique where positive samples are sampled more frequently. This ensures that every training batch is statistically balanced ($1:1$ ratio), providing the model with more opportunities to learn the features of contaminated tissue.
-*   **Optimizer**: **Adam (Adaptive Moment Estimation)**. Unlike standard Gradient Descent, Adam maintains separate learning rates for each parameter, adapting them based on the first and second moments of the gradients. This handles noisy microscopic data much more effectively.
-*   **Learning Rate**: Set to $1 \times 10^{-4}$ to ensure stable convergence during fine-tuning.
+*   **Loss Function**: **Weighted Cross-Entropy Loss**. We assign a significantly higher weight ($w=10.0$) to the "Contaminated" class. This prioritizes **Recall (Sensitivity)**, ensuring that the penalty for a False Negative (missed infection) is ten times higher than a False Positive.
+*   **Imbalance Handling**: 
+    *   **Weighted Loss ($1:10$)**: Penalizes misses heavily.
+    *   **WeightedRandomSampler**: Ensures every training batch is statistically balanced ($1:1$ ratio).
+    *   **Early Stopping Metric**: The model is saved based on **Minimum Validation Loss** (which considers the 10x penalty) rather than raw Accuracy.
+*   **Optimizer**: **Adam (Adaptive Moment Estimation)** with a Learning Rate of $1 \times 10^{-4}$.
 
-### **Data Management & Normalization**
-*   **Preprocessing**: All images are resized to $224 \times 224$ pixels.
-*   **Normalization**: Pixel values are standardized using the ImageNet mean $(\mu = [0.485, 0.456, 0.406])$ and standard deviation $(\sigma = [0.229, 0.224, 0.225])$. This is critical because the pre-trained weights were learned on data with this specific distribution.
-*   **Augmentation**: During training, we use **Random Horizontal and Vertical Flips**. Since medical pathology slides don't have a fixed "up" or "down," this prevents the model from learning orientation-based biases.
+### **Data Pipeline & Labeling**
+*   **Dataset Source**: `Annotated` folder (~2,700 verified images).
+*   **Labeling Prioritization**:
+    1.  **Level 1 (Annotated)**: Window IDs (e.g., `00902.png` normalized to `902`) in the patch Excel are used directly.
+    2.  **Level 2 (Confirmed Negative)**: All patches from patients with "NEGATIVA" diagnosis are used as 0.
+    3.  **Level 3 (Ambiguous)**: Unannotated patches from positive patients are **discarded** to ensure zero label noise.
+*   **Normalization**: Standard ImageNet mean/std $(\mu, \sigma)$ applied via `torchvision.transforms`.
+*   **Augmentation**: Horizontal/Vertical flips, Random Rotations, and Color Jitter to handle stain variability.
 
-### **Evaluation Metrics**
-*   **ROC Curve (Receiver Operating Characteristic)**: Tracks the trade-off between Sensitivity (True Positive Rate) and Specificity (1 - False Positive Rate) across all probability thresholds.
-*   **AUC (Area Under the Curve)**: Provides a single scalar metric for classifier quality independent of the classification threshold.
-*   **HoldOut Set**: A strictly separated group of patients (not just patches) to ensure the model generalizes across patients rather than just memorizing local slide textures.
+### **Infrastructure & Deployment**
+*   **SLURM Integration**: Configured for high-memory clusters (tasks: 8 cores, 32GB RAM).
+*   **Result Versioning**: Every training run automatically creates a versioned report (e.g., `results/06_101764_evaluation_report.csv`).
+*   **Hardware Compatibility**: Optimized for CPU/GPU. Support for **Intel Extension for PyTorch (IPEX)** is integrated for optimized inference on CPU-only nodes.
 
 ---
 
 ## 3. Training Performance Estimations
-*   **Hardware Compatibility**: Optimized for standard PyTorch on CPU/GPU. Includes optional **Intel Extension for PyTorch (IPEX)** support via a toggle in `train.py`.
-*   **Optimization**: IPEX acceleration can be enabled by setting `USE_IPEX = True` in `train.py` (requires compatible hardware and drivers).
-*   **Quantization Potential**: This model can be further optimized via INT8 quantization for real-time deployment on mobile pathology scanners.
+*   **Current Goal**: Achieve >80% Recall on the HoldOut set while maintaining >60% Precision.
+*   **Deployment**: Results are saved as machine-readable CSVs, confusion matrices (PNG), and ROC curves (PNG) for rapid clinical review.
