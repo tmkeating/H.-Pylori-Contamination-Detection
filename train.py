@@ -135,7 +135,8 @@ def train_model():
     
     if USE_IPEX:
         try:
-            import intel_extension_for_pytorch as ipex
+            # We import here so it only tries to load if the user turned it on
+            import intel_extension_for_pytorch as ipex # type: ignore
             model, optimizer = ipex.optimize(model, optimizer=optimizer)
             print("Intel Extension for PyTorch optimization enabled.")
         except Exception as e:
@@ -252,7 +253,7 @@ def train_model():
     # 3. Save Confusion Matrix plot
     cm = confusion_matrix(all_labels, all_preds)
     disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=['Negative', 'Contaminated'])
-    disp.plot(cmap=plt.cm.Blues)
+    disp.plot(cmap='Blues') # Use the string name to avoid linter confusion
     plt.title("HoldOut Set: Confusion Matrix")
     plt.savefig("confusion_matrix_final.png")
     print("Saved confusion_matrix_final.png")
