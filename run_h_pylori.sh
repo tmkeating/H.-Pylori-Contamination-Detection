@@ -6,7 +6,6 @@
 #SBATCH -N 1                           # Ensure that all cores are on one machine
 #SBATCH -t 0-12:00                     # Runtime in D-HH:MM (12 hours)
 #SBATCH -p dcca40                 # Partition to submit to (Master High/Low)
-#SBATCH -q masterlow                   # Quality of Service (QOS)
 #SBATCH --mem=32G                      # Total memory
 #SBATCH --gres=gpu:1                   # Request 1 GPU
 #SBATCH -o results/%x_%j.out           # Standard output log
