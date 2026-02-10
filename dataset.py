@@ -66,7 +66,7 @@ class HPyloriDataset(Dataset):
         if 'Annotated' in root_dir:
             cropped_dir = os.path.join(root_parent, 'Cropped')
             if os.path.exists(cropped_dir):
-                search_dirs.append(cropped_dir)
+                search_dirs = search_dirs + [cropped_dir]
 
         added_keys = set() # Track (patient, win_id) or (patient, img_name) to avoid dupes
 
