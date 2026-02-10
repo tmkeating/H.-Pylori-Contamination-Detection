@@ -218,13 +218,12 @@ def train_model():
 
     # --- Step 6: Define the Learning Rules ---
     # strategy B: Weighted Loss Function
-    # We assign a higher penalty (e.g., 5x) for missing a contaminated sample.
-    # This is critical now that we have a 50:1 imbalance.
-    loss_weights = torch.FloatTensor([1.0, 3.0]).to(device) 
+    # Reduced weight to 2.0 to improve Precision while maintaining high Recall
+    loss_weights = torch.FloatTensor([1.0, 2.0]).to(device) 
     criterion = nn.CrossEntropyLoss(weight=loss_weights)
     
-    # Optimizer: The "tutor" (the math that updates the model to make it less wrong)
-    optimizer = Adam(model.parameters(), lr=1e-4)
+    # Optimizer: Adjusted learning rate for finer final convergence
+    optimizer = Adam(model.parameters(), lr=5e-5)
     
     # --- Step 6.5: Hardware Optimization (Optional) ---
     # Set this to True ONLY if you have an Intel CPU and compatible IPEX installed.
@@ -243,8 +242,8 @@ def train_model():
         print("Running on standard PyTorch (IPEX disabled).")
 
     # --- Step 7: The Main Training Loop ---
-    # We will go through the entire set of images 10 times (10 "Epochs")
-    num_epochs = 10
+    # We will go through the entire set of images 15 times (15 "Epochs")
+    num_epochs = 15
     best_loss = float('inf')
     
     # Track the "History" to plot learning curves later
