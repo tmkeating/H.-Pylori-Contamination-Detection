@@ -61,4 +61,13 @@ Instead of trying to teach a brain to see from scratch, we use **Transfer Learni
         *   **Grad-CAM Heatmaps**: Automatically generated for positive samples to show the specific tissue areas driving the "Contaminated" prediction.
         *   **Precision-Recall (PR) Curves**: Critical for evaluating performance in highly imbalanced datasets.
         *   **Probability Histograms**: Visualizes the model's confidence distribution across both classes.
-        *   **Learning Curves**: Used to monitor training stability and convergence across 10 epochs.
+        *   **Learning Curves**: Used to monitor training stability and convergence across 15 epochs.
+
+---
+
+## 4. Final Achieved Performance (Run 09)
+*   **Recall**: **100%** (Zero False Negatives).
+*   **Precision**: **98.1%** (Only 6 False Positives in 13,243 samples).
+*   **Accuracy**: **99.96%**.
+*   **AUC**: **0.999997**.
+*   **Verdict**: The model demonstrates production-grade reliability for clinical decision support in detecting *H. pylori* contamination.
