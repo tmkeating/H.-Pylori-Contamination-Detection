@@ -1,9 +1,9 @@
-torch
-torchvision
-pandas
-pillow
-tqdm
 matplotlib
-scikit-learn
 numpy
 openpyxl
+pandas
+pillow
+scikit-learn
+torch
+torchvision
+tqdm
