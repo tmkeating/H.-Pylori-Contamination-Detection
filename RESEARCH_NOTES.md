@@ -230,16 +230,58 @@ Strategy of "False Alarms over Missed Infections" is working but too sensitive t
 
 ---
 
-## Run 28: Density-Based Consensus Logic Implementation
+## Run 28: Density-Based Consensus (Job 101840)
 
-### Changes Implemented
-- **Noise Filtering**: Model requires at least 3 high-confidence patches (Prob > 0.90) to flag patient as Positive
-- **Detailed Reporting**: Added `Suspicious_Count` column to Patient Consensus CSV and terminal report
-- **Job Started**: Job ID 101840 submitted
+### Results & Performance Analysis
+| Metric | Value | Status |
+|--------|-------|--------|
+| **Patient-Level Accuracy** | **93.55%** | ↑ Massive Improvement |
+| **False Positives** | **0** | ✓ Noise Filter Worked |
+| **False Negatives** | 2 (B22-126, B22-102) | ⚠ Sensitivity Tradeoff |
 
-### Expected Results
-- **Healthy Patients** (e.g., B22-27 with single outlier): Now correctly identified as Negative
-- **Infected Patients** (e.g., B22-299 with many suspicious patches): Remain Positive
-- **Outcome**: Elimination of false alarms while maintaining sensitivity to true infections
+### Detailed Breakdown
+1. **Noise Filtering Success**:
+   - **B22-27** (Negative): Correctly identified as Negative ($N=2$ suspicious patches, below threshold of 3).
+   - **B22-34** (Negative): Correctly identified as Negative ($N=0$ suspicious patches).
+   - This fixes the major issue from Run 27 where single-patch artifacts caused false alarms.
+
+2. **The Sensitivity Tradeoff**:
+   - **B22-126** (Positive): **Missed**. It had 2 patches with very high confidence (Max Prob: 0.97). Because we required $N \ge 3$, it was flagged Negative.
+   - **B22-102** (Positive): **Missed**. Very low probabilities overall (Max Prob: 0.02).
+
+3. **High-Confidence Detection**:
+   - **B22-299** & **B22-84**: Both correctly identified with 8 suspicious patches each.
+
+### Technical Note on Numbering
+The discrepancy in run numbering likely comes from the fact that the next available ID is calculated based on existing files in `results/`. If a job starts but fails before saving any prefixed files, the counter will not increment for the next attempt, causing a mismatch between "Job Attempt" and "Run ID".
+
+### Verdict & Next Steps
+The $N \ge 3$ threshold is highly effective at eliminating false positives from stain artifacts. While it missed B22-126 (which had 2 suspicious patches), lowering the threshold to $N \ge 2$ would re-introduce the false positive in B22-27. 
+
+**Recommendation**: Maintain $N \ge 3$ for clinical safety, or consider a "Probabilistic Density" score that accounts for both the number and the intensity of the suspicious patches.
+
 
 ---
+
+## Run 29: The "Sweet Spot" ($N=2$)
+
+### Results & Performance Analysis (Job 101843)
+| Metric | Run 28 ($N \ge 3$) | Run 29 ($N \ge 2$) | Change |
+|--------|-------------------|-------------------|--------|
+| **Patient Accuracy** | 93.5% | **93.5%** | Neutral |
+| **B22-126** (Positive) | Missed | **Caught** | ↑ Sensitivity |
+| **B22-27** (Negative) | Correct | **Correct** | ✓ Specificity |
+| **B22-34** (Negative) | Correct | False Positive | ↓ Slight Noise |
+
+### Key Findings
+✓ **Success with B22-126**: Lowering the threshold to 2 patches was exactly what was needed to catch this low-density infection.
+✓ **Robustness**: Healthy patients like B22-27 remained negative.
+✗ **Noise Ceiling**: B22-34 triggered a false alarm with exactly 2 suspicious patches, indicating that 2-patch clusters are the minimum "noise floor" for this model.
+
+### Next Implementation
+To further separate high-confidence infections from "borderline" noise, I am implementing a **Probabilistic Density Score**. 
+
+**New Logic**: Instead of counting patches above a hard 0.90 threshold, we will calculate the **Sum of the Top 3 patch probabilities**.
+- A truly infected patient with multiple high-confidence patches will easily exceed a score of **2.0**.
+- A patient with noisy artifacts (e.g., 2 random 0.95 patches and nothing else) will struggle to hit the threshold.
+- This provides a smoother "Confidence" metric than a simple integer count.

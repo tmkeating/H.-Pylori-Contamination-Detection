@@ -71,9 +71,25 @@ def get_next_run_number(results_dir="results"):
     files = os.listdir(results_dir)
     prefixes = []
     for f in files:
+        # Check for numeric prefix in results files
         match = re.match(r"^(\d+)_", f)
         if match:
             prefixes.append(int(match.group(1)))
+        
+        # Also check output logs for "Starting Run ID" in case job failed early
+        if f.startswith("output_") and f.endswith(".txt"):
+            try:
+                with open(os.path.join(results_dir, f), 'r') as log:
+                    # Headers are usually at the very top
+                    for _ in range(50):
+                        line = log.readline()
+                        if not line: break
+                        m = re.search(r"Starting Run ID: (\d+)", line)
+                        if m:
+                            prefixes.append(int(m.group(1)))
+                            break
+            except:
+                pass
     
     return max(prefixes) + 1 if prefixes else 0
 
@@ -271,7 +287,7 @@ def train_model():
     
     # --- Step 6.2: Learning Rate Scheduler ---
     # Reduce learning rate when validation loss stops improving
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=2, verbose=True)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=2)
     
     # --- Step 6.5: Hardware Optimization (Optional) ---
     # Set this to True ONLY if you have an Intel CPU and compatible IPEX installed.
@@ -370,7 +386,11 @@ def train_model():
         print(f"Val Loss: {val_epoch_loss:.4f} Acc: {val_epoch_acc:.4f}")
 
         # --- Step 7.2: Reduce LR on Plateau ---
+        old_lr = optimizer.param_groups[0]['lr']
         scheduler.step(val_epoch_loss)
+        new_lr = optimizer.param_groups[0]['lr']
+        if new_lr < old_lr:
+            print(f"Learning rate reduced from {old_lr:.2e} to {new_lr:.2e}")
 
         # Store history
         history['train_loss'].append(epoch_loss)
@@ -571,22 +591,27 @@ def train_model():
     for pat_id, probs in patient_probs.items():
         avg_prob = np.mean(probs)
         max_prob = np.max(probs)
-        # Count how many patches are highly suspicious (> 0.90)
-        high_conf_count = sum(1 for p in probs if p > 0.90)
         
-        # New Diagnostic Logic: Flag as positive if multiple patches are highly suspicious
-        # "Flag as positive if at least 3 patches have Prob > 0.90"
-        # This reduces "False Alarms" from single noisy artifacts/stain precipitate.
-        pred_label = 1 if high_conf_count >= 3 else 0 
+        # New Diagnostic Logic: Probabilistic Density Score
+        # We look at the top 3 most suspicious patches.
+        # This accounts for both the "count" and the "certainty" of the detection.
+        sorted_probs = sorted(probs, reverse=True)
+        top3_score = sum(sorted_probs[:3]) if len(sorted_probs) >= 3 else sum(sorted_probs)
+        
+        # Flag as positive if the Top-3 sum exceeds 1.5
+        # This requires either:
+        # - Two very high confidence patches (e.g., 0.9 + 0.9 = 1.8)
+        # - Three moderately high patches (e.g., 0.5 + 0.5 + 0.5 = 1.5)
+        pred_label = 1 if top3_score >= 1.5 else 0
         actual_label = patient_gt[pat_id]
         
         consensus_data.append({
             "PatientID": pat_id,
             "Actual": "Positive" if actual_label == 1 else "Negative",
             "Predicted": "Positive" if pred_label == 1 else "Negative",
+            "Top3_Score": f"{top3_score:.4f}",
             "Mean_Prob": f"{avg_prob:.4f}",
             "Max_Prob": f"{max_prob:.4f}",
-            "Suspicious_Count": high_conf_count,
             "Patch_Count": len(probs),
             "Correct": "Yes" if pred_label == actual_label else "No"
         })
