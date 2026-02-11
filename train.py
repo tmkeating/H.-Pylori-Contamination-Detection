@@ -118,6 +118,16 @@ def train_model():
     # Use a Graphics Card (CUDA) if available; otherwise, use the Main Processor (CPU)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
+    
+    # --- Step 1.5: Initialize Macenko Normalizer on GPU ---
+    from PIL import Image
+    normalizer = MacenkoNormalizer()
+    if os.path.exists(REFERENCE_PATCH_PATH):
+        print(f"Fitting Macenko Normalizer (GPU-ready) to reference: {REFERENCE_PATCH_PATH}")
+        ref_img = Image.open(REFERENCE_PATCH_PATH).convert("RGB")
+        normalizer.fit(ref_img, device=device)
+    else:
+        print(f"WARNING: Reference patch {REFERENCE_PATCH_PATH} not found. Normalization disabled.")
 
     # --- Step 2: Set the paths to our data ---
     # We prioritize local scratch space for speed, then fallback to network path
@@ -143,37 +153,25 @@ def train_model():
     # Note: We will split the train_dir itself to ensure we have positive samples in evaluation
     holdout_dir = os.path.join(base_data_path, "HoldOut")
 
-    # --- Step 2.5: Initialize Macenko Normalizer ---
-    from PIL import Image
-    normalizer = MacenkoNormalizer()
-    if os.path.exists(REFERENCE_PATCH_PATH):
-        print(f"Fitting Macenko Normalizer to reference: {REFERENCE_PATCH_PATH}")
-        ref_img = Image.open(REFERENCE_PATCH_PATH).convert("RGB")
-        normalizer.fit(ref_img)
-    else:
-        print(f"WARNING: Reference patch {REFERENCE_PATCH_PATH} not found. Skipping Macenko.")
-
     # --- Step 3: Define "Study Habits" (Transforms) ---
     # Training habits: We resize and add variety to make the AI more robust
     train_transform = transforms.Compose([
         transforms.Resize((448, 448)), # Increased resolution to see tiny bacteria better
-        normalizer,                    # Macenko Normalization first to stabilize color
         transforms.RandomHorizontalFlip(), 
         transforms.RandomVerticalFlip(),
         transforms.RandomRotation(15), # Small rotations to handle slide orientation
-        transforms.ColorJitter(brightness=0.05, contrast=0.05, saturation=0.02, hue=0.01), # Minimal jitter after Macenko
+        transforms.ColorJitter(brightness=0.05, contrast=0.05, saturation=0.02, hue=0.01), # Minimal jitter
         transforms.ToTensor(), 
-        # Standardize colors so they are easier for the AI to understand
-        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
 
     # Validation habits: No random variety here, just high resolution
     val_transform = transforms.Compose([
         transforms.Resize((448, 448)),
-        normalizer,                    # Apply Macenko to validation as well
         transforms.ToTensor(),
-        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
+    
+    # GPU-based normalization (ImageNet stats)
+    gpu_normalize = transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
 
     # --- Step 4: Load and split the data ---
     # Create the full dataset object without a transform initially
@@ -312,6 +310,12 @@ def train_model():
             inputs = inputs.to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)
             
+            # --- Per-Batch Normalization (on GPU) ---
+            # Call Macenko Stain Normalization first
+            inputs = normalizer.normalize_batch(inputs)
+            # Then standard ImageNet normalization
+            inputs = gpu_normalize(inputs)
+            
             optimizer.zero_grad()
             
             # Use autocast for the forward pass (Mixed Precision)
@@ -343,6 +347,10 @@ def train_model():
             for inputs, labels in tqdm(val_loader, desc="Validation"):
                 inputs = inputs.to(device, non_blocking=True)
                 labels = labels.to(device, non_blocking=True)
+                
+                # --- Per-Batch Normalization (on GPU) ---
+                inputs = normalizer.normalize_batch(inputs)
+                inputs = gpu_normalize(inputs)
                 
                 with torch.amp.autocast('cuda'):
                     outputs = model(inputs)
