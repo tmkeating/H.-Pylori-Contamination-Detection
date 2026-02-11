@@ -20,6 +20,9 @@ import re                          # Regexp to handle file numbering
 import torch.nn.functional as F
 from normalization import MacenkoNormalizer
 
+# Hardware Optimization: Enable cuDNN auto-tuner for a speed boost
+torch.backends.cudnn.benchmark = True
+
 # Use a fixed reference patch for Macenko normalization consistency
 REFERENCE_PATCH_PATH = "/import/fhome/vlia/HelicoDataSet/CrossValidation/Annotated/B22-47_0/01653.png"
 
