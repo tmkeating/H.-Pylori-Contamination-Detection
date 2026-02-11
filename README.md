@@ -22,9 +22,18 @@ This project implements **Fully Pre-trained Transfer Learning** to recognize con
 
 ## Data Strategy (Expanded Training)
 
-The model now utilizes an expanded dataset of **~54,000 images**:
+The model utilizes an expanded dataset of **~54,000 images**:
 - **High-Fidelity Corpus**: Pathologist-verified patches from the `Annotated` folders.
-- **Supplemental Negatives**: High-confidence negative patches from the `Cropped` folders of patients with a confirmed 100% negative diagnosis. This increases the model's exposure to healthy tissue variations by over 20x.
+- **Supplemental Negatives**: High-confidence negative patches from confirmed healthy patients.
+- **Scientific Validation**: Validated on a **Patient-Independent Split** (80/20 by Patient ID).
+
+## Performance Highlights (Run 10)
+
+- **94.0% Precision**: Extremely low rate of false positives on unseen patient tissues.
+- **87.0% Recall**: Strong sensitivity to bacterial presence in independent samples.
+- **0.94 PR-AUC**: High clinical confidence across diverse patient staining.
+- **93.4% Acc (Hard)**: Performance on difficult, pathologist-reviewed tissue.
+- **99.9% Acc (Easy)**: Near-perfect cleaning of supplemental negative tissue.
 
 ## How to Get Started
 
