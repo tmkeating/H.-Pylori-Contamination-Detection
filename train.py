@@ -159,7 +159,7 @@ def train_model():
         transforms.Resize((448, 448)), # Increased resolution to see tiny bacteria better
         transforms.RandomHorizontalFlip(), 
         transforms.RandomVerticalFlip(),
-        transforms.RandomRotation(15), # Small rotations to handle slide orientation
+        transforms.RandomRotation(90), # Large rotations to add complexity
         transforms.ColorJitter(brightness=0.05, contrast=0.05, saturation=0.02, hue=0.01), # Minimal jitter
         transforms.ToTensor(), 
     ])
@@ -263,11 +263,15 @@ def train_model():
     # strategy B: Weighted Loss Function
     # Increased weight to 5.0 to prioritize Recall on the independent validation set.
     # We use a higher weight because positive patches are rarer in some patients.
-    loss_weights = torch.FloatTensor([1.0, 5.0]).to(device) 
+    loss_weights = torch.FloatTensor([1.0, 25.0]).to(device) 
     criterion = nn.CrossEntropyLoss(weight=loss_weights)
     
     # Optimizer: Adjusted learning rate for finer final convergence
     optimizer = Adam(model.parameters(), lr=5e-5)
+    
+    # --- Step 6.2: Learning Rate Scheduler ---
+    # Reduce learning rate when validation loss stops improving
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=2, verbose=True)
     
     # --- Step 6.5: Hardware Optimization (Optional) ---
     # Set this to True ONLY if you have an Intel CPU and compatible IPEX installed.
@@ -365,6 +369,9 @@ def train_model():
         val_epoch_acc = float(val_corrects) / len(val_indices)
         print(f"Val Loss: {val_epoch_loss:.4f} Acc: {val_epoch_acc:.4f}")
 
+        # --- Step 7.2: Reduce LR on Plateau ---
+        scheduler.step(val_epoch_loss)
+
         # Store history
         history['train_loss'].append(epoch_loss)
         history['train_acc'].append(epoch_acc)
@@ -426,7 +433,10 @@ def train_model():
                 outputs = model(inputs) # Get raw brain output
             
             probs = torch.softmax(outputs, dim=1) # Convert output to 100% probabilities
-            _, preds = torch.max(outputs, 1) # Pick the highest probability class
+            # picking a custom threshold for screening (e.g. 0.2 instead of 0.5)
+            # as requested: "In screening, we prefer 'False Alarms' over 'Missed Infections.'"
+            thresh = 0.2
+            preds = (probs[:, 1] > thresh).long()
             
             all_preds.extend(preds.cpu().numpy())
             all_labels.extend(labels.cpu().numpy())
@@ -561,7 +571,10 @@ def train_model():
     for pat_id, probs in patient_probs.items():
         avg_prob = np.mean(probs)
         max_prob = np.max(probs)
-        pred_label = 1 if avg_prob > 0.5 else 0 # 50% average threshold
+        
+        # New Diagnostic Logic: Flag as positive if any patch is highly suspicious
+        # "Flag as positive if Max Probability > 0.90" (ignore the mean)
+        pred_label = 1 if max_prob > 0.90 else 0 
         actual_label = patient_gt[pat_id]
         
         consensus_data.append({
