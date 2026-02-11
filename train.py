@@ -18,6 +18,10 @@ from model import get_model        # Our custom code that builds the AI brain
 from tqdm import tqdm              # A library that shows a "progress bar"
 import re                          # Regexp to handle file numbering
 import torch.nn.functional as F
+from normalization import MacenkoNormalizer
+
+# Use a fixed reference patch for Macenko normalization consistency
+REFERENCE_PATCH_PATH = "/import/fhome/vlia/HelicoDataSet/CrossValidation/Annotated/B22-47_0/01653_Aug8.png"
 
 def generate_gradcam(model, input_batch, target_layer):
     """Generates Grad-CAM heatmaps for a batch of images."""
@@ -80,14 +84,9 @@ class TransformedSubset(Dataset):
         self.transform = transform
         
     def __getitem__(self, index):
-        # The base dataset usually provides raw images if no transform is passed to it,
-        # but here the original HPyloriDataset might already have a transform.
-        # We access the image and label from the subset
-        # We need to reach the original image data without the full_dataset's transform.
-        # Actually, if we just want to override, we should create the full_dataset with transform=None.
-        img, label = self.subset[index] # This currently uses train_transform because full_dataset has it
-        # If we really want to swap transforms, we should set full_dataset.transform = None 
-        # and apply them here.
+        img, label = self.subset[index] 
+        if self.transform:
+            img = self.transform(img)
         return img, label
 
     def __len__(self):
@@ -140,14 +139,25 @@ def train_model():
     # Note: We will split the train_dir itself to ensure we have positive samples in evaluation
     holdout_dir = os.path.join(base_data_path, "HoldOut")
 
+    # --- Step 2.5: Initialize Macenko Normalizer ---
+    from PIL import Image
+    normalizer = MacenkoNormalizer()
+    if os.path.exists(REFERENCE_PATCH_PATH):
+        print(f"Fitting Macenko Normalizer to reference: {REFERENCE_PATCH_PATH}")
+        ref_img = Image.open(REFERENCE_PATCH_PATH).convert("RGB")
+        normalizer.fit(ref_img)
+    else:
+        print(f"WARNING: Reference patch {REFERENCE_PATCH_PATH} not found. Skipping Macenko.")
+
     # --- Step 3: Define "Study Habits" (Transforms) ---
     # Training habits: We resize and add variety to make the AI more robust
     train_transform = transforms.Compose([
         transforms.Resize((448, 448)), # Increased resolution to see tiny bacteria better
+        normalizer,                    # Macenko Normalization first to stabilize color
         transforms.RandomHorizontalFlip(), 
         transforms.RandomVerticalFlip(),
         transforms.RandomRotation(15), # Small rotations to handle slide orientation
-        transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.05), # Handle stain variation
+        transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.05, hue=0.02), # Milder jitter after Macenko
         transforms.ToTensor(), 
         # Standardize colors so they are easier for the AI to understand
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
@@ -156,6 +166,7 @@ def train_model():
     # Validation habits: No random variety here, just high resolution
     val_transform = transforms.Compose([
         transforms.Resize((448, 448)),
+        normalizer,                    # Apply Macenko to validation as well
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])

@@ -14,9 +14,11 @@ from sklearn.metrics import (
     precision_recall_curve, average_precision_score
 )
 from torchvision import transforms
+from normalization import MacenkoNormalizer
+from PIL import Image
 
 # --- Config ---
-RUN_ID = "10_101782"
+RUN_ID = "12_101795" # UPDATED for the Macenko Run
 MODEL_PATH = f"results/{RUN_ID}_model_brain.pth"
 OUTPUT_DIR = f"results/{RUN_ID}_gradcam_samples"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -30,8 +32,17 @@ PATIENT_CSV = os.path.join(BASE_PATH, "PatientDiagnosis.csv")
 PATCH_CSV = os.path.join(BASE_PATH, "HP_WSI-CoordAnnotatedAllPatches.xlsx")
 TRAIN_DIR = os.path.join(BASE_PATH, "CrossValidation/Annotated")
 
+# Macenko Setup
+REFERENCE_PATCH_PATH = "/import/fhome/vlia/HelicoDataSet/CrossValidation/Annotated/B22-47_0/01653_Aug8.png"
+normalizer = MacenkoNormalizer()
+if os.path.exists(REFERENCE_PATCH_PATH):
+    print(f"Fitting Macenko Normalizer to reference: {REFERENCE_PATCH_PATH}")
+    ref_img = Image.open(REFERENCE_PATCH_PATH).convert("RGB")
+    normalizer.fit(ref_img)
+
 VAL_TRANSFORM = transforms.Compose([
     transforms.Resize((448, 448)),
+    normalizer,
     transforms.ToTensor(),
     transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
 ])
