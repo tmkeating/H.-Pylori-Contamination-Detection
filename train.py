@@ -436,7 +436,7 @@ def train_model():
     )
     
     # Load our best saved brain
-    model.load_state_dict(torch.load(best_model_path))
+    model.load_state_dict(torch.load(best_model_path, weights_only=True))
     model.eval()
     
     all_preds = []   # List to store the AI's final guesses (0 or 1)
@@ -592,26 +592,29 @@ def train_model():
         avg_prob = np.mean(probs)
         max_prob = np.max(probs)
         
-        # New Diagnostic Logic: Probabilistic Density Score
-        # We look at the top 3 most suspicious patches.
-        # This accounts for both the "count" and the "certainty" of the detection.
-        sorted_probs = sorted(probs, reverse=True)
-        top3_score = sum(sorted_probs[:3]) if len(sorted_probs) >= 3 else sum(sorted_probs)
+        # New Diagnostic Logic: "Hardened" Density Consensus
+        # We count patches at two confidence levels
+        count_90 = sum(1 for p in probs if p > 0.90)
+        count_99 = sum(1 for p in probs if p > 0.99)
         
-        # Flag as positive if the Top-3 sum exceeds 1.5
-        # This requires either:
-        # - Two very high confidence patches (e.g., 0.9 + 0.9 = 1.8)
-        # - Three moderately high patches (e.g., 0.5 + 0.5 + 0.5 = 1.5)
-        pred_label = 1 if top3_score >= 1.5 else 0
+        # Strategy:
+        # - High Density: If there are 4+ patches over 0.90, it's likely a real infection.
+        # - High Intensity: If there are 2+ patches over 0.99, it's a very confident detection.
+        if count_90 >= 4 or count_99 >= 2:
+            pred_label = 1
+        else:
+            pred_label = 0
+            
         actual_label = patient_gt[pat_id]
         
         consensus_data.append({
             "PatientID": pat_id,
             "Actual": "Positive" if actual_label == 1 else "Negative",
             "Predicted": "Positive" if pred_label == 1 else "Negative",
-            "Top3_Score": f"{top3_score:.4f}",
             "Mean_Prob": f"{avg_prob:.4f}",
             "Max_Prob": f"{max_prob:.4f}",
+            "Count_90": count_90,
+            "Count_99": count_99,
             "Patch_Count": len(probs),
             "Correct": "Yes" if pred_label == actual_label else "No"
         })

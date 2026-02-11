@@ -285,3 +285,27 @@ To further separate high-confidence infections from "borderline" noise, I am imp
 - A truly infected patient with multiple high-confidence patches will easily exceed a score of **2.0**.
 - A patient with noisy artifacts (e.g., 2 random 0.95 patches and nothing else) will struggle to hit the threshold.
 - This provides a smoother "Confidence" metric than a simple integer count.
+
+---
+
+## Run 30: Probabilistic Density Experiment (Job 101848)
+
+### Results & Performance Analysis
+| Metric | Run 29 ($N \ge 2$) | Run 30 (Top-3 Sum $\ge 1.5$) | Status |
+|--------|-------------------|-------------------|--------|
+| **Patient Accuracy** | 93.5% | **64.5%** | ↓ Regression |
+| **False Positives** | 1 | **10** | ✗ High Noise |
+| **B22-126** (Positive) | Caught | Caught | ✓ Sensitivity |
+
+### Critical Analysis
+The "Top-3 Sum $\ge 1.5$" logic failed because the model in this run became significantly more over-confident on staining artifacts and mucus.
+- **Artifact Overflow**: Healthy patients (e.g., B22-27, B22-158) produced multiple patches with probabilities near 1.0, easily crossing the 1.5 sum threshold.
+- **The Gap**: There is currently no clear separator between "Low Density Positive" and "High Artifact Negative" using a simple sum.
+
+### Next Strategic Step: Run 31 (The "Hardened" Density)
+We will return to the integer count logic ( \ge 2$) but add a **Quality Gate** to ensure we aren't just counting random artifacts.
+
+**Refined Logic**:
+1. Flag as Positive if at least **4 patches** have Prob > 0.90 ( \ge 4$).
+2. **OR** if between **2 and 3 patches** have Prob > 0.99 (Extremely high confidence).
+3. This combines "Density" (many patches) with "Intensity" (extreme confidence) to separate low-density true positives from background noise.
