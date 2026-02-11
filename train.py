@@ -571,10 +571,13 @@ def train_model():
     for pat_id, probs in patient_probs.items():
         avg_prob = np.mean(probs)
         max_prob = np.max(probs)
+        # Count how many patches are highly suspicious (> 0.90)
+        high_conf_count = sum(1 for p in probs if p > 0.90)
         
-        # New Diagnostic Logic: Flag as positive if any patch is highly suspicious
-        # "Flag as positive if Max Probability > 0.90" (ignore the mean)
-        pred_label = 1 if max_prob > 0.90 else 0 
+        # New Diagnostic Logic: Flag as positive if multiple patches are highly suspicious
+        # "Flag as positive if at least 3 patches have Prob > 0.90"
+        # This reduces "False Alarms" from single noisy artifacts/stain precipitate.
+        pred_label = 1 if high_conf_count >= 3 else 0 
         actual_label = patient_gt[pat_id]
         
         consensus_data.append({
@@ -583,6 +586,7 @@ def train_model():
             "Predicted": "Positive" if pred_label == 1 else "Negative",
             "Mean_Prob": f"{avg_prob:.4f}",
             "Max_Prob": f"{max_prob:.4f}",
+            "Suspicious_Count": high_conf_count,
             "Patch_Count": len(probs),
             "Correct": "Yes" if pred_label == actual_label else "No"
         })
