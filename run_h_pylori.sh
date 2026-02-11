@@ -1,17 +1,37 @@
 #!/bin/bash
-#SBATCH --job-name=h_pylori_train       # Name of the job
-#SBATCH -D .                           # Use CURRENT directory as working directory
-#SBATCH -n 8                           # Number of cores
-#SBATCH -N 1                           # Ensure that all cores are on one machine
-#SBATCH -t 0-12:00                     # Runtime in D-HH:MM (12 hours)
-#SBATCH -p dcca40                     # Submit to the dcca40 partition
-#SBATCH --mem=32G                     # Total memory
-#SBATCH --gres=gpu:1                   # Request 1 GPU
-#SBATCH -o results/output_%j.txt       # Standard output log (JobID %j)
-#SBATCH -e results/error_%j.txt        # Error log
+#SBATCH --job-name=h_pylori_fast
+#SBATCH -D .
+#SBATCH -n 8                           # Reverted back to 8 as 12 exceeds QOS
+#SBATCH -N 1
+#SBATCH -t 0-06:00                     # It will likely finish in < 6 hours now
+#SBATCH -p dcca40
+#SBATCH --mem=48G                      # Increased to 48GB as requested
+#SBATCH --gres=gpu:1
+#SBATCH -o results/output_%j.txt
+#SBATCH -e results/error_%j.txt
 
 # Create results directory if it doesn't exist
 mkdir -p results
+
+# --- LOCAL SCRATCH SETUP ---
+# We use /tmp as it's on a local NVMe SSD (faster than network storage)
+LOCAL_SCRATCH="/tmp/ricse03_h_pylori_data"
+REMOTE_DATA="/import/fhome/vlia/HelicoDataSet"
+
+if [ ! -d "$LOCAL_SCRATCH" ]; then
+    echo "Copying dataset to local scratch: $LOCAL_SCRATCH"
+    mkdir -p "$LOCAL_SCRATCH"
+    # Copy metadata
+    cp "$REMOTE_DATA"/*.xlsx "$LOCAL_SCRATCH/"
+    cp "$REMOTE_DATA"/*.csv "$LOCAL_SCRATCH/"
+    # Sync folders (rsync is efficient for partial copies)
+    mkdir -p "$LOCAL_SCRATCH/CrossValidation"
+    rsync -aq "$REMOTE_DATA/CrossValidation/Annotated" "$LOCAL_SCRATCH/CrossValidation/"
+    rsync -aq "$REMOTE_DATA/CrossValidation/Cropped" "$LOCAL_SCRATCH/CrossValidation/"
+    echo "Data copy complete."
+else
+    echo "Local scratch already exists. Skipping copy."
+fi
 
 # 1. Load necessary modules (Common on clusters)
 # module load python/3.8

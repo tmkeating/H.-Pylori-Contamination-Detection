@@ -21,7 +21,7 @@ import torch.nn.functional as F
 from normalization import MacenkoNormalizer
 
 # Use a fixed reference patch for Macenko normalization consistency
-REFERENCE_PATCH_PATH = "/import/fhome/vlia/HelicoDataSet/CrossValidation/Annotated/B22-47_0/01653_Aug8.png"
+REFERENCE_PATCH_PATH = "/import/fhome/vlia/HelicoDataSet/CrossValidation/Annotated/B22-47_0/01653.png"
 
 def generate_gradcam(model, input_batch, target_layer):
     """Generates Grad-CAM heatmaps for a batch of images."""
@@ -120,8 +120,12 @@ def train_model():
     print(f"Using device: {device}")
 
     # --- Step 2: Set the paths to our data ---
-    # The dataset is located on the shared cluster path
-    base_data_path = "/import/fhome/vlia/HelicoDataSet"
+    # We prioritize local scratch space for speed, then fallback to network path
+    base_data_path = "/tmp/ricse03_h_pylori_data"
+    
+    if not os.path.exists(base_data_path):
+        base_data_path = "/import/fhome/vlia/HelicoDataSet"
+
     if not os.path.exists(base_data_path):
         # Fallback for local development or different environments
         local_path = "/home/twyla/Documents/Classes/aprenentatgeProfund/Code/HelicoDataSet"
@@ -157,7 +161,7 @@ def train_model():
         transforms.RandomHorizontalFlip(), 
         transforms.RandomVerticalFlip(),
         transforms.RandomRotation(15), # Small rotations to handle slide orientation
-        transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.05, hue=0.02), # Milder jitter after Macenko
+        transforms.ColorJitter(brightness=0.05, contrast=0.05, saturation=0.02, hue=0.01), # Minimal jitter after Macenko
         transforms.ToTensor(), 
         # Standardize colors so they are easier for the AI to understand
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
@@ -234,10 +238,25 @@ def train_model():
     sample_weights = [class_weights[t] for t in train_labels]
     sampler = WeightedRandomSampler(sample_weights, len(sample_weights))
 
-    # DataLoaders are like "librarians" that hand the AI images in batches of 32
-    # We use the 'sampler' to show contaminated images more frequently to the AI
-    train_loader = DataLoader(train_transformed, batch_size=32, sampler=sampler, num_workers=8)
-    val_loader = DataLoader(val_transformed, batch_size=32, shuffle=False, num_workers=8)
+    # DataLoaders optimized for NVIDIA A40 (48GB VRAM)
+    # Reverted to 8 workers
+    batch_size = 128
+    train_loader = DataLoader(
+        train_transformed, 
+        batch_size=batch_size, 
+        sampler=sampler, 
+        num_workers=8, 
+        pin_memory=True, 
+        persistent_workers=True
+    )
+    val_loader = DataLoader(
+        val_transformed, 
+        batch_size=batch_size, 
+        shuffle=False, 
+        num_workers=8, 
+        pin_memory=True, 
+        persistent_workers=True
+    )
 
     # --- Step 5: Build the customized AI brain ---
     model = get_model(num_classes=2, pretrained=True).to(device)
@@ -269,7 +288,8 @@ def train_model():
         print("Running on standard PyTorch (IPEX disabled).")
 
     # --- Step 7: The Main Training Loop ---
-    # We will go through the entire set of images 15 times (15 "Epochs")
+    # We use Automatic Mixed Precision (AMP) to speed up training on the A40
+    scaler = torch.amp.GradScaler('cuda')
     num_epochs = 15
     best_loss = float('inf')
     
@@ -289,16 +309,22 @@ def train_model():
         
         # Hand batches of images to the AI one by one
         for inputs, labels in tqdm(train_loader, desc="Training"):
-            inputs = inputs.to(device) # Move images to CPU/GPU
-            labels = labels.to(device) # Move correct answers to CPU/GPU
+            inputs = inputs.to(device, non_blocking=True)
+            labels = labels.to(device, non_blocking=True)
             
-            optimizer.zero_grad() # Clear previous math notes
-            outputs = model(inputs) # AI makes its guess
-            loss = criterion(outputs, labels) # See how wrong the guess was
-            _, preds = torch.max(outputs, 1) # Pick the best class (0 or 1)
+            optimizer.zero_grad()
             
-            loss.backward() # Mathematical "backtracking" to see what to fix
-            optimizer.step() # Tutor updates the brain's connections
+            # Use autocast for the forward pass (Mixed Precision)
+            with torch.amp.autocast('cuda'):
+                outputs = model(inputs)
+                loss = criterion(outputs, labels)
+            
+            _, preds = torch.max(outputs, 1)
+            
+            # Use scaler for the backward pass
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
             
             # Keep track of scores
             running_loss += loss.item() * inputs.size(0)
@@ -315,11 +341,13 @@ def train_model():
         
         with torch.no_grad(): # Don't take any math notes, just grade
             for inputs, labels in tqdm(val_loader, desc="Validation"):
-                inputs = inputs.to(device)
-                labels = labels.to(device)
+                inputs = inputs.to(device, non_blocking=True)
+                labels = labels.to(device, non_blocking=True)
                 
-                outputs = model(inputs)
-                loss = criterion(outputs, labels)
+                with torch.amp.autocast('cuda'):
+                    outputs = model(inputs)
+                    loss = criterion(outputs, labels)
+                
                 _, preds = torch.max(outputs, 1)
                 
                 val_loss += loss.item() * inputs.size(0)
@@ -364,7 +392,13 @@ def train_model():
     # This set contains patients that the AI has NEVER seen during training.
     # This is the "Gold Standard" test for avoiding Data Leakage.
     print("\nEvaluating on Independent Validation set (Patient-level Split)...")
-    holdout_loader = DataLoader(val_transformed, batch_size=32, shuffle=False, num_workers=8)
+    holdout_loader = DataLoader(
+        val_transformed, 
+        batch_size=batch_size, 
+        shuffle=False, 
+        num_workers=8, 
+        pin_memory=True
+    )
     
     # Load our best saved brain
     model.load_state_dict(torch.load(best_model_path))
@@ -377,10 +411,12 @@ def train_model():
 
     with torch.no_grad():
         for inputs, labels in tqdm(holdout_loader, desc="Patient-Independent Test"):
-            inputs = inputs.to(device)
-            labels = labels.to(device)
+            inputs = inputs.to(device, non_blocking=True)
+            labels = labels.to(device, non_blocking=True)
             
-            outputs = model(inputs) # Get raw brain output
+            with torch.amp.autocast('cuda'):
+                outputs = model(inputs) # Get raw brain output
+            
             probs = torch.softmax(outputs, dim=1) # Convert output to 100% probabilities
             _, preds = torch.max(outputs, 1) # Pick the highest probability class
             
@@ -504,13 +540,9 @@ def train_model():
         img_path, _ = full_dataset.samples[orig_idx]
         label = all_labels[idx]
         
-        # Extract patient ID from path like ".../PatientID_Annotated/..."
-        path_parts = img_path.split(os.sep)
-        pat_id = "Unknown"
-        for part in path_parts:
-            if "_Annotated" in part:
-                pat_id = part.replace("_Annotated", "")
-                break
+        # Extract patient ID from folder name (consistent with split logic)
+        folder_name = os.path.basename(os.path.dirname(img_path))
+        pat_id = folder_name.split('_')[0]
         
         if pat_id not in patient_probs:
             patient_probs[pat_id] = []
