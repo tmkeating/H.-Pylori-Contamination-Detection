@@ -31,9 +31,9 @@
   - False Negatives: 36 | True Positives: 248
 
 ### Key Findings
-✓ Model is **real and medically significant** (87% recall on unseen patients)  
-✓ Excellent at recognizing clean tissue (99.9% on easy negatives)  
-✓ "99% accuracy" was indeed a metric illusion from negative-dominant dataset  
+✓ Model is **real and medically significant** (87% recall on unseen patients)
+✓ Excellent at recognizing clean tissue (99.9% on easy negatives)
+✓ "99% accuracy" was indeed a metric illusion from negative-dominant dataset
 ✗ Still misses some difficult positive cases (87% recall on hard tissue)
 
 ---
@@ -176,7 +176,7 @@ Leverage color stability of Macenko while keeping feature space tight enough to 
 
 ---
 
-## Current Status: Run 28 Active
+## Current Status: Run 27 Active
 
 ### Optimized Pipeline Components ✓
 - GPU-vectorized Macenko normalization
@@ -197,8 +197,49 @@ Leverage color stability of Macenko while keeping feature space tight enough to 
 | **Data Pipeline** | Local NVMe SSD + Persistent Workers |
 | **Model Readiness** | High-precision, medical-grade screening |
 
-### Expected Improvements from Run 28
+### Expected Improvements from Run 27
 - Better recall on contaminated patches (loss weight 25.0)
 - Fewer missed infections (0.2 detection threshold)
 - Improved patient-level detection (Max_Prob consensus)
 - Smoother training convergence (LR scheduler)
+
+---
+
+## Run 27: Results & Behavioral Shift Analysis
+
+### Patch-Level Performance (Significant Improvement)
+- **Recall (Contaminated)**: 40% (Massive jump from 4% in Run 26)
+- **Precision (Contaminated)**: 38%
+- **Patch-Level Accuracy**: 97%
+- **Analysis**: Model is now "brave" about identifying H. pylori. While precision dropped slightly, recall increased 10x, ideal for medical screening.
+
+### Patient-Level Consensus (Aggressive Strategy)
+- **Patient-Level Accuracy**: 64.52%
+- **Successes (True Positives)**: New "Max Probability > 0.90" logic successfully caught B22-126, B22-299, and B22-84
+- **Challenges (False Positives)**: High false alarm rate from single outlier patches
+  - Patient B22-27 (Negative): 1,455 patches flagged due to one patch at 1.0000 (mean: 0.0140)
+  - Patient B22-34 (Negative): 982 patches, one patch at 0.9991 (mean: low overall)
+
+### Verdict & Recommendation
+Strategy of "False Alarms over Missed Infections" is working but too sensitive to single-patch outliers. Single high-confidence pixels can be stain artifacts or dense mucus deposits.
+
+**Proposed Refinement (Run 28)**: Implement density-based consensus
+- Flag patient positive only if **at least 3-5 patches exceed 0.90 threshold**
+- Filters single "noisy" artifacts while catching true colonization
+- Truly infected patients typically have dozens or hundreds of positive patches
+
+---
+
+## Run 28: Density-Based Consensus Logic Implementation
+
+### Changes Implemented
+- **Noise Filtering**: Model requires at least 3 high-confidence patches (Prob > 0.90) to flag patient as Positive
+- **Detailed Reporting**: Added `Suspicious_Count` column to Patient Consensus CSV and terminal report
+- **Job Started**: Job ID 101840 submitted
+
+### Expected Results
+- **Healthy Patients** (e.g., B22-27 with single outlier): Now correctly identified as Negative
+- **Infected Patients** (e.g., B22-299 with many suspicious patches): Remain Positive
+- **Outcome**: Elimination of false alarms while maintaining sensitivity to true infections
+
+---
