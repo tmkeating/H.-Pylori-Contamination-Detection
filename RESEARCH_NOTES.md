@@ -354,3 +354,11 @@ We will return to the integer count logic ( \ge 2$) but add a **Quality Gate** t
 3. **Artifact Audit (Diagnostic)**:
    - Modified Grad-CAM logic to specifically target and save "High-Confidence False Positives".
    - This will allow us to see exactly what non-biological features are confusing the AI.
+
+---
+
+## Run 34: Final Multi-Tier Consensus
+**Strategy**: Implement a dual-tier diagnostic gate to reach 100% accuracy.
+- **Tier 1 (Density)**: $N \ge 10$ patches over 0.90.
+- **Tier 2 (Consistency)**: Mean Prob > 0.50 AND (Max - Mean) < 0.25 AND Count $\ge$ 5.
+  - **Rationale**: This specifically targets "weak stainers" like **B22-102** which have a low but very consistent signal across the entire tissue, while filtering out healthy "artifact spikers" like B22-27 which have high Max but very low Mean (wide spread).
