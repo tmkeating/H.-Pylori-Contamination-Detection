@@ -285,7 +285,7 @@ def train_model():
     # strategy B: Weighted Loss Function
     # Increased weight to 5.0 to prioritize Recall on the independent validation set.
     # We use a higher weight because positive patches are rarer in some patients.
-    loss_weights = torch.FloatTensor([1.0, 25.0]).to(device) 
+    loss_weights = torch.FloatTensor([1.0, 10.0]).to(device) 
     # Added label_smoothing to prevent the model from becoming overconfident on artifacts
     criterion = nn.CrossEntropyLoss(weight=loss_weights, label_smoothing=0.1)
     
@@ -469,12 +469,20 @@ def train_model():
             all_labels.extend(labels.cpu().numpy())
             all_probs.extend(probs.cpu().numpy()[:, 1]) # Probability of being "Contaminated"
             
-            # Save a few contaminated samples for Grad-CAM
-            if len(gradcam_samples) < 5:
+            # Save a few samples for Grad-CAM
+            if len(gradcam_samples) < 10:
+                # 1. Real Contaminated samples
                 pos_indices = (labels == 1).nonzero(as_tuple=True)[0]
                 if len(pos_indices) > 0:
                     idx = pos_indices[0].item()
-                    gradcam_samples.append(inputs[idx:idx+1].clone())
+                    gradcam_samples.append(('Real_Pos', inputs[idx:idx+1].clone()))
+                
+                # 2. High-Confidence False Positives (Diagnostic for artifacts)
+                # If label is Negative but probability is very high
+                fp_indices = ((labels == 0) & (probs[:, 1] > 0.9)).nonzero(as_tuple=True)[0]
+                if len(fp_indices) > 0:
+                    idx = fp_indices[0].item()
+                    gradcam_samples.append(('False_Alarm_Artifact', inputs[idx:idx+1].clone()))
 
     # --- Step 9: Detailed Reporting ---
     
@@ -542,7 +550,7 @@ def train_model():
         print("Generating Grad-CAM interpretability maps...")
         # For ResNet18, the last conv layer is usually layer4
         target_layer = model.layer4[-1]
-        for i, img_tensor in enumerate(gradcam_samples):
+        for i, (sample_type, img_tensor) in enumerate(gradcam_samples):
             with torch.enable_grad(): # Grad-CAM needs gradients
                 cam, prob = generate_gradcam(model, img_tensor, target_layer)
             
@@ -558,7 +566,7 @@ def train_model():
             plt.figure(figsize=(10, 5))
             plt.subplot(1, 2, 1)
             plt.imshow(img)
-            plt.title(f"Original Path (Prob: {prob[0,1]:.2f})")
+            plt.title(f"{sample_type} (Prob: {prob[0,1]:.2f})")
             plt.axis('off')
             
             plt.subplot(1, 2, 2)
@@ -567,7 +575,7 @@ def train_model():
             plt.title("Grad-CAM Heatmap")
             plt.axis('off')
             
-            plt.savefig(os.path.join(gradcam_dir, f"sample_{i}.png"))
+            plt.savefig(os.path.join(gradcam_dir, f"{sample_type}_{i}.png"))
             plt.close()
         print(f"Saved Grad-CAM samples to {gradcam_dir}")
 
@@ -599,11 +607,12 @@ def train_model():
         avg_prob = np.mean(probs)
         max_prob = np.max(probs)
         
-        # New Diagnostic Logic: Sensitive Consensus (N >= 2 at 0.90)
-        # Reverting to N=2 now that we have core-training improvements to handle artifacts.
-        # This prioritizes Sensitivity (Recall) to ensure no infection is missed.
+        # New Diagnostic Logic: Calibrated Consensus (N >= 10 at 0.90)
+        # We increased the threshold because Run 32 showed that "trigger-happy" artifact clusters
+        # can reach 20-50 patches, while true infections stay well above that signal.
+        # This prioritizes cleaning up noise floor while keeping sensitivity for real infections.
         high_conf_count = sum(1 for p in probs if p > 0.90)
-        pred_label = 1 if high_conf_count >= 2 else 0
+        pred_label = 1 if high_conf_count >= 10 else 0
             
         actual_label = patient_gt[pat_id]
         

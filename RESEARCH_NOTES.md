@@ -333,3 +333,24 @@ We will return to the integer count logic ( \ge 2$) but add a **Quality Gate** t
 3. **Consensus Restoration**:
    - Reverted to ** \ge 2$ Sensitive Logic**.
    - **Rationale**: With the training improvements, artifacts should naturally register lower probabilities, allowing us to be highly sensitive to real infections without a complex "top-averaging" gate.
+
+---
+
+## Run 32 Analysis: Extreme Sensitivity, High Noise
+**Status**: Completed (Job 101865)
+- **Patch Recall**: 100% (Caught all bacteria).
+- **Patient Accuracy**: 58.06% (Too many False Positives).
+- **Finding**: High loss weight (25.0) + Label Smoothing created a "trigger-happy" model where healthy patient artifacts hit probabilities of 0.99 for dozens of patches.
+
+---
+
+## Run 33 Implementation: The Calibrated Gate
+**Strategy**: Recalibrate the model to separate "Artifact Clusters" from "True Colonization".
+
+**Changes Implemented**:
+1. **Calibrated Weights**: Reduced positive loss weight from **25.0 to 10.0** to lower the background noise floor.
+2. **Hardened Consensus**: Increased threshold to **$N \ge 10$** patches at 0.90 confidence. 
+   - Rationale: True infections (e.g., B22-126) show 35+ suspicious patches, while false positives typically cluster in smaller groups.
+3. **Artifact Audit (Diagnostic)**:
+   - Modified Grad-CAM logic to specifically target and save "High-Confidence False Positives".
+   - This will allow us to see exactly what non-biological features are confusing the AI.
