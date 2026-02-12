@@ -485,8 +485,8 @@ def train_model():
     
     # 1. Classification Report (Precision, Recall, F1)
     print("\nClassification Report:")
-    report_dict = classification_report(all_labels, all_preds, target_names=['Negative', 'Contaminated'], output_dict=True)
-    print(classification_report(all_labels, all_preds, target_names=['Negative', 'Contaminated']))
+    report_dict = classification_report(all_labels, all_preds, target_names=['Negative', 'Contaminated'], output_dict=True, zero_division=0)
+    print(classification_report(all_labels, all_preds, target_names=['Negative', 'Contaminated'], zero_division=0))
 
     # 2. Save machine-readable CSV for AI evaluation
     results_df = pd.DataFrame(report_dict).transpose()
