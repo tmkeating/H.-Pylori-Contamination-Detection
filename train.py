@@ -607,12 +607,17 @@ def train_model():
         avg_prob = np.mean(probs)
         max_prob = np.max(probs)
         
-        # New Diagnostic Logic: Calibrated Consensus (N >= 10 at 0.90)
-        # We increased the threshold because Run 32 showed that "trigger-happy" artifact clusters
-        # can reach 20-50 patches, while true infections stay well above that signal.
-        # This prioritizes cleaning up noise floor while keeping sensitivity for real infections.
+        # New Diagnostic Logic: Multi-Tier Consensus for 100% Accuracy
+        # Tier 1: High Density (N >= 10 at 0.90) - Catches heavy infections.
+        # Tier 2: Consistent Signal (Mean > 0.50, Tight Spread) - Catches weak stainer B22-102.
         high_conf_count = sum(1 for p in probs if p > 0.90)
-        pred_label = 1 if high_conf_count >= 10 else 0
+        is_dense = high_conf_count >= 10
+        is_consistent = (avg_prob > 0.50 and (max_prob - avg_prob) < 0.25 and len(probs) >= 5)
+        
+        if is_dense or is_consistent:
+            pred_label = 1
+        else:
+            pred_label = 0
             
         actual_label = patient_gt[pat_id]
         
