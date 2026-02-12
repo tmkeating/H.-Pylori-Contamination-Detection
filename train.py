@@ -179,7 +179,10 @@ def train_model():
         transforms.RandomHorizontalFlip(), 
         transforms.RandomVerticalFlip(),
         transforms.RandomRotation(90), # Large rotations to add complexity
-        transforms.ColorJitter(brightness=0.05, contrast=0.05, saturation=0.02, hue=0.01), # Minimal jitter
+        # Increased Jitter and added Grayscale/Blur to help AI ignore color-based artifacts
+        transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.05, hue=0.02),
+        transforms.RandomGrayscale(p=0.1),
+        transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 2.0)),
         transforms.ToTensor(), 
     ])
 
@@ -283,7 +286,8 @@ def train_model():
     # Increased weight to 5.0 to prioritize Recall on the independent validation set.
     # We use a higher weight because positive patches are rarer in some patients.
     loss_weights = torch.FloatTensor([1.0, 25.0]).to(device) 
-    criterion = nn.CrossEntropyLoss(weight=loss_weights)
+    # Added label_smoothing to prevent the model from becoming overconfident on artifacts
+    criterion = nn.CrossEntropyLoss(weight=loss_weights, label_smoothing=0.1)
     
     # Optimizer: Adjusted learning rate for finer final convergence
     optimizer = Adam(model.parameters(), lr=5e-5)
@@ -595,18 +599,11 @@ def train_model():
         avg_prob = np.mean(probs)
         max_prob = np.max(probs)
         
-        # New Diagnostic Logic: "Hardened" Density Consensus
-        # We count patches at two confidence levels
-        count_90 = sum(1 for p in probs if p > 0.90)
-        count_99 = sum(1 for p in probs if p > 0.99)
-        
-        # Strategy:
-        # - High Density: If there are 4+ patches over 0.90, it's likely a real infection.
-        # - High Intensity: If there are 2+ patches over 0.99, it's a very confident detection.
-        if count_90 >= 4 or count_99 >= 2:
-            pred_label = 1
-        else:
-            pred_label = 0
+        # New Diagnostic Logic: Sensitive Consensus (N >= 2 at 0.90)
+        # Reverting to N=2 now that we have core-training improvements to handle artifacts.
+        # This prioritizes Sensitivity (Recall) to ensure no infection is missed.
+        high_conf_count = sum(1 for p in probs if p > 0.90)
+        pred_label = 1 if high_conf_count >= 2 else 0
             
         actual_label = patient_gt[pat_id]
         
@@ -616,8 +613,7 @@ def train_model():
             "Predicted": "Positive" if pred_label == 1 else "Negative",
             "Mean_Prob": f"{avg_prob:.4f}",
             "Max_Prob": f"{max_prob:.4f}",
-            "Count_90": count_90,
-            "Count_99": count_99,
+            "Suspicious_Count": high_conf_count,
             "Patch_Count": len(probs),
             "Correct": "Yes" if pred_label == actual_label else "No"
         })

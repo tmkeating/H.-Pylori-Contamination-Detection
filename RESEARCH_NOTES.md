@@ -309,3 +309,27 @@ We will return to the integer count logic ( \ge 2$) but add a **Quality Gate** t
 1. Flag as Positive if at least **4 patches** have Prob > 0.90 ( \ge 4$).
 2. **OR** if between **2 and 3 patches** have Prob > 0.99 (Extremely high confidence).
 3. This combines "Density" (many patches) with "Intensity" (extreme confidence) to separate low-density true positives from background noise.
+
+---
+
+## Run 31 Analysis: The Trade-off of Strictness
+**Status**: Completed (Job 101856)
+- **Patient Accuracy**: 83.87%
+- **Recall Regression**: Missed **B22-126** (Positive) because confidence dropped to 0.84.
+- **Specificity Persistence**: While several FPs were cleared, **B22-27** still triggered the  \ge 2 @ 0.99$ gate.
+
+---
+
+## Run 32 Implementation: Core AI Hardening
+**Strategy**: Shifting focus from "Consensus Math" to "Core Training Robustness".
+
+**Changes Implemented**:
+1. **Augmentation Upgrade**:
+   - Added **Gaussian Blue** and **Random Grayscale** to force the model to look for biological morphology (comma shape) rather than just sharp pixels or purple color.
+   - Increased **Color Jitter** to 0.1 brightness/contrast.
+2. **Confidence Management**:
+   - Implemented **Label Smoothing (0.1)** in CrossEntropyLoss.
+   - **Goal**: Prevent the model from becoming "over-confident" (0.999+) on single non-biological artifacts.
+3. **Consensus Restoration**:
+   - Reverted to ** \ge 2$ Sensitive Logic**.
+   - **Rationale**: With the training improvements, artifacts should naturally register lower probabilities, allowing us to be highly sensitive to real infections without a complex "top-averaging" gate.
