@@ -380,3 +380,25 @@ The final model employs a dual-tier screening gate:
 - **Throughput**: 7.5x increase vs. baseline (GPU-vectorized Macenko).
 - **Security**: Weights loaded with `weights_only=True`.
 - **Optimization**: Enabled `cudnn.benchmark` for high-resolution 448x448 inference speed.
+
+---
+
+## Run 35: High-Throughput Pipeline Optimization (Job In-Progress)
+**Strategy**: Eliminate remaining CPU bottlenecks and resolve critical evaluation inconsistencies.
+
+### ⚠️ Critical Issue Fixed: Evaluation Normalization
+During a deep code audit, a discrepancy was found in the `Patient-Independent Test` loop (Step 8):
+- **Observation**: While the training and validation loops used the GPU-vectorized Macenko and ImageNet normalization, the **final holdout evaluation** was processing raw image tensors.
+- **Impact**: This meant the "Gold Standard" metrics were potentially calculated on unnormalized color spaces, which could lead to inconsistent results across different staining batches.
+- **Resolution**: Updated `train.py` to correctly apply `normalize_batch` and `gpu_normalize` in the holdout loop, ensuring 100% architectural parity across all stages.
+
+### 🚀 Performance Breakthrough: GPU-Augmentation Pipeline
+To resolve the "staccato" training pattern (where the model would process 8 iterations and then pause), the pipeline was overhauled:
+1. **Torchvision v2 Migration**: Switched to the optimized `v2` transforms for faster image decoding and resizing.
+2. **On-GPU Augmentations**: Geometric (Flips, Rotations) and Color (Jitter, Blur, Grayscale) transforms were moved from the CPU workers to the GPU (`gpu_augment`). 
+   - **Result**: The A40 now handles these augmentations nearly "for free" in parallel with the forward pass, freeing CPU cores for disk I/O.
+3. **Resource Tuning**:
+   - **Cores**: Maintained at **8 CPU cores** to ensure compatibility with standard cluster QOS.
+   - **Workers**: Optimized at **7 DataLoader workers** with `prefetch_factor=4` (reserving 1 core for the main coordination process).
+4. **Outcome**: Achieving significantly smoother `it/s` and maximizing GPU utilization by offloading compute-heavy augmentations to the A40.
+
