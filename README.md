@@ -10,16 +10,15 @@ This project implements **Fully Pre-trained Transfer Learning** to recognize con
     - Collects images from patient-specific folders.
 - `model.py`: Defines the transfer learning model using a pre-trained **ResNet18**.
 - `train.py`: Main training script that:
-    - **Patient-Level Splitting**: Implements a rigorous validation strategy where data is split by Patient ID. This ensures that patches from the same patient are never shared between training and validation sets, eliminating "Data Leakage."
+    - **Scientific Three-Way Split**: Implements a rigorous validation strategy. Data is split by Patient ID into Training and Validation sets, with a final **unseen HoldOut set** used for the gold-standard evaluation to eliminate Data Leakage.
     - **GPU-Accelerated Macenko Normalization**: Vectorized batch processing on NVIDIA A40 for 7.5x faster training (262 images/sec).
+    - **On-GPU Augmentations**: Geometric and color transforms are offloaded to the GPU using `torchvision.transforms.v2` to eliminate CPU bottlenecks.
     - **Learning Rate Scheduler**: `ReduceLROnPlateau` to adaptively reduce learning rate when validation loss plateaus.
     - Trains the model and saves the best version as `best_model.pth`.
     - **Advanced Evaluation & Interpretability**: 
-      - Automatically runs a full statistical report on the independent validation patients.
-      - Generates ROC curves, Confusion Matrices, Precision-Recall curves, and Learning Curves.
+      - Automatically runs a full statistical report on the independent test patients.
       - **Grad-CAM**: Produces heatmaps showing exactly which bacterial structures the model is "looking at" to make its decisions.
-      - **Probability Histograms**: Visualizes the confidence distribution of model predictions.
-      - **Multi-Tier Consensus**: Implements a dual-gate diagnostic engine (Density + Signal Consistency) to achieve 100% Patient Recall, capturing even "weak stainers" while filtering out artifacts.
+      - **Multi-Tier Consensus**: Implements a dual-gate diagnostic engine (Density + Signal Consistency) to achieve 100% Patient Recall.
 - `requirements.txt`: Python packages required.
 - `normalization.py`: Hosts the GPU-vectorized Macenko stain normalization algorithm.
 
@@ -40,9 +39,9 @@ The model utilizes an expanded dataset of **~54,000 images**:
 - **Throughput**: **262 images/second** (7.5x speedup via GPU-normalization)
 
 ### Hardware Performance
-- **Vectorized Preprocessing**: Shifted Macenko normalization to GPU using `torch.linalg.pinv`, cutting epoch time from 25 mins to <4 mins on NVIDIA A40.
-- **VRAM Utilization**: Efficiently handles 448x448 high-resolution patches at batch-size 64.
-- **Cluster Efficiency**: Optimized for SLURM `dcca40` with local NVMe SSD caching.
+- **High-Throughput Pipeline**: Moved all geometric and color augmentations to the GPU using `v2.Transforms`, resolving CPU bottlenecks and ensuring smooth iterations.
+- **VRAM Utilization**: Efficiently handles 448x448 high-resolution patches at batch-size 128 on 48GB VRAM.
+- **Cluster Efficiency**: Optimized for SLURM with local NVMe SSD caching and multi-worker (10+) prefetching.
 
 ## Diagnostic Architecture (Multi-Tier Consensus)
 

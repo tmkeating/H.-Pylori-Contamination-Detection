@@ -23,9 +23,6 @@ import re                          # Regexp to handle file numbering
 import torch.nn.functional as F
 from normalization import MacenkoNormalizer
 
-# Use a fixed reference patch for Macenko normalization consistency
-REFERENCE_PATCH_PATH = "/import/fhome/vlia/HelicoDataSet/CrossValidation/Annotated/B22-47_0/01653.png"
-
 def generate_gradcam(model, input_batch, target_layer):
     """Generates Grad-CAM heatmaps for a batch of images."""
     model.eval()
@@ -138,16 +135,6 @@ def train_model():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     
-    # --- Step 1.5: Initialize Macenko Normalizer on GPU ---
-    from PIL import Image
-    normalizer = MacenkoNormalizer()
-    if os.path.exists(REFERENCE_PATCH_PATH):
-        print(f"Fitting Macenko Normalizer (GPU-ready) to reference: {REFERENCE_PATCH_PATH}")
-        ref_img = Image.open(REFERENCE_PATCH_PATH).convert("RGB")
-        normalizer.fit(ref_img, device=device)
-    else:
-        print(f"WARNING: Reference patch {REFERENCE_PATCH_PATH} not found. Normalization disabled.")
-
     # --- Step 2: Set the paths to our data ---
     # We prioritize local scratch space for speed, then fallback to network path
     base_data_path = "/tmp/ricse03_h_pylori_data"
@@ -164,12 +151,30 @@ def train_model():
             # Last resort: look in the parent directory
             base_data_path = os.path.abspath(os.path.join(os.getcwd(), "..", "HelicoDataSet"))
         
-        print(f"Primary path not found. Using: {base_data_path}")
+        print(f"Primary data path not found. Using: {base_data_path}")
+    else:
+        print(f"Using Data Path: {base_data_path}")
+
+    # --- Step 2.5: Initialize Macenko Normalizer on GPU ---
+    from PIL import Image
+    normalizer = MacenkoNormalizer()
+    
+    # Use a fixed reference patch for Macenko normalization consistency
+    # We prioritize paths relative to our base_data_path for portability
+    rel_ref_path = "CrossValidation/Annotated/B22-47_0/01653.png"
+    reference_patch_path = os.path.join(base_data_path, rel_ref_path)
+    
+    if os.path.exists(reference_patch_path):
+        print(f"Fitting Macenko Normalizer (GPU-ready) to reference: {reference_patch_path}")
+        ref_img = Image.open(reference_patch_path).convert("RGB")
+        normalizer.fit(ref_img, device=device)
+    else:
+        print(f"WARNING: Reference patch {reference_patch_path} not found. Normalization disabled.")
 
     patient_csv = os.path.join(base_data_path, "PatientDiagnosis.csv")
     patch_csv = os.path.join(base_data_path, "HP_WSI-CoordAnnotatedAllPatches.xlsx") # Use Excel directly
     train_dir = os.path.join(base_data_path, "CrossValidation/Annotated")
-    # Note: We will split the train_dir itself to ensure we have positive samples in evaluation
+    # This folder contains patients that the AI has NEVER seen during training.
     holdout_dir = os.path.join(base_data_path, "HoldOut")
 
     # --- Step 3: Define "Study Habits" (Transforms) ---
@@ -440,9 +445,14 @@ def train_model():
     # --- Step 8: Final Evaluation (Independent Patients) ---
     # This set contains patients that the AI has NEVER seen during training.
     # This is the "Gold Standard" test for avoiding Data Leakage.
-    print("\nEvaluating on Independent Validation set (Patient-level Split)...")
+    print(f"\nEvaluating on Independent Hold-Out set from: {holdout_dir}")
+    
+    # Load the TRULY independent data
+    holdout_dataset = HPyloriDataset(holdout_dir, patient_csv, patch_csv, transform=None)
+    holdout_transformed = TransformDataset(Subset(holdout_dataset, range(len(holdout_dataset))), val_transform)
+    
     holdout_loader = DataLoader(
-        val_transformed, 
+        holdout_transformed, 
         batch_size=batch_size, 
         shuffle=False, 
         num_workers=7, 
@@ -450,6 +460,9 @@ def train_model():
         prefetch_factor=4
     )
     
+    print(f"Independent Patients in Hold-Out: {len(set([os.path.basename(os.path.dirname(p)).split('_')[0] for p, l in holdout_dataset.samples]))}")
+    print(f"Total Patches in Hold-Out: {len(holdout_dataset)}")
+
     # Load our best saved brain
     model.load_state_dict(torch.load(best_model_path, weights_only=True))
     model.eval()
@@ -507,7 +520,9 @@ def train_model():
     results_df = pd.DataFrame(report_dict).transpose()
     fpr, tpr, thresholds = roc_curve(all_labels, all_probs)
     roc_auc = auc(fpr, tpr)
-    results_df.loc['overall_auc', 'precision'] = roc_auc 
+    
+    # Add overall summary stats
+    results_df.loc['OVERALL_AUC_ROC', 'support'] = roc_auc 
     results_df.to_csv(results_csv_path)
     print(f"Saved machine-readable report to {results_csv_path}")
 
@@ -591,18 +606,16 @@ def train_model():
             plt.close()
         print(f"Saved Grad-CAM samples to {gradcam_dir}")
 
-    # --- Step 9: Patient-Level Consensus Analysis ---
+    # --- Step 10: Patient-Level Consensus Analysis ---
     # In the real world, a doctor doesn't care about one patch; they care if the PATIENT has H. Pylori.
-    # We group all validation patches by Patient ID and check if the AI is consistent.
-    print("\n--- Patient-Level Consensus Report ---")
+    # We group all patches from the Independent set by Patient ID and check if the AI is consistent.
+    print("\n--- Patient-Level Consensus Report (Independent Set) ---")
     patient_probs = {} # { patientID: [prob_p1, prob_p2, ...] }
     patient_gt = {}    # { patientID: label }
     
-    # We use the validation set samples and the probabilities we just calculated
-    # Note: all_probs and the val_indices correspond 1:1
+    # We use the holdout set samples and the probabilities we just calculated
     for idx, prob in enumerate(all_probs):
-        orig_idx = val_indices[idx]
-        img_path, _ = full_dataset.samples[orig_idx]
+        img_path, _ = holdout_dataset.samples[idx]
         label = all_labels[idx]
         
         # Extract patient ID from folder name (consistent with split logic)

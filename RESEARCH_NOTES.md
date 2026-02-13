@@ -402,3 +402,18 @@ To resolve the "staccato" training pattern (where the model would process 8 iter
    - **Workers**: Optimized at **7 DataLoader workers** with `prefetch_factor=4` (reserving 1 core for the main coordination process).
 4. **Outcome**: Achieving significantly smoother `it/s` and maximizing GPU utilization by offloading compute-heavy augmentations to the A40.
 
+
+---
+
+## Run 36: The Scientific Gold Standard 
+**Strategy**: Close the "Scientific Loop" by implementing true independent hold-out verification and path resilience.
+
+### 🔬 Elimination of Data Leakage
+Previously, the final evaluation was using the `Validation set`. While technically independent of training *gradient updates*, the model selection (saving the best model) was based on that set, creating a subtle optimistic bias. 
+- **Change**: Updated `train.py` to use the separate `HoldOut/` directory for the final "Gold Standard" evaluation.
+- **Scientific Impact**: This provides a **zero-leakage** performance report on patients that played no part in training *or* checkpoint selection.
+
+### 🛡️ Deployment Resilience
+- **Portable Pathing**: Refactored the `MacenkoNormalizer` reference patch logic. It now automatically finds the reference image relative to `base_data_path`, regardless of whether the script is running on the cluster (local NVMe scratch) or a local machine.
+- **Reporting Fix**: Corrected the CSV output indices; ROC-AUC is now explicitly tracked in `evaluation_report.csv` rather than being nested under standard metrics.
+
