@@ -8,6 +8,9 @@ import pandas as pd              # Data manipulation library
 import matplotlib.pyplot as plt  # Drawing/plotting library
 from torch.utils.data import DataLoader, random_split, Dataset, Subset, WeightedRandomSampler # Tools to manage and split data
 from torchvision import transforms # Tools to prep images for the AI
+from torchvision import disable_beta_transforms_warning
+disable_beta_transforms_warning()
+from torchvision.transforms import v2 # Faster, optimized transforms
 from sklearn.metrics import (
     roc_curve, auc, confusion_matrix, ConfusionMatrixDisplay, 
     classification_report, precision_recall_curve, 
@@ -170,17 +173,20 @@ def train_model():
     holdout_dir = os.path.join(base_data_path, "HoldOut")
 
     # --- Step 3: Define "Study Habits" (Transforms) ---
-    # Training habits: We resize and add variety to make the AI more robust
+    # CPU-bound: Minimal prep to save worker time
     train_transform = transforms.Compose([
-        transforms.Resize((448, 448)), # Increased resolution to see tiny bacteria better
-        transforms.RandomHorizontalFlip(), 
-        transforms.RandomVerticalFlip(),
-        transforms.RandomRotation(90), # Large rotations to add complexity
-        # Increased Jitter and added Grayscale/Blur to help AI ignore color-based artifacts
-        transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.05, hue=0.02),
-        transforms.RandomGrayscale(p=0.1),
-        transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 2.0)),
+        transforms.Resize((448, 448)), 
         transforms.ToTensor(), 
+    ])
+
+    # GPU-bound: Advanced augmentations performed significantly faster on A40
+    gpu_augment = v2.Compose([
+        v2.RandomHorizontalFlip(), 
+        v2.RandomVerticalFlip(),
+        v2.RandomRotation(90),
+        v2.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.05, hue=0.02),
+        v2.RandomGrayscale(p=0.1),
+        v2.GaussianBlur(kernel_size=3, sigma=(0.1, 2.0)),
     ])
 
     # Validation habits: No random variety here, just high resolution
@@ -190,7 +196,7 @@ def train_model():
     ])
     
     # GPU-based normalization (ImageNet stats)
-    gpu_normalize = transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    gpu_normalize = v2.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
 
     # --- Step 4: Load and split the data ---
     # Create the full dataset object without a transform initially
@@ -256,23 +262,25 @@ def train_model():
     sampler = WeightedRandomSampler(sample_weights, len(sample_weights))
 
     # DataLoaders optimized for NVIDIA A40 (48GB VRAM)
-    # Reverted to 8 workers
+    # Using 7 workers for 8 CPU cores to avoid "Starvation"
     batch_size = 128
     train_loader = DataLoader(
         train_transformed, 
         batch_size=batch_size, 
         sampler=sampler, 
-        num_workers=8, 
+        num_workers=7, 
         pin_memory=True, 
-        persistent_workers=True
+        persistent_workers=True,
+        prefetch_factor=4 # Increase buffer of ready batches
     )
     val_loader = DataLoader(
         val_transformed, 
         batch_size=batch_size, 
         shuffle=False, 
-        num_workers=8, 
+        num_workers=7, 
         pin_memory=True, 
-        persistent_workers=True
+        persistent_workers=True,
+        prefetch_factor=4
     )
 
     # --- Step 5: Build the customized AI brain ---
@@ -334,10 +342,12 @@ def train_model():
             inputs = inputs.to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)
             
-            # --- Per-Batch Normalization (on GPU) ---
-            # Call Macenko Stain Normalization first
+            # --- GPU-Based Preprocessing Pipieline ---
+            # 1. Apply geometric and color augmentations on GPU
+            inputs = gpu_augment(inputs)
+            # 2. Apply vectorized Macenko Stain Normalization
             inputs = normalizer.normalize_batch(inputs)
-            # Then standard ImageNet normalization
+            # 3. Apply standard ImageNet normalization
             inputs = gpu_normalize(inputs)
             
             optimizer.zero_grad()
@@ -435,8 +445,9 @@ def train_model():
         val_transformed, 
         batch_size=batch_size, 
         shuffle=False, 
-        num_workers=8, 
-        pin_memory=True
+        num_workers=7, 
+        pin_memory=True,
+        prefetch_factor=4
     )
     
     # Load our best saved brain
@@ -452,6 +463,10 @@ def train_model():
         for inputs, labels in tqdm(holdout_loader, desc="Patient-Independent Test"):
             inputs = inputs.to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)
+            
+            # --- Per-Batch Normalization (on GPU) ---
+            inputs = normalizer.normalize_batch(inputs)
+            inputs = gpu_normalize(inputs)
             
             with torch.amp.autocast('cuda'):
                 outputs = model(inputs) # Get raw brain output
