@@ -325,7 +325,7 @@ def train_model():
     # --- Step 7: The Main Training Loop ---
     # We use Automatic Mixed Precision (AMP) to speed up training on the A40
     scaler = torch.amp.GradScaler('cuda')
-    num_epochs = 15
+    num_epochs = 12 # Reduced to prevent final-epoch regression seen in Run 37
     best_loss = float('inf')
     
     # Track the "History" to plot learning curves later

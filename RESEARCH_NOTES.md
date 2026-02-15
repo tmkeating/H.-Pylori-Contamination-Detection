@@ -417,3 +417,30 @@ Previously, the final evaluation was using the `Validation set`. While technical
 - **Portable Pathing**: Refactored the `MacenkoNormalizer` reference patch logic. It now automatically finds the reference image relative to `base_data_path`, regardless of whether the script is running on the cluster (local NVMe scratch) or a local machine.
 - **Reporting Fix**: Corrected the CSV output indices; ROC-AUC is now explicitly tracked in `evaluation_report.csv` rather than being nested under standard metrics.
 
+
+---
+
+## Run 37: GPU Pipeline Stress Test & Deployment Bug (Job 101917)
+**Status**: Partial Success (Throughput Milestone / Evaluation Crash)
+
+### 🚀 Performance & Throughput
+- **Achievement**: Reached peak throughput of **~2.05 it/s** (approx. **262 images/sec**) with Batch Size 128.
+- **Result**: Confirmed that moving augmentations to the GPU and utilizing `v2.Transforms` has completely eliminated the CPU bottleneck. Training is now 25-50% faster than previous GPU-vectorized baselines.
+
+### ⚠️ The "Empty Set" Crash
+The run successfully completed 15 epochs but crashed during the final Hold-Out evaluation.
+- **Issue**: `HoldOut` directory was missing from the local NVMe scratch space (`/tmp`). 
+- **Root Cause**: The SLURM script sync command omitted the `HoldOut` folder.
+- **Evaluation**: 0 patients/patches were detected, causing a `ValueError` in the sklearn metrics calculation.
+
+---
+
+## Run 38: The Unified Clinical Engine (Final Implementation)
+**Strategy**: Consolidate throughput gains with fully portable data syncing and calibrated training duration.
+
+### 🛠️ Final Adjustments
+1. **Sync Completion**: Updated `run_h_pylori.sh` to include `rsync -aq "$REMOTE_DATA/HoldOut" "$LOCAL_SCRATCH/"`. This ensures the 100% sensitivity verification has the data it needs on the high-speed local drive.
+2. **Epoch Calibration**: Reduced `num_epochs` to **12**.
+   - **Rationale**: Analysis of Run 37 showed a performance peak at Epoch 12, followed by slight instability and over-confidence. Stopping at 12 ensures we capture the high-generalization state.
+3. **Consensus Reliability**: Maintained the Multi-Tier (Density + Consistency) logic to ensure "weak stainers" are captured with the new high-throughput weights.
+

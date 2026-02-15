@@ -29,6 +29,7 @@ if [ ! -d "$LOCAL_SCRATCH" ]; then
     mkdir -p "$LOCAL_SCRATCH/CrossValidation"
     rsync -aq "$REMOTE_DATA/CrossValidation/Annotated" "$LOCAL_SCRATCH/CrossValidation/"
     rsync -aq "$REMOTE_DATA/CrossValidation/Cropped" "$LOCAL_SCRATCH/CrossValidation/"
+    rsync -aq "$REMOTE_DATA/HoldOut" "$LOCAL_SCRATCH/"
     echo "Data copy complete."
 else
     echo "Local scratch already exists. Skipping copy."
