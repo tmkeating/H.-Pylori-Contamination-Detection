@@ -19,21 +19,20 @@ mkdir -p results
 LOCAL_SCRATCH="/tmp/ricse03_h_pylori_data"
 REMOTE_DATA="/import/fhome/vlia/HelicoDataSet"
 
-if [ ! -d "$LOCAL_SCRATCH" ]; then
-    echo "Copying dataset to local scratch: $LOCAL_SCRATCH"
-    mkdir -p "$LOCAL_SCRATCH"
-    # Copy metadata
-    cp "$REMOTE_DATA"/*.xlsx "$LOCAL_SCRATCH/"
-    cp "$REMOTE_DATA"/*.csv "$LOCAL_SCRATCH/"
-    # Sync folders (rsync is efficient for partial copies)
-    mkdir -p "$LOCAL_SCRATCH/CrossValidation"
-    rsync -aq "$REMOTE_DATA/CrossValidation/Annotated" "$LOCAL_SCRATCH/CrossValidation/"
-    rsync -aq "$REMOTE_DATA/CrossValidation/Cropped" "$LOCAL_SCRATCH/CrossValidation/"
-    rsync -aq "$REMOTE_DATA/HoldOut" "$LOCAL_SCRATCH/"
-    echo "Data copy complete."
-else
-    echo "Local scratch already exists. Skipping copy."
-fi
+echo "Synchronizing dataset to local scratch: $LOCAL_SCRATCH"
+mkdir -p "$LOCAL_SCRATCH"
+
+# Copy metadata (fast)
+cp "$REMOTE_DATA"/*.xlsx "$LOCAL_SCRATCH/"
+cp "$REMOTE_DATA"/*.csv "$LOCAL_SCRATCH/"
+
+# Sync folders (rsync is efficient - only copies missing/changed files)
+mkdir -p "$LOCAL_SCRATCH/CrossValidation"
+rsync -aq "$REMOTE_DATA/CrossValidation/Annotated" "$LOCAL_SCRATCH/CrossValidation/"
+rsync -aq "$REMOTE_DATA/CrossValidation/Cropped" "$LOCAL_SCRATCH/CrossValidation/"
+rsync -aq "$REMOTE_DATA/HoldOut" "$LOCAL_SCRATCH/"
+
+echo "Data synchronization complete."
 
 # 1. Load necessary modules (Common on clusters)
 # module load python/3.8
