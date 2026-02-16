@@ -531,11 +531,29 @@ While recall was perfect, **Specificity dropped significantly**.
    - **Epochs**: Increased back to **15**.
    - **Rationale**: Give the balanced model more iterations to find the complex features that separate bacteria from mimics without the "crutch" of class weighting.
 
-### 🏁 Scientific Objective
-Shift from a "Screening Tool" (100% Recall) to a **"Supportive Diagnostic Tool"**:
-- **Target Specificity**: >90%
-- **Target Accuracy**: >80%
-- **Clinical Role**: A tool that suggests high-confidence regions to the pathologist, emphasizing precision to minimize alert fatigue.
+### 🏁 Results summary
+- **Patient Sensitivity**: 17.24% (🔻 Significant drop, but highly reliable detections)
+- **Patient Specificity**: 98.28% (🟢 **Major Milestone**: Only 1 False Positive)
+- **Accuracy**: 57.76% (🟢 Improved)
+- **Conclusion**: The "Supportive Pivot" was highly successful in cleaning up noise. Balanced weights [1.0, 1.0] reduced the artifact signal strength in B22-89 by 92%. The tool is now extremely safe (98%+ specificity) but too conservative for broad utility.
+
+
+---
+
+## Run 43: Utility Optimization (The Clinical Sweet Spot)
+**Strategy**: Lower the density threshold to recover sensitivity while maintaining the high-specificity gains of the balanced model.
+
+### 🛠️ Strategic Changes
+1. **Calibrated Consensus Gate**:
+   - **Tier 1 (Density)**: Lowered `high_conf_count` threshold from $N \ge 150$ to **$N \ge 75$**.
+   - **Rationale**: Many positive patients in Run 42 had suspicious counts between 70 and 140. Lowering the threshold to 75 targeting the "density gap" should recapture substantial sensitivity without re-introducing the focal artifacts that are now suppressed by the [1.0, 1.0] training weights.
+2. **Persistence**:
+   - Maintained **Balanced Weights [1.0, 1.0]** and **15 epochs**.
+
+### 📉 Expected Outcome
+- **Sensitivity**: Target >50% (recovering the most obvious infections).
+- **Specificity**: Target >95% (maintaining the reliable, "no-false-alarm" status).
+- **Patient Accuracy**: Target >75%.
 
 
 

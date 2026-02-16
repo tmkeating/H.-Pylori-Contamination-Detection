@@ -632,10 +632,10 @@ def train_model():
         max_prob = np.max(probs)
         
         # New Diagnostic Logic: Multi-Tier Consensus for High Specificity Clinical Tool
-        # Tier 1: High Density (N >= 150 at 0.90) - Pivoted to prioritize Accuracy.
+        # Tier 1: High Density (N >= 75 at 0.90) - Calibrated for balanced specificity/sensitivity.
         # Tier 2: Consistent Signal (Mean > 0.92, Spread < 0.10) - Extremely selective for clinical support.
         high_conf_count = sum(1 for p in probs if p > 0.90)
-        is_dense = high_conf_count >= 150
+        is_dense = high_conf_count >= 75
         is_consistent = (avg_prob > 0.92 and (max_prob - avg_prob) < 0.10 and len(probs) >= 10)
         
         if is_dense or is_consistent:
