@@ -293,8 +293,8 @@ def train_model():
 
     # --- Step 6: Define the Learning Rules ---
     # strategy B: Weighted Loss Function
-    # Using a weight of 5.0 to balance Recall and Specificity (Run 41 calibration).
-    loss_weights = torch.FloatTensor([1.0, 5.0]).to(device) 
+    # Balanced weights (1.0, 1.0) to prioritize Specificity and Accuracy (Run 42 pivot).
+    loss_weights = torch.FloatTensor([1.0, 1.0]).to(device) 
     # Added label_smoothing to prevent the model from becoming overconfident on artifacts
     criterion = nn.CrossEntropyLoss(weight=loss_weights, label_smoothing=0.1)
     
@@ -324,7 +324,7 @@ def train_model():
     # --- Step 7: The Main Training Loop ---
     # We use Automatic Mixed Precision (AMP) to speed up training on the A40
     scaler = torch.amp.GradScaler('cuda')
-    num_epochs = 12 # Reduced to prevent final-epoch regression seen in Run 37
+    num_epochs = 15 # Increased for high-specificity convergence (Run 42 pivot)
     best_loss = float('inf')
     
     # Track the "History" to plot learning curves later
@@ -631,12 +631,12 @@ def train_model():
         avg_prob = np.mean(probs)
         max_prob = np.max(probs)
         
-        # New Diagnostic Logic: Multi-Tier Consensus for 100% Accuracy
-        # Tier 1: High Density (N >= 61 at 0.90) - Sharpened to filter stain artifacts.
-        # Tier 2: Consistent Signal (Mean > 0.85, Spread < 0.15) - Sharpened for clinical specificity.
+        # New Diagnostic Logic: Multi-Tier Consensus for High Specificity Clinical Tool
+        # Tier 1: High Density (N >= 150 at 0.90) - Pivoted to prioritize Accuracy.
+        # Tier 2: Consistent Signal (Mean > 0.92, Spread < 0.10) - Extremely selective for clinical support.
         high_conf_count = sum(1 for p in probs if p > 0.90)
-        is_dense = high_conf_count >= 61
-        is_consistent = (avg_prob > 0.85 and (max_prob - avg_prob) < 0.15 and len(probs) >= 5)
+        is_dense = high_conf_count >= 150
+        is_consistent = (avg_prob > 0.92 and (max_prob - avg_prob) < 0.10 and len(probs) >= 10)
         
         if is_dense or is_consistent:
             pred_label = 1

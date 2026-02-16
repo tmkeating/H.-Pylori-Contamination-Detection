@@ -504,9 +504,38 @@ While recall was perfect, **Specificity dropped significantly**.
      - **Spread (Max-Mean)**: Tightened from **0.25 → 0.15**.
      - **Goal**: Ensures that "consistent signal" detections represent high-confidence, uniform evidence rather than global model uncertainty.
 
-### 📈 Expected Outcome
-- Maintain **100% Sensitivity** (Recall).
-- Significantly increase **Specificity** by filtering out the focal stain artifacts that previously triggered the 10-patch gate.
-- Achieve the optimal clinical balance for a "Screening Tool" that minimizes pathologist over-work without missing infections.
+### 📈 Results summary
+- **Patient Sensitivity**: 98.28% (🔻 Missed 1 patient: B22-81)
+- **Patient Specificity**: 10.34% (🟢 Improved from 0%)
+- **Accuracy**: 54.31%
+- **Conclusion**: The threshold of $N=61$ was effective at filtering 6 FPs but caused a sensitivity breach. Furthermore, "Poison" negative patients (e.g., B22-89) still exhibited >2,000 suspicious patches, indicating that the model needs higher precision at the weight level, not just the gate level.
+
+
+---
+
+## Run 42: The Clinical Pivot (Supportive Tool)
+**Strategy**: Prioritize Specificity over Recall to transform the model into a suggestive clinical assistant.
+
+### 🛠️ Strategic Changes
+1. **Balanced Objective**:
+   - **Weight Change**: `loss_weights` set to **[1.0, 1.0]**.
+   - **Rationale**: Completely remove the "Recall-at-all-costs" bias. Allow the model to optimize for overall accuracy and distinguish artifacts from bacteria by treating both classes as equally important.
+2. **High-Bar Consensus Gates**:
+   - **Tier 1 (Density)**: Increased `high_conf_count` threshold to **$N \ge 150$**.
+     - *Goal*: Substantially reduce "leakage" from dense focal artifacts.
+   - **Tier 2 (Consistency)**:
+     - **Mean Prob**: Increased to **$> 0.92$**.
+     - **Spread**: Tightened to **$< 0.10$**.
+     - **Goal**: Require extremely uniform, high-confidence evidence for any "Consistency" based flag.
+3. **Training Duration**:
+   - **Epochs**: Increased back to **15**.
+   - **Rationale**: Give the balanced model more iterations to find the complex features that separate bacteria from mimics without the "crutch" of class weighting.
+
+### 🏁 Scientific Objective
+Shift from a "Screening Tool" (100% Recall) to a **"Supportive Diagnostic Tool"**:
+- **Target Specificity**: >90%
+- **Target Accuracy**: >80%
+- **Clinical Role**: A tool that suggests high-confidence regions to the pathologist, emphasizing precision to minimize alert fatigue.
+
 
 
