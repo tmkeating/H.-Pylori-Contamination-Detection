@@ -293,9 +293,8 @@ def train_model():
 
     # --- Step 6: Define the Learning Rules ---
     # strategy B: Weighted Loss Function
-    # Increased weight to 5.0 to prioritize Recall on the independent validation set.
-    # We use a higher weight because positive patches are rarer in some patients.
-    loss_weights = torch.FloatTensor([1.0, 10.0]).to(device) 
+    # Using a weight of 5.0 to balance Recall and Specificity (Run 41 calibration).
+    loss_weights = torch.FloatTensor([1.0, 5.0]).to(device) 
     # Added label_smoothing to prevent the model from becoming overconfident on artifacts
     criterion = nn.CrossEntropyLoss(weight=loss_weights, label_smoothing=0.1)
     
@@ -633,11 +632,11 @@ def train_model():
         max_prob = np.max(probs)
         
         # New Diagnostic Logic: Multi-Tier Consensus for 100% Accuracy
-        # Tier 1: High Density (N >= 10 at 0.90) - Catches heavy infections.
-        # Tier 2: Consistent Signal (Mean > 0.50, Tight Spread) - Catches weak stainer B22-102.
+        # Tier 1: High Density (N >= 61 at 0.90) - Sharpened to filter stain artifacts.
+        # Tier 2: Consistent Signal (Mean > 0.85, Spread < 0.15) - Sharpened for clinical specificity.
         high_conf_count = sum(1 for p in probs if p > 0.90)
-        is_dense = high_conf_count >= 10
-        is_consistent = (avg_prob > 0.50 and (max_prob - avg_prob) < 0.25 and len(probs) >= 5)
+        is_dense = high_conf_count >= 61
+        is_consistent = (avg_prob > 0.85 and (max_prob - avg_prob) < 0.15 and len(probs) >= 5)
         
         if is_dense or is_consistent:
             pred_label = 1

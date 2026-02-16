@@ -109,7 +109,15 @@ class HPyloriDataset(Dataset):
                             self.samples.append((os.path.join(patient_path, img_name), 0))
                             added_keys.add(file_key)
                     
-                    # Priority 3: Otherwise skip
+                    # Priority 3: Use overall Positive patient patches (BAIXA/ALTA)
+                    # even if they don't have patch-level annotations in the Excel
+                    elif patient_id in self.patient_densities and self.patient_densities[patient_id] != 'NEGATIVA':
+                        file_key = (patient_id, img_name)
+                        if file_key not in added_keys:
+                            self.samples.append((os.path.join(patient_path, img_name), 1))
+                            added_keys.add(file_key)
+                    
+                    # Priority 4: Otherwise skip
                     else:
                         continue
 
