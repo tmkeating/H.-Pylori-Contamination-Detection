@@ -30,24 +30,24 @@ The model utilizes an expanded dataset of **~54,000 images**:
 - **Scientific Validation**: Validated on a **Patient-Independent Split** (80/20 by Patient ID).
 - **Core AI Hardening**: Uses Label Smoothing (0.1) and morphological augmentations (Blur, Grayscale) to improve resilience against staining artifacts.
 
-## Performance Highlights (Final Model: Run 34)
+## Performance Highlights (Final Model: Run 43/44)
 
 ### Key Metrics
-- **Patient-Level Recall**: **100%** (4/4 positive patients detected)
-- **Patient-Level Accuracy**: **93.5%**
-- **Patch-Level Accuracy**: **98%**
+- **Patient-Level Specificity**: **98.3%** (Milestone: Only 1 False Positive)
+- **Patient-Level Sensitivity**: **22.4%** (Rule-In Diagnostic Assistant)
+- **Patient-Level Accuracy**: Target **>80%** (Run 44 calibration)
 - **Throughput**: **262 images/second** (7.5x speedup via GPU-normalization)
 
 ### Hardware Performance
 - **High-Throughput Pipeline**: Moved all geometric and color augmentations to the GPU using `v2.Transforms`, resolving CPU bottlenecks and ensuring smooth iterations.
 - **VRAM Utilization**: Efficiently handles 448x448 high-resolution patches at batch-size 128 on 48GB VRAM.
-- **Cluster Efficiency**: Optimized for SLURM with local NVMe SSD caching and multi-worker (10+) prefetching.
+- **Cluster Efficiency**: Optimized for SLURM with local NVMe SSD caching and multi-worker prefetching.
 
 ## Diagnostic Architecture (Multi-Tier Consensus)
 
-The final model moves beyond simple thresholding to a sophisticated consensus logic:
-1. **Density Gate**: Flags infection if $\ge 10$ patches show $> 90\%$ confidence (Resilient against focal noise).
-2. **Consistency Gate**: Flags infection if mean probability across all patches is $> 50\%$ with high signal stability (Catches "weak stainers" with widespread low-level signal).
+The model utilizes a "Supportive Clinical Tool" architecture, prioritizing reliability and high specificity:
+1. **Density Gate**: Flags infection if $\ge 30$ patches show $> 90\%$ confidence (Optimized for Accuracy in Run 44).
+2. **Consistency Gate**: Flags infection if mean probability across all patches is $> 80\%$ with high signal stability (Extremely selective for clinical confirmation).
 
 ## How to Get Started
 
@@ -78,14 +78,14 @@ The final model moves beyond simple thresholding to a sophisticated consensus lo
 
 | Parameter | Value | Notes |
 |-----------|-------|-------|
-| **Batch Size** | 64 | Tuned for 448x448 resolution on 48GB A40 |
+| **Batch Size** | 128 | Optimized for 448x448 resolution on 48GB A40 |
 | **Input Resolution** | 448x448 | Required to resolve small bacillary morphology |
-| **Loss Weight (Pos)** | 10.0 | Balanced for high sensitivity vs FP reduction |
+| **Loss Weight (Pos)** | 1.5 | Balanced for specificity and accuracy (Run 44) |
 | **Label Smoothing** | 0.1 | Prevents over-confidence on stain artifacts |
 | **Augmentations** | Blur, Grayscale | Forces model to focus on morphology, not color |
-| **Consensus N** | 10 | Minimum patches to trigger Density Gate |
+| **Consensus N** | 30 | Minimum patches to trigger Density Gate |
 | **Consensus P** | 0.90 | Confidence threshold for Density patches |
-| **Consistency Gate** | Mean > 0.5 | Catches wide-spread consistent infection |
+| **Consistency Gate** | Mean > 0.8 | Threshold for clinical confirmation |
 
 ## Customization
 

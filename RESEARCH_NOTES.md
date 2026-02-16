@@ -550,10 +550,34 @@ While recall was perfect, **Specificity dropped significantly**.
 2. **Persistence**:
    - Maintained **Balanced Weights [1.0, 1.0]** and **15 epochs**.
 
+### 🏁 Results summary
+- **Patient Sensitivity**: 22.41% (🟢 Gained 3 patients vs Run 42)
+- **Patient Specificity**: 98.28% (Flat)
+- **Accuracy**: 60.34%
+- **Outlier B22-89**: Successfully tamed (dropped from 207 to 6 patches).
+- **Conclusion**: We found a high-specificity state, but the "gate-only" optimization is hitting diminishing returns. The positive class is "under-confident," with many true positive patches lingering in the 0.5-0.7 probability range.
+
+
+---
+
+## Run 44: Balanced Performance Optimization
+**Strategy**: Apply "Positive Pressure" to the weights to push under-confident cases into the high-confidence zone.
+
+### 🛠️ Strategic Changes
+1. **Calibration via Weighting**:
+   - **Weight Change**: `loss_weights` set to **[1.0, 1.5]**.
+   - **Rationale**: A moderate 50% boost to the positive class to encourage higher output probabilities for weak bacterial signals without re-introducing the artifact chaos of the [1.0, 5.0] regime.
+2. **Data-Driven Consensus Optimization**:
+   - **Tier 1 (Density)**: Lowered `high_conf_count` threshold to **$N \ge 30$**.
+     - *Rationale*: Analysis of Run 43 showed $N=30$ is the mathematical apex for accuracy (capturing the most positives for the fewest false positives).
+   - **Tier 2 (Consistency)**:
+     - **Mean Prob**: Relaxed to **$> 0.80$**.
+     - **Spread**: Relaxed to **$< 0.20$**.
+
 ### 📉 Expected Outcome
-- **Sensitivity**: Target >50% (recovering the most obvious infections).
-- **Specificity**: Target >95% (maintaining the reliable, "no-false-alarm" status).
-- **Patient Accuracy**: Target >75%.
+- **Sensitivity**: Target >50%.
+- **Specificity**: Target >90% (Accepting up to 6 FPs for the accuracy gain).
+- **Patient Accuracy**: **Target >80%** (The "Clinical Utility" milestone).
 
 
 
