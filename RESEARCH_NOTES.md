@@ -644,9 +644,29 @@ While recall was perfect, **Specificity dropped significantly**.
    - Maintained **LR 1e-5** and **Weight Decay 1e-3**.
    - These are retained as "stability guardrails" that prevent the divergence issues of Run 44.
 
+### 🏁 Results summary
+- **Patient Sensitivity**: 24.14% (🔻 Significant drop, but highly reliable)
+- **Patient Specificity**: **100.0%** (🟢 Milestone: Zero False Positives)
+- **Accuracy**: 62.07% (🟢 Improved)
+- **Outlier B22-89**: Found the "Artifact Ceiling." The strongest FP produced exactly **33** suspicious patches.
+- **Conclusion**: We have achieved perfect precision. The next step is to safely lower the gate to recover sensitivity without re-triggering the artifacts.
+
+
+---
+
+## Run 48: Sensitivity Recovery (The "Apex" Calibration)
+**Strategy**: Recalibrate the diagnostic gate to the "Artifact Ceiling" identified in Run 47.
+
+### 🛠️ Strategic Changes
+1. **Gate Recalibration**:
+   - **Tier 1 (Density)**: Lowered `high_conf_count` threshold from $N \ge 100$ to **$N \ge 40$**.
+   - **Rationale**: Since the strongest False Positive (B22-89) was "capped" at 33 patches by the balanced weights, setting the gate at 40 provides a safety buffer while capturing a much larger volume of true positive cases.
+2. **Persistence**:
+   - Maintain **Balanced Weights [1.0, 1.0]**, **LR 1e-5**, and **Weight Decay 1e-3**.
+
 ### 📉 Expected Outcome
-- **Generalization**: High overlap between Training and Validation accuracy.
-- **Specificity**: Restore to **>90%**.
+- **Sensitivity**: Target >60%.
+- **Specificity**: Target **100%** (Maintained).
 - **Patient Accuracy**: **Target >80%**.
 
 
