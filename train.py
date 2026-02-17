@@ -298,12 +298,12 @@ def train_model():
     # Added label_smoothing to prevent the model from becoming overconfident on artifacts
     criterion = nn.CrossEntropyLoss(weight=loss_weights, label_smoothing=0.1)
     
-    # Optimizer: Adjusted learning rate for finer final convergence
-    optimizer = Adam(model.parameters(), lr=5e-5)
+    # Optimizer: Lowered learning rate and added weight decay to prevent overfitting (Run 45)
+    optimizer = Adam(model.parameters(), lr=1e-5, weight_decay=1e-3)
     
     # --- Step 6.2: Learning Rate Scheduler ---
-    # Reduce learning rate when validation loss stops improving
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=2)
+    # More aggressive patience (1) to move faster on stagnation
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=1)
     
     # --- Step 6.5: Hardware Optimization (Optional) ---
     # Set this to True ONLY if you have an Intel CPU and compatible IPEX installed.

@@ -574,10 +574,34 @@ While recall was perfect, **Specificity dropped significantly**.
      - **Mean Prob**: Relaxed to **$> 0.80$**.
      - **Spread**: Relaxed to **$< 0.20$**.
 
+### 🏁 Results summary
+- **Patient Sensitivity**: 100.0% (🟢 Captured all infected patients)
+- **Patient Specificity**: 46.55% (🔻 Significant regression, 31 False Positives)
+- **Accuracy**: 73.28% (🔻 Target >80% Not Met)
+- **Instability Observation**: Validation Loss reached its minimum at **Epoch 2 (0.6407)** then immediately diverged, indicating a training instability/overfitting plateau.
+
+
+---
+
+## Run 45: Training Stabilization & Anti-Overfitting
+**Strategy**: Drastically reduce learning rate and increase regularization to capture a more generalizable features.
+
+### 🛠️ Strategic Changes
+1. **Optimization Hardening**:
+   - **Learning Rate**: Reduced from 5e-5 to **1e-5**.
+     - *Rationale*: Slower optimization to prevent the "jump" into local regional minima observed at Epoch 3 of Run 44.
+   - **Weight Decay**: Increased to **1e-3**.
+     - *Rationale*: Apply L2 regularization to penalize complex, non-generalizable weights that are currently over-fitting the training set.
+2. **Dynamic Response**:
+   - **Scheduler Patience**: Reduced from 2 to **1**.
+     - *Rationale*: Faster response to validation plateaus to avoid wasting compute on diverging trajectories.
+3. **Consensus Persistence**:
+   - Maintained **$N \ge 30$** and **[1.0, 1.5] weights** to confirm if regularization fixes the specificity collapse seen in Run 44.
+
 ### 📉 Expected Outcome
-- **Sensitivity**: Target >50%.
-- **Specificity**: Target >90% (Accepting up to 6 FPs for the accuracy gain).
-- **Patient Accuracy**: **Target >80%** (The "Clinical Utility" milestone).
+- **Generalization**: Close the gap between Train Loss and Val Loss.
+- **Specificity**: Restore Specificity to **>90%** by eliminating high-frequency noise that the model is currently memorizing.
+- **Patient Accuracy**: **Target >80%**.
 
 
 
