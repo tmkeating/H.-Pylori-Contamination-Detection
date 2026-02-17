@@ -2,7 +2,7 @@
 #SBATCH --job-name=h_pylori_fast
 #SBATCH -D .
 #SBATCH -n 1                           # One task
-#SBATCH -c 8                          # Request 12 CPU cores per task for fast data loading
+#SBATCH -c 8                          # Request 8 CPU cores per task for fast data loading
 #SBATCH -N 1
 #SBATCH -t 0-06:00                     # It will likely finish in < 6 hours now
 #SBATCH -p dcca40

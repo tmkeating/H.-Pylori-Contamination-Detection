@@ -293,8 +293,8 @@ def train_model():
 
     # --- Step 6: Define the Learning Rules ---
     # strategy B: Weighted Loss Function
-    # Slight bias (1.0, 1.5) to boost confidence of weak positives while maintaining Specificity.
-    loss_weights = torch.FloatTensor([1.0, 1.5]).to(device) 
+    # Balanced weights (1.0, 1.0) to prioritize Structural Precision and Accuracy (Run 47).
+    loss_weights = torch.FloatTensor([1.0, 1.0]).to(device) 
     # Added label_smoothing to prevent the model from becoming overconfident on artifacts
     criterion = nn.CrossEntropyLoss(weight=loss_weights, label_smoothing=0.1)
     
@@ -631,11 +631,11 @@ def train_model():
         avg_prob = np.mean(probs)
         max_prob = np.max(probs)
         
-        # New Diagnostic Logic: Multi-Tier Consensus for Balanced Clinical Engine
-        # Tier 1: High Density (N >= 50 at 0.90) - Sharpened to recover Specificity after stabilization.
+        # New Diagnostic Logic: Multi-Tier Consensus for Structural Precision Tool
+        # Tier 1: High Density (N >= 100 at 0.90) - Raised to filter heavy focal artifacts.
         # Tier 2: Consistent Signal (Mean > 0.88, Spread < 0.20) - High-bar signal consistency.
         high_conf_count = sum(1 for p in probs if p > 0.90)
-        is_dense = high_conf_count >= 50
+        is_dense = high_conf_count >= 100
         is_consistent = (avg_prob > 0.88 and (max_prob - avg_prob) < 0.20 and len(probs) >= 10)
         
         if is_dense or is_consistent:

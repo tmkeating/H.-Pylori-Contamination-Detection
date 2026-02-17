@@ -621,9 +621,33 @@ While recall was perfect, **Specificity dropped significantly**.
    - Maintained **LR 1e-5**, **Weight Decay 1e-3**, and **Weights [1.0, 1.5]**.
    - These parameters provided the stability; the gates will now provide the precision.
 
+### 🏁 Results summary
+- **Patient Sensitivity**: 87.93% (🔻 Capture rate dropped)
+- **Patient Specificity**: 31.03% (🟢 Incremental gain, but still too noisy)
+- **Accuracy**: 59.48% (🔻 Target >80% Not Met)
+- **Bottleneck**: "Poison" patients (e.g., B22-89) still generate >1,700 suspicious patches. Sharpening the categorical gates is hitting diminishing returns because the model is structurally hypersensitive.
+
+
+---
+
+## Run 47: The Structural Precision Phase
+**Strategy**: Force the model to be fundamentally more discriminative by removing positive weighting and significantly increasing the evidence requirement.
+
+### 🛠️ Strategic Changes
+1. **Weight Balancing**:
+   - **Weight Change**: `loss_weights` reverted to **[1.0, 1.0]**.
+   - **Rationale**: Remove the artificial pressure to classify ambiguous morphology as positive. Force the model to learn the strict visual distinction between bacteria and debris.
+2. **Elite Evidence Bar**:
+   - **Tier 1 (Density)**: Increased `high_conf_count` threshold to **$N \ge 100$**.
+     - *Rationale*: Strategically filter out the background noise that successfully crossed the 50-patch gate in Run 46.
+3. **Persistence**:
+   - Maintained **LR 1e-5** and **Weight Decay 1e-3**.
+   - These are retained as "stability guardrails" that prevent the divergence issues of Run 44.
+
 ### 📉 Expected Outcome
-- **Specificity**: Target >85%.
-- **Patient Accuracy**: Target >80%.
+- **Generalization**: High overlap between Training and Validation accuracy.
+- **Specificity**: Restore to **>90%**.
+- **Patient Accuracy**: **Target >80%**.
 
 
 
