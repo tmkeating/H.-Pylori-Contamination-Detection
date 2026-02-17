@@ -632,11 +632,11 @@ def train_model():
         max_prob = np.max(probs)
         
         # New Diagnostic Logic: Multi-Tier Consensus for Balanced Clinical Engine
-        # Tier 1: High Density (N >= 30 at 0.90) - Optimized for >80% Patient Accuracy.
-        # Tier 2: Consistent Signal (Mean > 0.80, Spread < 0.20) - Threshold for clinically significant signal.
+        # Tier 1: High Density (N >= 50 at 0.90) - Sharpened to recover Specificity after stabilization.
+        # Tier 2: Consistent Signal (Mean > 0.88, Spread < 0.20) - High-bar signal consistency.
         high_conf_count = sum(1 for p in probs if p > 0.90)
-        is_dense = high_conf_count >= 30
-        is_consistent = (avg_prob > 0.80 and (max_prob - avg_prob) < 0.20 and len(probs) >= 10)
+        is_dense = high_conf_count >= 50
+        is_consistent = (avg_prob > 0.88 and (max_prob - avg_prob) < 0.20 and len(probs) >= 10)
         
         if is_dense or is_consistent:
             pred_label = 1

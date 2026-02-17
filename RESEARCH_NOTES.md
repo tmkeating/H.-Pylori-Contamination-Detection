@@ -598,10 +598,32 @@ While recall was perfect, **Specificity dropped significantly**.
 3. **Consensus Persistence**:
    - Maintained **$N \ge 30$** and **[1.0, 1.5] weights** to confirm if regularization fixes the specificity collapse seen in Run 44.
 
+### 🏁 Results summary
+- **Patient Sensitivity**: 93.10% (🔻 Missed 4 patients due to cautious weights)
+- **Patient Specificity**: 22.41% (🔻 High sensitivity caused widespread False Positives)
+- **Accuracy**: 57.76% (🔻 Target >80% Not Met)
+- **Stabilization Audit**: **Technical Success.** The loss curve remained flat and stable (no divergence). However, the model became overly sensitive, flagging artifacts at the $N \ge 30$ gate.
+
+
+---
+
+## Run 46: Sharpening the Stabilized Engine
+**Strategy**: Leverage the stable features of Run 45 but raise the diagnostic "bar" to recover Specificity.
+
+### 🛠️ Strategic Changes
+1. **Higher Evidence Bar**:
+   - **Tier 1 (Density)**: Increased `high_conf_count` threshold to **$N \ge 50$**.
+     - *Rationale*: Filters out the "Stabilized Noise" (artifacts that now consistently trigger small numbers of high-confidence patches).
+   - **Tier 2 (Consistency)**:
+     - **Mean Prob**: Increased to **$> 0.88$**.
+     - *Rationale*: Require stronger global confirmation for any positive flag.
+2. **Persistence**:
+   - Maintained **LR 1e-5**, **Weight Decay 1e-3**, and **Weights [1.0, 1.5]**.
+   - These parameters provided the stability; the gates will now provide the precision.
+
 ### 📉 Expected Outcome
-- **Generalization**: Close the gap between Train Loss and Val Loss.
-- **Specificity**: Restore Specificity to **>90%** by eliminating high-frequency noise that the model is currently memorizing.
-- **Patient Accuracy**: **Target >80%**.
+- **Specificity**: Target >85%.
+- **Patient Accuracy**: Target >80%.
 
 
 
