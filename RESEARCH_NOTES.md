@@ -833,3 +833,21 @@ While recall was perfect, **Specificity dropped significantly**.
 ### 📉 Expected Outcome
 - **Throughput**: Significantly faster than Run 55.
 - **Stability**: Elimination of "Dynamo cache size limit" warnings.
+
+## Run 57: Robust Sequential Preprocessing (Symbolic Fix)
+**Context**: Run 56 crashed at the end of Epoch 1 because `torch.nanquantile` is incompatible with `torch.compile` when handling symbolic tensor sizes (dynamic batch/spatial dimensions).
+
+### 🛠️ Strategic Fixes
+1. **Manual Batch Quantiles**:
+   - Replaced all `torch.nanquantile` calls in `normalization.py` with a custom `batch_nanquantile` implementation using `sort` and `gather`.
+   - **Rationale**: Standard quantile functions often trigger internal `numel()` checks that fail during the graph-capture phase of `torch.compile` on certain hardware configurations.
+2. **Deterministic Stability**:
+   - Maintained the decoupled "Augmentation -> Compiled Normalization" pipeline.
+   - **Rationale**: Previous runs proved that this structure prevents Dynamo graph breaks while keeping the I/O pipeline vectorized.
+
+### 📉 Expected Outcome
+- **Stability**: Full execution of all epochs and evaluation cycles.
+- **Throughput**: Maintaining the 500+ img/s target via the optimized GPU-native normalizer.
+
+---
+**Note for AI Continuity**: A context transfer prompt has been created at [CONTEXT_PROMPT.md](CONTEXT_PROMPT.md) for future sessions using the "Skeptic Data Scientist" persona.

@@ -103,13 +103,25 @@ class MacenkoNormalizer:
         eigvecs = V[:, :, [1, 2]]
         
         # Project OD onto plane and find quantiles (Vectorized find_HE)
+        # We use a sort-based quantile approach to avoid symbolic numel errors in torch.compile
         That = torch.matmul(OD, eigvecs) # (B, N, 2)
         phi = torch.atan2(That[:, :, 1], That[:, :, 0]) # (B, N)
         
-        # Use nanquantile to ignore masked pixels (0 counts as valid index otherwise)
+        # Filter and sort to find quantiles manually (more robust for torch.compile)
         phi_masked = torch.where(mask > 0, phi, torch.tensor(float('nan'), device=device))
-        min_phi = torch.nanquantile(phi_masked, alpha / 100, dim=1) # (B,)
-        max_phi = torch.nanquantile(phi_masked, 1 - alpha / 100, dim=1) # (B,)
+        
+        def batch_nanquantile(x, q):
+            # Move to a context where we handle nans by replacing with infinity for sorting
+            x_filled = torch.where(torch.isnan(x), torch.tensor(float('inf'), device=device), x)
+            x_sorted, _ = torch.sort(x_filled, dim=1)
+            # Count non-nan values per row
+            valid_counts = mask.sum(dim=1)
+            indices = (q * (valid_counts - 1)).long()
+            # Gather the values at calculated indices
+            return x_sorted.gather(1, indices.unsqueeze(1).clamp(min=0)).squeeze(1)
+
+        min_phi = batch_nanquantile(phi_masked, alpha / 100) # (B,)
+        max_phi = batch_nanquantile(phi_masked, 1 - alpha / 100) # (B,)
         
         # Reconstruct HE components
         vMin = torch.matmul(eigvecs, torch.stack([torch.cos(min_phi), torch.sin(min_phi)], dim=1).unsqueeze(-1)).squeeze(-1)
@@ -130,7 +142,16 @@ class MacenkoNormalizer:
         C = torch.matmul(HE_pinv, Y) # (B, 2, N)
         
         # 4. Normalize Concentrations
-        maxC_source = torch.nanquantile(torch.where(C > 0, C, torch.tensor(float('nan'), device=device)), 0.99, dim=2)
+        # Replace nanquantile with manual batch quantile for torch.compile stability
+        def batch_quantile_positive(x, q):
+            # Focus on positive values for concentration normalization
+            x_pos = torch.where(x > 0, x, torch.tensor(float('-inf'), device=device))
+            x_sorted, _ = torch.sort(x_pos, dim=2)
+            valid_counts = (x > 0).sum(dim=2)
+            indices = (q * (valid_counts - 1)).long()
+            return x_sorted.gather(2, indices.unsqueeze(2).clamp(min=0)).squeeze(2)
+
+        maxC_source = batch_quantile_positive(C, 0.99)
         maxC_source = torch.clamp(maxC_source, min=1e-5)
         
         ref_maxC = self.normalizer.maxCRef.to(device)
