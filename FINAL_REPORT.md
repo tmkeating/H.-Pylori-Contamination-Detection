@@ -9,7 +9,6 @@ The objective was to develop a deep-learning-based classification system for ide
 Enabled a high-speed training pipeline using **GPU-vectorized Macenko Normalization** and **Torchvision v2** on NVIDIA A40 GPUs, achieving a throughput of **262 images/second** (7.5x increase over CPU-bound normalization).
 
 ### B. "Core AI Hardening" (Resilience against Artifacts)
-### B. "Core AI Hardening" (Resilience against Artifacts)
 Implemented a "Learning Extension" strategy in Run 52, using a higher weight decay (**5e-3**) and relaxed scheduler patience to force the model to learn robust morphological features. This successfully reduced artifact-driven false positives (e.g., patient B22-89) by **76%** (69 patches → 16 patches).
 
 ### C. Multi-Tier Consensus Logic (Diagnostic Engine)
