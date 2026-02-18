@@ -17,6 +17,9 @@ __pycache__/
 best_model.pth
 coverage.xml
 env/
+# Whitelist finalResults for the checkpoint release
+!finalResults/
+!finalResults/**
 nosetests.xml
 pip-delete-this-directory.txt
 pip-log.txt
