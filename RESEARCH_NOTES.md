@@ -724,3 +724,48 @@ While recall was perfect, **Specificity dropped significantly**.
 - **Generalization**: A tighter gap between Training and Validation loss.
 - **Artifact Rejection**: Lower "Suspicious Counts" for patient B22-89 by preventing the model from becoming over-confident on stain noise.
 - **Accuracy**: Target **>80%** Patient Accuracy.
+
+## Run 52: Baseline Restoration (Revert to Run 48)
+**Strategy**: Complete restoration of the Run 48 environment to verify the 70.69% Accuracy baseline before moving forward with more targeted experiments.
+### 🛠️ Strategic Changes
+1. **Revert Architecture**: Restored single-layer linear head in [model.py](model.py). The "Sharp Head" (Run 51) was discontinued due to excessive patch-level sensitivity degradation.
+2. **Revert Optimization**:
+   - **LR**: Reverted to **1e-5**.
+   - **Weight Decay**: Reverted to **1e-3**.
+   - **Scheduler Patience**: Reverted to **1**.
+3. **Revert Consensus**:
+   - **Gate**: Lowered threshold back to **$N \ge 40$**.
+   - **Rationale**: Re-establish the baseline where sensitivity and specificity were most balanced.
+
+### 📉 Expected Outcome
+- **Accuracy**: Recovery of **70.69%** (Run 48 benchmark).
+- **Stability**: Verified baseline results to ensure training stochasticity is controlled.
+
+## Run 53: Optimization Re-Extension (Run 50 Strategy)
+**Strategy**: Re-applying the learning rate extension and increased regularization to the baseline head. We are testing if the "Learning Extension" provides a better peak when using the standard architecture without the noise found in the Sharp Head.
+### 🛠️ Strategic Changes
+1. **Optimization Tuning**:
+   - **Initial LR**: Re-increased to **$2e-5$**.
+   - **Weight Decay**: Re-increased to **$5e-3$**.
+2. **Scheduler Relaxation**:
+   - **Patience**: Re-increased to **$3$**.
+3. **Consensus**:
+   - **Gate**: Maintained **$N \ge 75$** (Golden Gate).
+
+### 📉 Expected Outcome
+- **Accuracy**: Targeting **>75%** by balancing the stability of the baseline head with the better convergence of the extension.
+
+## Run 53 (Revised): Optimization Extension with Baseline Gate
+**Strategy**: Re-applying the learning rate extension and increased regularization (Run 50 Strategy) but reverting the consensus gate to the Run 48 baseline ($N \ge 40$).
+### 🛠️ Strategic Changes
+1. **Optimization Tuning**:
+   - **Initial LR**: **$2e-5$**.
+   - **Weight Decay**: **$5e-3$**.
+2. **Scheduler Relaxation**:
+   - **Patience**: **$3$**.
+3. **Consensus**:
+   - **Gate**: Reverted to **$N \ge 40$** (Run 48 Baseline).
+   - **Rationale**: The Golden Gate ($N \ge 75$) was deemed too aggressive; we want to see if better optimization alone can improve the 70.69% accuracy benchmark without loss of sensitivity.
+
+### 📉 Expected Outcome
+- **Accuracy**: Recovery and improvement of the **70.69%** benchmark.

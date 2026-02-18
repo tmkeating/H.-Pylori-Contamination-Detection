@@ -632,10 +632,10 @@ def train_model():
         max_prob = np.max(probs)
         
         # New Diagnostic Logic: Multi-Tier Consensus for Sensitivity Recovery
-        # Tier 1: High Density (N >= 75 at 0.90) - Calibrated to capture true positives while staying above the artifact ceiling (69).
+        # Tier 1: High Density (N >= 40 at 0.90) - Calibrated to capture true positives while staying above the artifact ceiling (33).
         # Tier 2: Consistent Signal (Mean > 0.88, Spread < 0.20) - High-bar signal consistency.
         high_conf_count = sum(1 for p in probs if p > 0.90)
-        is_dense = high_conf_count >= 75
+        is_dense = high_conf_count >= 40
         is_consistent = (avg_prob > 0.88 and (max_prob - avg_prob) < 0.20 and len(probs) >= 10)
         
         if is_dense or is_consistent:

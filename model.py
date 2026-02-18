@@ -15,20 +15,13 @@ def get_model(num_classes=2, pretrained=True):
         # Older way if your software is a bit behind
         model = models.resnet18(pretrained=pretrained)
     
-    # --- Modification Step: The "Sharp" Classification Head ---
-    # The standard ResNet18 was designed to recognize 1,000 different things.
-    # We replace the final layer with a more specialized, multi-layer "Sharp" head:
-    # 1. First Dense Layer (512 -> 256)
-    # 2. ReLU Activation (To handle complex visual features)
-    # 3. Dropout (0.5) - CRITICAL for preventing overfitting to staining artifacts (Run 51)
-    # 4. Final Prediction Layer (256 -> 2)
+    # --- Modification Step ---
+    # The standard ResNet18 was designed to recognize 1,000 different things (dogs, cars, etc.)
+    # We only have 2 classes: "Negative" or "Contaminated".
+    # We find out how many connections go into the original final "thinking" layer
     num_ftrs = model.fc.in_features
-    model.fc = nn.Sequential(
-        nn.Linear(num_ftrs, 256),
-        nn.ReLU(),
-        nn.Dropout(0.5), 
-        nn.Linear(256, num_classes)
-    )
+    # We replace that final layer with a new one that only has 2 outputs
+    model.fc = nn.Linear(num_ftrs, num_classes)
     
     return model # Hand over the complete, customized brain
 
