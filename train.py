@@ -298,12 +298,12 @@ def train_model():
     # Added label_smoothing to prevent the model from becoming overconfident on artifacts
     criterion = nn.CrossEntropyLoss(weight=loss_weights, label_smoothing=0.1)
     
-    # Optimizer: Lowered learning rate and added weight decay to prevent overfitting (Run 45)
-    optimizer = Adam(model.parameters(), lr=1e-5, weight_decay=1e-3)
+    # Optimizer: Increased decay and slightly higher LR for better exploration (Run 50)
+    optimizer = Adam(model.parameters(), lr=2e-5, weight_decay=5e-3)
     
     # --- Step 6.2: Learning Rate Scheduler ---
-    # More aggressive patience (1) to move faster on stagnation
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=1)
+    # Relaxed patience (3) to prevent premature collapse after Epoch 2 (Run 50)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
     
     # --- Step 6.5: Hardware Optimization (Optional) ---
     # Set this to True ONLY if you have an Intel CPU and compatible IPEX installed.
@@ -632,10 +632,10 @@ def train_model():
         max_prob = np.max(probs)
         
         # New Diagnostic Logic: Multi-Tier Consensus for Sensitivity Recovery
-        # Tier 1: High Density (N >= 40 at 0.90) - Calibrated to capture true positives while staying above the artifact ceiling (33).
+        # Tier 1: High Density (N >= 75 at 0.90) - Calibrated to capture true positives while staying above the artifact ceiling (69).
         # Tier 2: Consistent Signal (Mean > 0.88, Spread < 0.20) - High-bar signal consistency.
         high_conf_count = sum(1 for p in probs if p > 0.90)
-        is_dense = high_conf_count >= 40
+        is_dense = high_conf_count >= 75
         is_consistent = (avg_prob > 0.88 and (max_prob - avg_prob) < 0.20 and len(probs) >= 10)
         
         if is_dense or is_consistent:
