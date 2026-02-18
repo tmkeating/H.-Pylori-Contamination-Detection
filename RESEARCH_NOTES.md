@@ -709,3 +709,18 @@ While recall was perfect, **Specificity dropped significantly**.
 ### 📉 Expected Outcome
 - **Stability**: Validation loss should follow Training loss more closely for $>5$ epochs.
 - **Accuracy**: Targeting **>80%** Patient Accuracy through improved patch-level classification.
+
+## Run 51: The "Sharp Architecture" Phase
+**Strategy**: Combat the artifact-overfitting seen in Run 50 by redesigning the model's classification head. 
+### 🛠️ Strategic Changes
+1. **Model Architecture (The "Sharp Head")**:
+   - **Intermediate Layer**: Replaced the single linear layer with a **Sequential(Linear(512, 256), ReLU, Dropout(0.5), Linear(256, 2))**.
+   - **Rationale**: A direct connection from features to classes was too "shallow," allowing the model to quickly memorize artifact textures. The new head forces the model to learn more robust, compressed features through Dropout.
+2. **Persistence**:
+   - **Optimization**: Maintain **LR 2e-5**, **Weight Decay 5e-3**, and **Patience 3**.
+   - **Consensus**: Maintain **"Golden Gate" ($N \ge 75$)** and **Balanced Weights [1.0, 1.0]**.
+
+### 📉 Expected Outcome
+- **Generalization**: A tighter gap between Training and Validation loss.
+- **Artifact Rejection**: Lower "Suspicious Counts" for patient B22-89 by preventing the model from becoming over-confident on stain noise.
+- **Accuracy**: Target **>80%** Patient Accuracy.
