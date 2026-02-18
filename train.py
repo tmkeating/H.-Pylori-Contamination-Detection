@@ -22,6 +22,7 @@ from tqdm import tqdm              # A library that shows a "progress bar"
 import re                          # Regexp to handle file numbering
 import torch.nn.functional as F
 from normalization import MacenkoNormalizer
+from meta_classifier import HPyMetaClassifier
 
 def generate_gradcam(model, input_batch, target_layer):
     """Generates Grad-CAM heatmaps for a batch of images."""
@@ -649,13 +650,24 @@ def train_model():
         probs_np = np.array(probs)
         avg_prob = np.mean(probs_np)
         max_prob = np.max(probs_np)
+        min_prob = np.min(probs_np)
         std_prob = np.std(probs_np)
         med_prob = np.median(probs_np)
-        p90_prob = np.percentile(probs_np, 90)
+        
+        # Percentiles for Distributional Signature
+        p10 = np.percentile(probs_np, 10)
+        p25 = np.percentile(probs_np, 25)
+        p75 = np.percentile(probs_np, 75)
+        p90 = np.percentile(probs_np, 90)
+        
+        # High-order moments via pandas series
+        prob_series = pd.Series(probs_np)
+        skew = prob_series.skew() if len(probs_np) > 2 else 0
+        kurt = prob_series.kurt() if len(probs_np) > 3 else 0
         
         # New Diagnostic Logic: Multi-Tier Consensus for Sensitivity Recovery
-        # Tier 1: High Density (N >= 40 at 0.90) - Calibrated to capture true positives while staying above the artifact ceiling (33).
-        # Tier 2: Consistent Signal (Mean > 0.88, Spread < 0.20) - High-bar signal consistency.
+        # Tier 1: High Density (N >= 40 at 0.90) 
+        # Tier 2: Consistent Signal (Mean > 0.88, Spread < 0.20)
         high_conf_count = sum(1 for p in probs if p > 0.90)
         is_dense = high_conf_count >= 40
         is_consistent = (avg_prob > 0.88 and (max_prob - avg_prob) < 0.20 and len(probs) >= 10)
@@ -667,31 +679,60 @@ def train_model():
             
         actual_label = patient_gt[pat_id]
         
-        # Detailed consensus logging for future Tree-Based interpretation (Iteration 2)
+        # Detailed consensus logging for Meta-Classifier Training (Random Forest)
         consensus_data.append({
             "PatientID": pat_id,
-            "Actual": "Positive" if actual_label == 1 else "Negative",
-            "Predicted": "Positive" if pred_label == 1 else "Negative",
-            "Mean_Prob": f"{avg_prob:.4f}",
-            "Max_Prob": f"{max_prob:.4f}",
-            "Std_Prob": f"{std_prob:.4f}",
-            "Median_Prob": f"{med_prob:.4f}",
-            "P90_Prob": f"{p90_prob:.4f}",
+            "Actual": 1 if actual_label == 1 else 0,
+            "Predicted": pred_label,
+            "Mean_Prob": avg_prob,
+            "Max_Prob": max_prob,
+            "Min_Prob": min_prob,
+            "Std_Prob": std_prob,
+            "Median_Prob": med_prob,
+            "P10_Prob": p10,
+            "P25_Prob": p25,
+            "P75_Prob": p75,
+            "P90_Prob": p90,
+            "Skew": skew,
+            "Kurtosis": kurt,
             "Count_P50": sum(1 for p in probs if p > 0.50),
+            "Count_P60": sum(1 for p in probs if p > 0.60),
             "Count_P70": sum(1 for p in probs if p > 0.70),
-            "Suspicious_Count": high_conf_count, # This is Count_P90
+            "Count_P80": sum(1 for p in probs if p > 0.80),
+            "Count_P90": high_conf_count,
             "Patch_Count": len(probs),
-            "Correct": "Yes" if pred_label == actual_label else "No"
+            "Correct": 1 if pred_label == actual_label else 0
         })
     
     consensus_df = pd.DataFrame(consensus_data)
+    
+    # Try using learned Meta-Classifier (Random Forest)
+    meta = HPyMetaClassifier()
+    meta_results = meta.predict(consensus_df)
+    
+    if meta_results is not None:
+        meta_preds, meta_reliability = meta_results
+        print("Using Learned Meta-Classifier for Diagnosis...")
+        consensus_df["Predicted"] = meta_preds
+        consensus_df["Confidence"] = meta_reliability
+        consensus_df["Method"] = "RandomForest"
+    else:
+        print("No Meta-Classifier found. Using Heuristic Gates (Fallback)...")
+        consensus_df["Method"] = "HeuristicGate"
+        consensus_df["Confidence"] = 1.0 # Heuristic is binary/hard
+        
+    # Recalculate 'Correct' after potential meta-prediction update
+    consensus_df["Correct"] = (consensus_df["Predicted"] == consensus_df["Actual"]).astype(int)
+    
     consensus_report_path = os.path.join(results_dir, f"{prefix}_patient_consensus.csv")
     consensus_df.to_csv(consensus_report_path, index=False)
     print(f"Patient Consensus Report saved to: {consensus_report_path}")
-    print(consensus_df.to_string(index=False))
+    
+    # Print summary for visibility
+    print(consensus_df[["PatientID", "Actual", "Predicted", "Confidence", "Count_P90", "Correct"]].to_string(index=False))
 
     # Calculate Patient-Level Accuracy
-    pat_acc = (consensus_df["Correct"] == "Yes").mean() * 100
+    pat_acc = consensus_df["Correct"].mean() * 100
     print(f"\nFinal Patient-Level Accuracy: {pat_acc:.2f}%")
 
 if __name__ == "__main__":

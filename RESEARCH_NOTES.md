@@ -849,5 +849,27 @@ While recall was perfect, **Specificity dropped significantly**.
 - **Stability**: Full execution of all epochs and evaluation cycles.
 - **Throughput**: Maintaining the 500+ img/s target via the optimized GPU-native normalizer.
 
+## Iteration 3: Learned Aggregation (Run 58 - Current)
+**Strategy**: Move beyond brittle "Gate" heuristics ($N \ge 40$) to a learned distributional meta-classifier.
+
+### 🛠️ Strategic Changes
+1. **Distributional Feature Extraction**:
+   - Upgraded [train.py](train.py) to extract a 17-dimensional "Patient Signature" per slide.
+   - Features include: `Skewness`, `Kurtosis`, multi-percentiles (P10-P90), and density counts at 5 probability intervals.
+   - **Rationale**: Distinguish "Tight" bacterial clusters from "Scattered" staining artifacts.
+
+2. **Meta-Classifier (Random Forest)**:
+   - Implemented [meta_classifier.py](meta_classifier.py) using a `RandomForestClassifier` with balanced class weights.
+   - Includes **Reliability Scoring**: Returns a confidence metric based on ensemble consensus to flag ambiguous clinical cases.
+   - **Rationale**: Replaces manual threshold tuning with a non-linear model trained on historical "Artifact Ceiling" data.
+
+3. **Architecture: Attention-MIL Foundation**:
+   - Refactored [model.py](model.py) into `HPyNet` with an integrated `AttentionGate`.
+   - **Mechanism**: Ready for Gated-Attention aggregation, allowing the model to learn which patches are "diagnostically relevant" vs "artifact noise."
+
+### 📉 Expected Outcome
+- **Separability**: Increase the "Artifact Gap" between high-noise negatives and low-density positives.
+- **Reliability**: Provide a quantifiable confidence score for every patient-level diagnosis.
+
 ---
 **Note for AI Continuity**: A context transfer prompt has been created at [CONTEXT_PROMPT.md](CONTEXT_PROMPT.md) for future sessions using the "Skeptic Data Scientist" persona.
