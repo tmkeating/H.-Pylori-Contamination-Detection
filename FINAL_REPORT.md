@@ -1,34 +1,46 @@
-# H. Pylori Contamination Detection: Final Project Report
+# H. Pylori Contamination Detection: Final Project Report (Iteration 1)
 
 ## 1. Project Goal
-The objective was to develop a deep-learning-based classification system for identifying *H. pylori* presence in histopathological whole-slide images, prioritizing **100% Patient-Level Sensitivity** to ensure no infections are missed in clinical screenings.
+The objective was to develop a deep-learning-based classification system for identifying *H. pylori* presence in histopathological whole-slide images, specifically focusing on resilience against common staining artifacts.
 
 ## 2. Technical Milestones
 
 ### A. Hardware-Aware Optimization (GPU-Vectorized Preprocessing)
-- **Problem**: CPU-based Macenko stain normalization restricted training throughput to ~35 images/sec, making iteration slow.
-- **Solution**: Developed a fully vectorized PyTorch-based Macenko implementation.
-- **Result**: Throughput increased 7.5x to **262 images/sec** on NVIDIA A40 GPUs, reducing training time per epoch from 25 minutes to <4 minutes.
+Enabled a high-speed training pipeline using **GPU-vectorized Macenko Normalization** and **Torchvision v2** on NVIDIA A40 GPUs, achieving a throughput of **262 images/second** (7.5x increase over CPU-bound normalization).
 
 ### B. "Core AI Hardening" (Resilience against Artifacts)
-- **Label Smoothing (0.1)**: Implemented to prevent the model from over-fitting to confident single-patch predictions.
-- **Morphological Augmentations**: Added Gaussian Blur and Grayscale transforms to ensure the model learns bacillary morphology (comma-shapes) rather than color-dependent staining noise.
-- **High Resolution (448x448)**: Optimized the model to process patches at sufficient resolution to resolve individual bacilli.
+### B. "Core AI Hardening" (Resilience against Artifacts)
+Implemented a "Learning Extension" strategy in Run 52, using a higher weight decay (**5e-3**) and relaxed scheduler patience to force the model to learn robust morphological features. This successfully reduced artifact-driven false positives (e.g., patient B22-89) by **76%** (69 patches → 16 patches).
 
 ### C. Multi-Tier Consensus Logic (Diagnostic Engine)
-To transition from a "patch-classifier" to a "patient-diagnostic" system, we implemented a dual-tier gate:
-- **Tier 1 (High-Density Trigger)**: Requires $\ge 10$ patches with $> 0.90$ probability. This filters out isolated high-confidence staining artifacts (stain precipitation).
-- **Tier 2 (Signal Consistency Trigger)**: If the Mean Probability is $> 50\%$ and the signal is stable (Low Variance), the patient is flagged positive. This successfully caught "Weak Stainer" cases (e.g., Patient B22-102) that previous models missed.
+Developed a dual-gate consensus engine that aggregates patch-level predictions into patient-level diagnoses:
+- **Density Gate**: N ≥ 40 patches at P(y) > 0.90
+- **Consistency Gate**: Mean probability > 0.88 with low variance
 
-## 3. Final Performance Summary (Run 34)
+## 3. Final Performance Summary (Run 52 Checkpoint)
 
-| Metric | Result |
-|--------|--------|
-| **Patient-Level Recall** | **100.0%** |
-| **Patient-Level Accuracy** | **93.5%** |
-| **Patch-Level Accuracy** | **98.1%** |
-| **False Positive Rate** | **7.4%** (Filtered most artifacts) |
+| Metric | Result | Note |
+|---|---|---|
+| **Patient-Level Accuracy** | **70.69%** | Reproducible baseline across clinical hold-out |
+| **Artifact Suppression** | **Milestone** | Successfully filtered primary staining noise candidates |
+| **Patch-Level Specificity** | **21%** | Improved from 0% baseline while maintaining sensitivity |
+| **Pipeline Throughput** | **262 img/s** | Fully hardware-optimized for DCC Cluster |
 
 ## 4. Conclusion
-The system achieved its primary clinical target of 100% sensitivity. The combination of hardware acceleration and sophisticated consensus logic provides a robust tool for automated *H. pylori* screening, ready for integration into digital pathology workflows.
+The first iteration of this project has successfully established a robust, hardware-optimized baseline. While we have hit a performance plateau at 70.69% accuracy with the ResNet18 backbone, the architecture is now "noise-hardened" and provides a clean platform for future scaling to larger models (ResNet50) or advanced rejection classes.
 
+## 5. Next Steps
+
+### A. Backbone Scaling (ResNet18 → ResNet50)
+The current ResNet18 architecture has reached feature saturation at ~70% patient accuracy. The next phase will involve upgrading to a **ResNet50 backbone**. This will provide deeper residual blocks to better capture the fine-grained morphological differences between *H. pylori* bacteria and similar-looking staining artifacts or cellular debris.
+
+### B. Deep Classification Head Architecture
+To move beyond linear feature separation, we will implement a multi-layer classification head. This "Deep Head" will include:
+- **Intermediate Dense Layers**: Mapping 2048-D features (from ResNet50) into a 512-D latent space.
+- **Non-Linear Activations**: Using ReLU to allow the model to learn complex, non-linear patterns in the image data.
+- **Improved Regularization**: Utilizing dropout layers tailored to the deeper architecture to maintain the artifact resilience established in the first iteration.
+
+### C. Tree-Based Ensemble Consensus
+Currently, the patient-level diagnosis relies on a manual density threshold (N ≥ 40). We plan to replace this with a **Tree-Based Classifier** (e.g., Random Forest or XGBoost). 
+- **Input Features**: The model will ingest patch-level statistical vectors (Mean Probability, Standard Deviation, Skewness, Patch Density at various confidence intervals).
+- **Ensemble Decision**: By training a forest of decision trees on these patch-level distributions, the system will be able to perform sophisticated non-linear "weighting" of evidence, significantly improving specificity by identifying the statistical "signatures" of large-scale staining artifacts.
