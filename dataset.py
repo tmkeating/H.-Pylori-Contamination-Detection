@@ -1,4 +1,5 @@
 import os                       # Library to interact with the operating system (files and folders)
+import numpy as np               # Library for numerical operations
 import pandas as pd             # Library to handle data tables (CSV files)
 from PIL import Image           # Library to open and process images
 from torch.utils.data import Dataset # Base class from PyTorch to build custom data loaders
@@ -46,17 +47,22 @@ class HPyloriDataset(Dataset):
         # --- Step 2: Load Patch-level data ---
         # Read the specialized file that looks at specific windows/spots within a sample
         self.patch_df = self._load_flexible_df(patch_csv)
-        # Create a dictionary for specific spots: { ("PatientID", "WindowID"): 0 or 1 }
-        self.patch_labels = {}
+        # Create a dictionary for specific spots: { ("PatientID", "WindowID"): (presence, x, y) }
+        self.patch_meta = {}
+        
+        has_coords = 'X' in self.patch_df.columns and 'Y' in self.patch_df.columns
+
         for _, row in self.patch_df.iterrows():
             pat_id = row['Pat_ID']
             win_id_str = str(row['Window_ID']) # Keep as text to handle "Aug" suffixes
             # Presence 1 is contaminated, everything else (usually -1) is negative
             presence = 1 if row['Presence'] == 1 else 0
-            self.patch_labels[(pat_id, win_id_str)] = presence
+            x = row['X'] if has_coords else 0
+            y = row['Y'] if has_coords else 0
+            self.patch_meta[(pat_id, win_id_str)] = (presence, x, y)
         
         # --- Step 3: Organize all file paths into a list ---
-        self.samples = [] # This will be our master list of (image_path, label)
+        self.samples = [] # This will be our master list of (image_path, label, x, y)
 
         # We will look in multiple potential locations to expand the dataset
         root_parent = os.path.dirname(root_dir)
@@ -96,17 +102,17 @@ class HPyloriDataset(Dataset):
                     match_key = (patient_id, win_id_normalized)
                     
                     # Priority 1: Use the specific spot annotation if we have it
-                    if match_key in self.patch_labels:
+                    if match_key in self.patch_meta:
                         if match_key not in added_keys:
-                            label = self.patch_labels[match_key]
-                            self.samples.append((os.path.join(patient_path, img_name), label))
+                            label, x, y = self.patch_meta[match_key]
+                            self.samples.append((os.path.join(patient_path, img_name), label, x, y))
                             added_keys.add(match_key)
                     
                     # Priority 2: Use overall Negative patient patches
                     elif patient_id in self.patient_densities and self.patient_densities[patient_id] == 'NEGATIVA':
                         file_key = (patient_id, img_name)
                         if file_key not in added_keys:
-                            self.samples.append((os.path.join(patient_path, img_name), 0))
+                            self.samples.append((os.path.join(patient_path, img_name), 0, 0, 0))
                             added_keys.add(file_key)
                     
                     # Priority 3: Use overall Positive patient patches (BAIXA/ALTA)
@@ -114,7 +120,7 @@ class HPyloriDataset(Dataset):
                     elif patient_id in self.patient_densities and self.patient_densities[patient_id] != 'NEGATIVA':
                         file_key = (patient_id, img_name)
                         if file_key not in added_keys:
-                            self.samples.append((os.path.join(patient_path, img_name), 1))
+                            self.samples.append((os.path.join(patient_path, img_name), 1, 0, 0))
                             added_keys.add(file_key)
                     
                     # Priority 4: Otherwise skip
@@ -129,15 +135,16 @@ class HPyloriDataset(Dataset):
         """
         This runs every time the computer "grabs" an image to study it.
         It opens the file, transforms it, and hands it to the model.
+        Returns: (image, label, image_path, coords)
         """
-        img_path, label = self.samples[idx] # Get path and label from our list
+        img_path, label, x, y = self.samples[idx] # Get path, label, and coords from our list
         image = Image.open(img_path).convert('RGB') # Open the image as a standard color picture
         
         # If we asked for changes (like resizing), apply them now
         if self.transform:
             image = self.transform(image)
             
-        return image, label # Return the ready-to-study image and its answer
+        return image, label, img_path, np.array([x, y], dtype=np.float32)
 
 if __name__ == "__main__":
     # Test dataset
@@ -157,8 +164,8 @@ if __name__ == "__main__":
     dataset = HPyloriDataset(train_dir, patient_csv, patch_csv, transform=transform)
     print(f"Total samples: {len(dataset)}")
     if len(dataset) > 0:
-        img, lbl = dataset[0]
+        img, lbl, path, coords = dataset[0]
         # We use a cautious approach to printing dimensions to satisfy the linter
         # as img could be a PIL Image (size) or a PyTorch Tensor (shape).
         dims = getattr(img, 'shape', getattr(img, 'size', 'Unknown'))
-        print(f"Sample 0 label: {lbl}, dimensions: {dims}")
+        print(f"Sample 0 label: {lbl}, coords: {coords}, dimensions: {dims}")

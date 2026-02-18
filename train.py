@@ -24,6 +24,24 @@ import torch.nn.functional as F
 from normalization import MacenkoNormalizer
 from meta_classifier import HPyMetaClassifier
 
+class FocalLoss(nn.Module):
+    """
+    Focal Loss for Dense Diagnostic Screening.
+    Reduces the relative loss for well-classified examples, focusing on 
+    the sparse, hard-to-detect bacterial signals.
+    """
+    def __init__(self, alpha=1, gamma=2, weight=None):
+        super(FocalLoss, self).__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+        self.weight = weight
+
+    def forward(self, inputs, targets):
+        ce_loss = F.cross_entropy(inputs, targets, reduction='none', weight=self.weight)
+        pt = torch.exp(-ce_loss)
+        focal_loss = self.alpha * (1 - pt)**self.gamma * ce_loss
+        return focal_loss.mean()
+
 def generate_gradcam(model, input_batch, target_layer):
     """Generates Grad-CAM heatmaps for a batch of images."""
     model.eval()
@@ -217,7 +235,7 @@ def train_model():
     # To prevent "Data Leakage", we must ensure that all patches from a single 
     # patient are either in Traing OR Validation, but never both.
     sample_patient_ids = []
-    for img_path, label in full_dataset.samples:
+    for img_path, label, x, y in full_dataset.samples:
         # Extract patient ID from folder name (e.g. "123_Annotated")
         folder_name = os.path.basename(os.path.dirname(img_path))
         patient_id = folder_name.split('_')[0]
@@ -249,10 +267,10 @@ def train_model():
             self.subset = subset
             self.transform = transform
         def __getitem__(self, index):
-            img, label = self.subset[index]
+            img, label, path, coords = self.subset[index]
             if self.transform:
                 img = self.transform(img)
-            return img, label
+            return img, label, path, coords
         def __len__(self):
             return len(self.subset)
 
@@ -298,11 +316,10 @@ def train_model():
     model = get_model(num_classes=2, pretrained=True).to(device)
 
     # --- Step 6: Define the Learning Rules ---
-    # strategy B: Weighted Loss Function
-    # Balanced weights (1.0, 1.0) to prioritize Structural Precision and Accuracy (Run 47).
-    loss_weights = torch.FloatTensor([1.0, 1.0]).to(device) 
-    # Added label_smoothing to prevent the model from becoming overconfident on artifacts
-    criterion = nn.CrossEntropyLoss(weight=loss_weights, label_smoothing=0.1)
+    # strategy B: Focal Loss for Sparse Bacteremia Detection
+    # Optimized to ignore common histological background and focus on sparse bacteria.
+    loss_weights = torch.FloatTensor([1.0, 1.25]).to(device) # High sensitivity push (Run 58)
+    criterion = FocalLoss(gamma=2, weight=loss_weights)
 
     # --- Optimization 5D: Preprocessing & Model Compilation (Kernel Fusion) ---
     # We define a fused preprocessing function for deterministic operations.
@@ -365,7 +382,7 @@ def train_model():
         running_corrects = 0
         
         # Hand batches of images to the AI one by one
-        for inputs, labels in tqdm(train_loader, desc="Training"):
+        for inputs, labels, paths, coords in tqdm(train_loader, desc="Training"):
             inputs = inputs.to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)
             
@@ -403,7 +420,7 @@ def train_model():
         val_corrects = 0
         
         with torch.no_grad(): # Don't take any math notes, just grade
-            for inputs, labels in tqdm(val_loader, desc="Validation"):
+            for inputs, labels, paths, coords in tqdm(val_loader, desc="Validation"):
                 inputs = inputs.to(device, non_blocking=True)
                 labels = labels.to(device, non_blocking=True)
                 
@@ -479,7 +496,7 @@ def train_model():
         prefetch_factor=4
     )
     
-    print(f"Independent Patients in Hold-Out: {len(set([os.path.basename(os.path.dirname(p)).split('_')[0] for p, l in holdout_dataset.samples]))}")
+    print(f"Independent Patients in Hold-Out: {len(set([os.path.basename(os.path.dirname(p)).split('_')[0] for p, l, x, y in holdout_dataset.samples]))}")
     print(f"Total Patches in Hold-Out: {len(holdout_dataset)}")
 
     # Load our best saved brain
@@ -489,10 +506,11 @@ def train_model():
     all_preds = []   # List to store the AI's final guesses (0 or 1)
     all_labels = []  # List to store the actual correct answers
     all_probs = []   # List to store how "sure" the AI was (e.g., 0.95 sure it's positive)
+    all_coords = []  # List to store the coordinates for spatial analysis
     gradcam_samples = [] # Store a few images for visualization
 
     with torch.no_grad():
-        for inputs, labels in tqdm(holdout_loader, desc="Patient-Independent Test"):
+        for inputs, labels, paths, coords in tqdm(holdout_loader, desc="Patient-Independent Test"):
             inputs = inputs.to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)
             
@@ -511,6 +529,7 @@ def train_model():
             all_preds.extend(preds.cpu().numpy())
             all_labels.extend(labels.cpu().numpy())
             all_probs.extend(probs.cpu().numpy()[:, 1]) # Probability of being "Contaminated"
+            all_coords.extend(coords.cpu().numpy())
             
             # Save a few samples for Grad-CAM
             if len(gradcam_samples) < 10:
@@ -593,8 +612,10 @@ def train_model():
     # 7. Generate Grad-CAM for saved samples
     if gradcam_samples:
         print("Generating Grad-CAM interpretability maps...")
-        # For ResNet18, the last conv layer is usually layer4
-        target_layer = model.layer4[-1]
+        # For ResNet50 in HPyNet, the target layer is under .backbone
+        # Check if model is compiled (wrapped in _CompiledModule)
+        actual_model = model._orig_mod if hasattr(model, "_orig_mod") else model
+        target_layer = actual_model.backbone.layer4[-1]
         for i, (sample_type, img_tensor) in enumerate(gradcam_samples):
             with torch.enable_grad(): # Grad-CAM needs gradients
                 cam, prob = generate_gradcam(model, img_tensor, target_layer)
@@ -626,48 +647,57 @@ def train_model():
 
     # --- Step 10: Patient-Level Consensus Analysis ---
     # In the real world, a doctor doesn't care about one patch; they care if the PATIENT has H. Pylori.
-    # We group all patches from the Independent set by Patient ID and check if the AI is consistent.
     print("\n--- Patient-Level Consensus Report (Independent Set) ---")
-    patient_probs = {} # { patientID: [prob_p1, prob_p2, ...] }
+    patient_probs = {} # { patientID: [prob1, prob2, ...] }
+    patient_coords = {} # { patientID: [coord1, coord2, ...] }
     patient_gt = {}    # { patientID: label }
     
-    # We use the holdout set samples and the probabilities we just calculated
     for idx, prob in enumerate(all_probs):
-        img_path, _ = holdout_dataset.samples[idx]
+        img_path, _, _, _ = holdout_dataset.samples[idx]
         label = all_labels[idx]
+        coord = all_coords[idx]
         
-        # Extract patient ID from folder name (consistent with split logic)
         folder_name = os.path.basename(os.path.dirname(img_path))
         pat_id = folder_name.split('_')[0]
         
         if pat_id not in patient_probs:
             patient_probs[pat_id] = []
+            patient_coords[pat_id] = []
             patient_gt[pat_id] = label
         patient_probs[pat_id].append(prob)
+        patient_coords[pat_id].append(coord)
     
     consensus_data = []
     for pat_id, probs in patient_probs.items():
         probs_np = np.array(probs)
+        coords_np = np.array(patient_coords[pat_id])
+        
         avg_prob = np.mean(probs_np)
         max_prob = np.max(probs_np)
         min_prob = np.min(probs_np)
         std_prob = np.std(probs_np)
         med_prob = np.median(probs_np)
+        p10, p25, p75, p90 = np.percentile(probs_np, [10, 25, 75, 90])
         
-        # Percentiles for Distributional Signature
-        p10 = np.percentile(probs_np, 10)
-        p25 = np.percentile(probs_np, 25)
-        p75 = np.percentile(probs_np, 75)
-        p90 = np.percentile(probs_np, 90)
-        
-        # High-order moments via pandas series
         prob_series = pd.Series(probs_np)
         skew = prob_series.skew() if len(probs_np) > 2 else 0
         kurt = prob_series.kurt() if len(probs_np) > 3 else 0
         
-        # New Diagnostic Logic: Multi-Tier Consensus for Sensitivity Recovery
-        # Tier 1: High Density (N >= 40 at 0.90) 
-        # Tier 2: Consistent Signal (Mean > 0.88, Spread < 0.20)
+        # --- Spatial Clustering Logic (New for Run 58) ---
+        # Calculate how 'clumped' the high-probability patches are.
+        # High confidence patches (>0.7) that are close to each other indicate biological colonies.
+        high_conf_idx = np.where(probs_np > 0.70)[0]
+        clustering_score = 0
+        if len(high_conf_idx) > 1:
+            from sklearn.neighbors import NearestNeighbors
+            # Use X, Y coordinates to find nearest neighbors among hot patches
+            pts = coords_np[high_conf_idx]
+            if len(pts) > 1:
+                nbrs = NearestNeighbors(n_neighbors=min(5, len(pts))).fit(pts)
+                distances, _ = nbrs.kneighbors(pts)
+                # Lower average distance means higher clustering
+                clustering_score = 1.0 / (np.mean(distances) + 1.0)
+        
         high_conf_count = sum(1 for p in probs if p > 0.90)
         is_dense = high_conf_count >= 40
         is_consistent = (avg_prob > 0.88 and (max_prob - avg_prob) < 0.20 and len(probs) >= 10)
@@ -679,7 +709,6 @@ def train_model():
             
         actual_label = patient_gt[pat_id]
         
-        # Detailed consensus logging for Meta-Classifier Training (Random Forest)
         consensus_data.append({
             "PatientID": pat_id,
             "Actual": 1 if actual_label == 1 else 0,
@@ -701,6 +730,7 @@ def train_model():
             "Count_P80": sum(1 for p in probs if p > 0.80),
             "Count_P90": high_conf_count,
             "Patch_Count": len(probs),
+            "Spatial_Clustering": clustering_score,
             "Correct": 1 if pred_label == actual_label else 0
         })
     
@@ -729,7 +759,7 @@ def train_model():
     print(f"Patient Consensus Report saved to: {consensus_report_path}")
     
     # Print summary for visibility
-    print(consensus_df[["PatientID", "Actual", "Predicted", "Confidence", "Count_P90", "Correct"]].to_string(index=False))
+    print(consensus_df[["PatientID", "Actual", "Predicted", "Confidence", "Spatial_Clustering", "Correct"]].to_string(index=False))
 
     # Calculate Patient-Level Accuracy
     pat_acc = consensus_df["Correct"].mean() * 100

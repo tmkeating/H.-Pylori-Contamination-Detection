@@ -849,27 +849,30 @@ While recall was perfect, **Specificity dropped significantly**.
 - **Stability**: Full execution of all epochs and evaluation cycles.
 - **Throughput**: Maintaining the 500+ img/s target via the optimized GPU-native normalizer.
 
-## Iteration 3: Learned Aggregation (Run 58 - Current)
-**Strategy**: Move beyond brittle "Gate" heuristics ($N \ge 40$) to a learned distributional meta-classifier.
+## Iteration 3: Bag-Level Robustness (Run 58 - Active)
+**Strategy**: Transition from individual patch voting to spatially-aware, weight-penalized diagnostic aggregation.
 
 ### 🛠️ Strategic Changes
-1. **Distributional Feature Extraction**:
-   - Upgraded [train.py](train.py) to extract a 17-dimensional "Patient Signature" per slide.
-   - Features include: `Skewness`, `Kurtosis`, multi-percentiles (P10-P90), and density counts at 5 probability intervals.
-   - **Rationale**: Distinguish "Tight" bacterial clusters from "Scattered" staining artifacts.
+1. **Focal Loss Injection**:
+   - Replaced Cross-Entropy with **Focal Loss** ($\gamma=2$).
+   - **Rationale**: Mitigate the "Overwhelming Backgound" problem. Mathematically forces the model to prioritize rare bacterial clusters over common histological debris.
 
-2. **Meta-Classifier (Random Forest)**:
-   - Implemented [meta_classifier.py](meta_classifier.py) using a `RandomForestClassifier` with balanced class weights.
-   - Includes **Reliability Scoring**: Returns a confidence metric based on ensemble consensus to flag ambiguous clinical cases.
-   - **Rationale**: Replaces manual threshold tuning with a non-linear model trained on historical "Artifact Ceiling" data.
+2. **Spatial Metadata & Clustering**:
+   - Updated `dataset.py` to return patch coordinates $(X,Y)$.
+   - Added **Spatial_Clustering** to the Meta-Classifier signature.
+   - **Rationale**: Biological infections cluster along epithelium; artifacts are often scattered. High clustering score + high density = clinical positive.
 
-3. **Architecture: Attention-MIL Foundation**:
-   - Refactored [model.py](model.py) into `HPyNet` with an integrated `AttentionGate`.
-   - **Mechanism**: Ready for Gated-Attention aggregation, allowing the model to learn which patches are "diagnostically relevant" vs "artifact noise."
+3. **Multi-Instance (Attention-MIL) Foundation**:
+   - Fully refactored [model.py](model.py) to support `HPyNet` with `AttentionGate`.
+   - Ready for weighted-feature aggregation to ignore "poison" patches in negative slides.
+
+4. **Rigorous Holdout Tracking**:
+   - Standardized the use of a truly independent **Hold-Out set** for final patient-level reporting.
 
 ### 📉 Expected Outcome
-- **Separability**: Increase the "Artifact Gap" between high-noise negatives and low-density positives.
-- **Reliability**: Provide a quantifiable confidence score for every patient-level diagnosis.
+- **Sensitivity**: Recovery of "Missed Infections" via Focal Loss focus.
+- **Specificity**: Reduction of "False Alarms" using Spatial Clustering constraints.
+- **Accuracy Target**: >80% Patient-Level Accuracy on the Independent set.
 
 ---
 **Note for AI Continuity**: A context transfer prompt has been created at [CONTEXT_PROMPT.md](CONTEXT_PROMPT.md) for future sessions using the "Skeptic Data Scientist" persona.

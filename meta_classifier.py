@@ -17,25 +17,23 @@ class HPyMetaClassifier:
     def __init__(self, model_path="meta_rf_classifier.joblib"):
         self.model_path = model_path
         
-        # The 'Patient Signature': 17 variables characterizing the patch distribution.
+        # The 'Patient Signature': 18 variables characterizing the patch distribution.
         self.features = [
             # Central Tendency & Spread:
-            # Clinical infections show skewed distributions; artifacts are often centered or random.
             "Mean_Prob", "Max_Prob", "Min_Prob", "Std_Prob", "Median_Prob",
             
             # Distributional Shape (Percentiles):
             "P10_Prob", "P25_Prob", "P75_Prob", "P90_Prob", 
             
-            # Higher-Order Moments (The 'Skeptic's Tools'):
-            # True bacterial clusters have predictable density (Kurtosis) and direction (Skew).
+            # Higher-Order Moments:
             "Skew", "Kurtosis",
             
             # Density Thresholds:
-            # Captures the frequency of patches crossing specific diagnostic confidence levels.
             "Count_P50", "Count_P60", "Count_P70", "Count_P80", "Count_P90",
             
-            # Exposure metrics:
-            "Patch_Count"
+            # Exposure & Spatial Context:
+            "Patch_Count",
+            "Spatial_Clustering" # New: Avg neighbors for high-conf patches
         ]
         
         # RandomForest Ensemble: 

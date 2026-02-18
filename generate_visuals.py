@@ -84,7 +84,7 @@ def full_visual_report():
     
     # Replicate Patient Split
     sample_patient_ids = []
-    for img_path, label in full_dataset.samples:
+    for img_path, label, x, y in full_dataset.samples:
         folder_name = os.path.basename(os.path.dirname(img_path))
         patient_id = folder_name.split('_')[0]
         sample_patient_ids.append(patient_id)
@@ -109,7 +109,7 @@ def full_visual_report():
     gradcam_saved = 0
 
     print("Running evaluation on Independent Patient Set...")
-    for inputs, labels in tqdm(test_loader):
+    for inputs, labels, paths, coords in tqdm(test_loader):
         inputs = inputs.to(DEVICE)
         outputs = model(inputs)
         probs = F.softmax(outputs, dim=1)
@@ -125,7 +125,9 @@ def full_visual_report():
             for idx in pos_indices:
                 if gradcam_saved >= 10: break
                 img_batch = inputs[idx:idx+1]
-                target_layer = model.layer4[-1]
+                # Update for HPyNet structure
+                actual_model = model._orig_mod if hasattr(model, "_orig_mod") else model
+                target_layer = actual_model.backbone.layer4[-1]
                 with torch.enable_grad():
                     cam, prob = generate_gradcam(model, img_batch, target_layer)
                 
