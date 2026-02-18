@@ -135,6 +135,11 @@ def train_model():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     
+    # Optimization 5D: Precision and Speed tuning for A40
+    if torch.cuda.is_available():
+        torch.set_float32_matmul_precision('high')
+        print("Set float32 matmul precision to 'high' for A40 hardware optimization.")
+    
     # --- Step 2: Set the paths to our data ---
     # We prioritize local scratch space for speed, then fallback to network path
     base_data_path = "/tmp/ricse03_h_pylori_data"
@@ -267,8 +272,8 @@ def train_model():
     sampler = WeightedRandomSampler(sample_weights, len(sample_weights))
 
     # DataLoaders optimized for NVIDIA A40 (48GB VRAM)
-    # Using 7 workers for 8 CPU cores to avoid "Starvation"
-    batch_size = 128
+    # Reduced batch_size for ResNet50 (Iteration 2)
+    batch_size = 64
     train_loader = DataLoader(
         train_transformed, 
         batch_size=batch_size, 
@@ -297,6 +302,23 @@ def train_model():
     loss_weights = torch.FloatTensor([1.0, 1.0]).to(device) 
     # Added label_smoothing to prevent the model from becoming overconfident on artifacts
     criterion = nn.CrossEntropyLoss(weight=loss_weights, label_smoothing=0.1)
+
+    # --- Optimization 5D: Preprocessing & Model Compilation (Kernel Fusion) ---
+    # We define a fused preprocessing function for deterministic operations.
+    # Moving augmentations OUT of the compiled block to avoid Dynamo recompilation.
+    def det_preprocess_batch(inputs):
+        # normalize_batch is now fully vectorized (Optimization 5D)
+        inputs = normalizer.normalize_batch(inputs)
+        inputs = gpu_normalize(inputs)
+        return inputs
+    
+    # Enable torch.compile for Kernel Fusion (Optimization 5D)
+    if hasattr(torch, "compile"):
+        print("Enabling torch.compile for Iteration 2 Optimization (5D)...")
+        # Compile the model with extreme overhead reduction
+        model = torch.compile(model, mode="reduce-overhead")
+        # Compile the deterministic preprocessing pipeline (Folds Macenko into GPU Ops)
+        det_preprocess_batch = torch.compile(det_preprocess_batch)
     
     # Optimizer: Increased decay and slightly higher LR for better exploration (Run 50)
     optimizer = Adam(model.parameters(), lr=2e-5, weight_decay=5e-3)
@@ -346,13 +368,11 @@ def train_model():
             inputs = inputs.to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)
             
-            # --- GPU-Based Preprocessing Pipieline ---
-            # 1. Apply geometric and color augmentations on GPU
+            # --- GPU-Based Preprocessing Pipeline (Optimization 5D) ---
+            # 1. Apply stochastic augmentations (Outside compilation)
             inputs = gpu_augment(inputs)
-            # 2. Apply vectorized Macenko Stain Normalization
-            inputs = normalizer.normalize_batch(inputs)
-            # 3. Apply standard ImageNet normalization
-            inputs = gpu_normalize(inputs)
+            # 2. Apply deterministic normalization (Compiled Kernel)
+            inputs = det_preprocess_batch(inputs)
             
             optimizer.zero_grad()
             
@@ -386,9 +406,8 @@ def train_model():
                 inputs = inputs.to(device, non_blocking=True)
                 labels = labels.to(device, non_blocking=True)
                 
-                # --- Per-Batch Normalization (on GPU) ---
-                inputs = normalizer.normalize_batch(inputs)
-                inputs = gpu_normalize(inputs)
+                # --- GPU-Based Preprocessing Pipeline (Optimization 5D) ---
+                inputs = det_preprocess_batch(inputs)
                 
                 with torch.amp.autocast('cuda'):
                     outputs = model(inputs)
@@ -476,9 +495,8 @@ def train_model():
             inputs = inputs.to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)
             
-            # --- Per-Batch Normalization (on GPU) ---
-            inputs = normalizer.normalize_batch(inputs)
-            inputs = gpu_normalize(inputs)
+            # --- GPU-Based Preprocessing Pipeline (Optimization 5D) ---
+            inputs = det_preprocess_batch(inputs)
             
             with torch.amp.autocast('cuda'):
                 outputs = model(inputs) # Get raw brain output
@@ -628,8 +646,12 @@ def train_model():
     
     consensus_data = []
     for pat_id, probs in patient_probs.items():
-        avg_prob = np.mean(probs)
-        max_prob = np.max(probs)
+        probs_np = np.array(probs)
+        avg_prob = np.mean(probs_np)
+        max_prob = np.max(probs_np)
+        std_prob = np.std(probs_np)
+        med_prob = np.median(probs_np)
+        p90_prob = np.percentile(probs_np, 90)
         
         # New Diagnostic Logic: Multi-Tier Consensus for Sensitivity Recovery
         # Tier 1: High Density (N >= 40 at 0.90) - Calibrated to capture true positives while staying above the artifact ceiling (33).
@@ -645,13 +667,19 @@ def train_model():
             
         actual_label = patient_gt[pat_id]
         
+        # Detailed consensus logging for future Tree-Based interpretation (Iteration 2)
         consensus_data.append({
             "PatientID": pat_id,
             "Actual": "Positive" if actual_label == 1 else "Negative",
             "Predicted": "Positive" if pred_label == 1 else "Negative",
             "Mean_Prob": f"{avg_prob:.4f}",
             "Max_Prob": f"{max_prob:.4f}",
-            "Suspicious_Count": high_conf_count,
+            "Std_Prob": f"{std_prob:.4f}",
+            "Median_Prob": f"{med_prob:.4f}",
+            "P90_Prob": f"{p90_prob:.4f}",
+            "Count_P50": sum(1 for p in probs if p > 0.50),
+            "Count_P70": sum(1 for p in probs if p > 0.70),
+            "Suspicious_Count": high_conf_count, # This is Count_P90
             "Patch_Count": len(probs),
             "Correct": "Yes" if pred_label == actual_label else "No"
         })

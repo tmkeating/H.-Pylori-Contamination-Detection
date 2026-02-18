@@ -65,7 +65,7 @@ class MacenkoNormalizer:
 
     def normalize_batch(self, batch_tensor):
         """
-        Optimized batch normalization for Macenko.
+        Fully vectorized batch normalization for Macenko (Optimization 5D).
         batch_tensor: (B, C, H, W) on GPU, values in [0, 1]
         """
         if not self.fitted:
@@ -78,83 +78,72 @@ class MacenkoNormalizer:
         beta = 0.15
         
         # 1. Convert whole batch to OD (Vectorized)
-        # torchstain uses: OD = -log((I+1)/Io)
         # batch_tensor is [0,1], scale to [0,255]
         I = (batch_tensor * 255.0).permute(0, 2, 3, 1) # (B, H, W, 3)
-        OD = -torch.log((I.reshape(B, -1, 3).float() + 1.0) / Io) # (B, N, 3)
+        N = H * W
+        OD = -torch.log((I.reshape(B, N, 3).float() + 1.0) / Io) # (B, N, 3)
         
-        # 2. Estimate HE matrix for each image (This loop is hard to vectorize due to filtering)
-        HE_mats = []
-        maxCs = []
+        # 2. Batch-Wide Stain Matrix Estimation (Vectorized)
+        # Create mask for tissue pixels
+        mask = (OD >= beta).all(dim=-1).float() # (B, N)
+        counts = mask.sum(dim=1, keepdim=True).clamp(min=100) # (B, 1) to avoid low-pixel noise
         
-        for i in range(B):
-            img_OD = OD[i]
-            # remove transparent pixels for this image
-            ODhat = img_OD[~torch.any(img_OD < beta, dim=1)]
-            
-            # Robustness: If too few tissue pixels, use reference
-            if ODhat.shape[0] < 100: 
-                HE_mats.append(self.normalizer.HERef.to(device))
-                continue
-
-            try:
-                # compute eigenvectors
-                # Use torch.cov with a small diagonal epsilon for stability
-                covariance = torch.cov(ODhat.T)
-                if torch.any(torch.isnan(covariance)):
-                    HE_mats.append(self.normalizer.HERef.to(device))
-                    continue
-                    
-                _, eigvecs = torch.linalg.eigh(covariance)
-                eigvecs = eigvecs[:, [1, 2]]
-                
-                HE = self.normalizer._TorchMacenkoNormalizer__find_HE(ODhat, eigvecs, alpha)
-                
-                # Check for NaN in HE
-                if torch.any(torch.isnan(HE)):
-                    HE_mats.append(self.normalizer.HERef.to(device))
-                else:
-                    HE_mats.append(HE)
-            except Exception:
-                HE_mats.append(self.normalizer.HERef.to(device))
+        # Weighted mean and covariance across batch
+        mean = (OD * mask.unsqueeze(-1)).sum(dim=1) / counts # (B, 3)
+        OD_centered = (OD - mean.unsqueeze(1)) * mask.unsqueeze(-1) # (B, N, 3)
         
-        HE_batch = torch.stack(HE_mats)
+        # Batch covariance: (B, 3, 3)
+        Cov = torch.matmul(OD_centered.transpose(1, 2), OD_centered) / (counts.unsqueeze(-1) - 1).clamp(min=1)
         
-        # 3. Batch Solve for Concentrations (Vectorized!)
-        Y = OD.permute(0, 2, 1)
+        # Batch Eigenvalue Decomposition
+        # Using a small epsilon on diagonal for stability
+        eps = 1e-6 * torch.eye(3, device=device).unsqueeze(0)
+        L, V = torch.linalg.eigh(Cov + eps)
+        # Top 2 eigenvectors (B, 3, 2)
+        eigvecs = V[:, :, [1, 2]]
         
-        # Use a more robust solver for potential singular matrices
-        # We use the pseudoinverse (pinv) which is numerically more stable 
-        # for rank-deficient matrices common in background patches.
-        # C = pinv(HE) @ Y
+        # Project OD onto plane and find quantiles (Vectorized find_HE)
+        That = torch.matmul(OD, eigvecs) # (B, N, 2)
+        phi = torch.atan2(That[:, :, 1], That[:, :, 0]) # (B, N)
+        
+        # Use nanquantile to ignore masked pixels (0 counts as valid index otherwise)
+        phi_masked = torch.where(mask > 0, phi, torch.tensor(float('nan'), device=device))
+        min_phi = torch.nanquantile(phi_masked, alpha / 100, dim=1) # (B,)
+        max_phi = torch.nanquantile(phi_masked, 1 - alpha / 100, dim=1) # (B,)
+        
+        # Reconstruct HE components
+        vMin = torch.matmul(eigvecs, torch.stack([torch.cos(min_phi), torch.sin(min_phi)], dim=1).unsqueeze(-1)).squeeze(-1)
+        vMax = torch.matmul(eigvecs, torch.stack([torch.cos(max_phi), torch.sin(max_phi)], dim=1).unsqueeze(-1)).squeeze(-1)
+        
+        # Determine H and E order (B, 3, 2)
+        condition = (vMin[:, 0] > vMax[:, 0]).unsqueeze(-1).unsqueeze(-1)
+        HE_batch = torch.where(condition, torch.stack([vMin, vMax], dim=2), torch.stack([vMax, vMin], dim=2))
+        
+        # Robustness Check: Replace failed batches with reference HERef
+        ref_HE = self.normalizer.HERef.to(device) # (3, 2)
+        is_nan = torch.any(torch.isnan(HE_batch.view(B, -1)), dim=1).unsqueeze(-1).unsqueeze(-1)
+        HE_batch = torch.where(is_nan, ref_HE.unsqueeze(0), HE_batch)
+        
+        # 3. Batch Solve for Concentrations
+        Y = OD.permute(0, 2, 1) # (B, 3, N)
         HE_pinv = torch.linalg.pinv(HE_batch) # (B, 2, 3)
         C = torch.matmul(HE_pinv, Y) # (B, 2, N)
         
-        # 4. Normalize Concentrations (Vectorized)
-        # Handle zero concentrations to avoid div-by-zero
-        maxC_source = torch.quantile(C, 0.99, dim=2)
+        # 4. Normalize Concentrations
+        maxC_source = torch.nanquantile(torch.where(C > 0, C, torch.tensor(float('nan'), device=device)), 0.99, dim=2)
         maxC_source = torch.clamp(maxC_source, min=1e-5)
         
-        # Scaling factor: (ref_maxC / source_maxC)
-        # self.normalizer.maxCRef is (2,)
         ref_maxC = self.normalizer.maxCRef.to(device)
         scale = (ref_maxC / maxC_source).unsqueeze(-1) # (B, 2, 1)
         C_norm = C * scale
         
-        # 5. Reconstruct (Vectorized!)
-        # Inorm = Io * exp(-HERef @ C_norm)
-        # HERef is (3, 2)
-        ref_HE = self.normalizer.HERef.to(device) # (3, 2)
-        
-        # (3, 2) @ (B, 2, N) -> (B, 3, N)
+        # 5. Reconstruct and convert back to image space
         OD_norm = torch.matmul(ref_HE, C_norm)
         Inorm = Io * torch.exp(-OD_norm)
         
-        # Final cleanup: clamping and reshaping
-        Inorm = torch.clamp(Inorm, 0, 255)
-        Inorm = Inorm.reshape(B, 3, H, W) / 255.0
-        
+        Inorm = torch.clamp(Inorm, 0, 255).reshape(B, 3, H, W) / 255.0
         return Inorm.to(batch_tensor.dtype)
+
 
     def __repr__(self):
         return f"MacenkoNormalizer(fitted={self.fitted})"

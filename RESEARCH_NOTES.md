@@ -752,10 +752,84 @@ While recall was perfect, **Specificity dropped significantly**.
 - **Noise Mitigation**: Solved staining artifact "leakage" using Weight Decay (5e-3) and relaxed scheduler patience.
 - **Hardware Throughput**: 262 images/sec via GPU-vectorized Macenko Normalization.
 
----
 
-## 🚀 Future Research (Run 54+)
+---------- END OF ITERATION   1 ---------
+
+---------- START OF ITERATION 2 ---------
+
+
+## 🚀 Future Research (Run 53+)
 **Target**: Break the 70.69% accuracy ceiling.
 1.  **Model Scaling**: Transition to **ResNet50**.
 2.  **Architecture**: Implement a multi-layer "Deep Head" with Dropout.
 3.  **Inference Logic**: Train a **Random Forest** on the patch-level probability distributions (Mean, Std, Density) to replace the static Consensus Gate.
+
+## Iteration 2: The Powerhouse Pivot (Run 53)
+**Strategy**: Scale the model's representational capacity to break the 71% accuracy plateau.
+### 🛠️ Strategic Changes
+1. **Backbone Upgrade (ResNet50)**:
+   - Replaced ResNet18 with **ResNet50**.
+   - **Rationale**: Triples the feature vector from 512 to 2048, allowing the model to resolve finer morphological structures of bacteria.
+2. **Deep Classification Head**:
+   - Replaced the single linear layer with a **Sequential(Linear(2048, 512), ReLU, Dropout(0.5), Linear(512, 2))**.
+   - **Rationale**: Added a hidden 512-D layer to process the richer ResNet50 features before prediction. Maintains 50% Dropout for robust artifact rejection.
+3. **Hardware Tuning**:
+   - **Batch Size**: Reduced from 128 to **64** to accommodate the larger ResNet50 VRAM footprint on the A40.
+4. **Statistics Extraction**:
+   - Expanded consensus logging to include **Std Dev, Median, P90, and Multi-threshold counts**.
+   - **Rationale**: Prepare a high-dimensional feature set for the Iteration 3 Tree-Based Classifier.
+
+### 📉 Expected Outcome
+- **Accuracy**: Targeting **>75%** Patient Accuracy.
+- **Complexity**: Monitoring for potential overfitting due to the increased model capacity.
+
+## Iteration 2: Optimization Hardening (Run 55 - Strategy 5D)
+**Strategy**: Implement the high-performance pipeline outlined in Section 5D of the Final Report.
+### 🛠️ Optimization Changes
+1. **Fully Vectorized Macenko (Batch-Wide)**:
+   - Re-engineered `normalization.py` to eliminate the per-image loop.
+   - Now uses masked batch-weighted covariance and batch eigenvalue decomposition for stain matrix estimation.
+   - All operations are now native PyTorch batch tensors, allowing the GPU to process the entire batch in parallel without CPU synchronization points.
+2. **Kernel Fusion (torch.compile)**:
+   - Wrapped the model and the entire preprocessing pipeline (`preprocess_batch`) in `torch.compile`.
+   - This fuses geometric augmentations, stain normalization, and ImageNet scaling into optimized CUDA kernels, minimizing VRAM read/write cycles.
+3. **Throughput Target**:
+   - Targeting **>500 images/sec** validation speed to enable industrial-scale screening.
+
+### 📉 Expected Outcome
+- Significant reduction in training/validation time.
+- No impact on accuracy (mathematical parity with Iteration 1 Macenko).
+
+## Run 56: Fixed Strategy 5D (Dynamo Optimization)
+**Context**: Run 55 (Strategy 5D Implementation) hit a performance wall due to  recompilation limits.
+### 🛠️ Strategic Fixes
+1. **Decoupled Augmentations**:
+   - Moved  (stochastic transforms) **outside** the  block.
+   - **Rationale**: Random parameters (angles, color factors) triggered a new graph compilation for every batch, causing massive latency and hitting cache limits.
+2. **Deterministic Kernel Fusion**:
+   -  now only contains Macenko Vectorized Normalization and ImageNet scaling.
+   - **Rationale**: These are deterministic and can be efficiently fused into a single CUDA kernel with the model's first layers.
+3. **Hardware Precision**:
+   - Enabled .
+   - **Rationale**: Optimized for A40's Tensor Cores to improve throughput without sacrificing significant diagnostic precision.
+
+### 📉 Expected Outcome
+- **Throughput**: Significantly faster than Run 55.
+- **Stability**: Elimination of "Dynamo cache size limit" warnings.
+
+## Run 56: Fixed Strategy 5D (Dynamo Optimization)
+**Context**: Run 55 (Strategy 5D Implementation) hit a performance wall due to `torch._dynamo` recompilation limits.
+### 🛠️ Strategic Fixes
+1. **Decoupled Augmentations**:
+   - Moved `gpu_augment` (stochastic transforms) **outside** the `torch.compile` block.
+   - **Rationale**: Random parameters (angles, color factors) triggered a new graph compilation for every batch, causing massive latency and hitting cache limits.
+2. **Deterministic Kernel Fusion**:
+   - `det_preprocess_batch` now only contains Macenko Vectorized Normalization and ImageNet scaling.
+   - **Rationale**: These are deterministic and can be efficiently fused into a single CUDA kernel with the model's first layers.
+3. **Hardware Precision**:
+   - Enabled `torch.set_float32_matmul_precision('high')`.
+   - **Rationale**: Optimized for A40's Tensor Cores to improve throughput without sacrificing significant diagnostic precision.
+
+### 📉 Expected Outcome
+- **Throughput**: Significantly faster than Run 55.
+- **Stability**: Elimination of "Dynamo cache size limit" warnings.
