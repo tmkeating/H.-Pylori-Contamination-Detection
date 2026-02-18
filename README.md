@@ -36,11 +36,12 @@ The model utilizes an expanded dataset of **~54,000 images**:
 - **Patient-Level Accuracy**: **70.69%** (Best-in-class baseline)
 - **Artifact Rejection**: **>75% Reduction** in false positives for stain artifacts (Run 52 breakthrough)
 - **Patch Specificity**: **21%** (Stable floor established)
-- **Throughput**: **262 images/second** (7.5x speedup via GPU-normalization)
+- **Throughput**: **~256 images/second** training; **~448 images/second** validation (A40 Optimized)
 
 ### Hardware Performance
 - **High-Throughput Pipeline**: Moved all geometric and color augmentations to the GPU using `v2.Transforms`, resolving CPU bottlenecks.
 - **VRAM Utilization**: Efficiently handles 448x448 high-resolution patches at batch-size 128 on 48GB NVIDIA A40 GPUs.
+- **Processing Speed**: **2 iterations/sec** (Training) | **3.5 iterations/sec** (Validation).
 - **Optimization Strategy**: Utilizes advanced weight decay (5e-3) and relaxed scheduler patience (3) for feature robustness.
 
 ## Diagnostic Architecture (Multi-Tier Consensus)

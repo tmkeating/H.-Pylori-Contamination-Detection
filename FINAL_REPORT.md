@@ -6,7 +6,9 @@ The objective was to develop a deep-learning-based classification system for ide
 ## 2. Technical Milestones
 
 ### A. Hardware-Aware Optimization (GPU-Vectorized Preprocessing)
-Enabled a high-speed training pipeline using **GPU-vectorized Macenko Normalization** and **Torchvision v2** on NVIDIA A40 GPUs, achieving a throughput of **262 images/second** (7.5x increase over CPU-bound normalization).
+Enabled a high-speed training pipeline using **GPU-vectorized Macenko Normalization** and **Torchvision v2** on NVIDIA A40 GPUs. 
+- **Training Speed**: ~256 images/sec (2 iterations/sec at Batch Size 128).
+- **Validation Speed**: ~448 images/sec (3.5 iterations/sec at Batch Size 128).
 
 ### B. "Core AI Hardening" (Resilience against Artifacts)
 Implemented a "Learning Extension" strategy in Run 52, using a higher weight decay (**5e-3**) and relaxed scheduler patience to force the model to learn robust morphological features. This successfully reduced artifact-driven false positives (e.g., patient B22-89) by **76%** (69 patches → 16 patches).
@@ -23,7 +25,7 @@ Developed a dual-gate consensus engine that aggregates patch-level predictions i
 | **Patient-Level Accuracy** | **70.69%** | Reproducible baseline across clinical hold-out |
 | **Artifact Suppression** | **Milestone** | Successfully filtered primary staining noise candidates |
 | **Patch-Level Specificity** | **21%** | Improved from 0% baseline while maintaining sensitivity |
-| **Pipeline Throughput** | **262 img/s** | Fully hardware-optimized for DCC Cluster |
+| **Pipeline Throughput** | **~256-448 img/s** | Optimized for training/val on DCC Cluster |
 
 ## 4. Conclusion
 The first iteration of this project has successfully established a robust, hardware-optimized baseline. While we have hit a performance plateau at 70.69% accuracy with the ResNet18 backbone, the architecture is now "noise-hardened" and provides a clean platform for future scaling to larger models (ResNet50) or advanced rejection classes.
@@ -43,3 +45,9 @@ To move beyond linear feature separation, we will implement a multi-layer classi
 Currently, the patient-level diagnosis relies on a manual density threshold (N ≥ 40). We plan to replace this with a **Tree-Based Classifier** (e.g., Random Forest or XGBoost). 
 - **Input Features**: The model will ingest patch-level statistical vectors (Mean Probability, Standard Deviation, Skewness, Patch Density at various confidence intervals).
 - **Ensemble Decision**: By training a forest of decision trees on these patch-level distributions, the system will be able to perform sophisticated non-linear "weighting" of evidence, significantly improving specificity by identifying the statistical "signatures" of large-scale staining artifacts.
+
+### D. Performance Improvements (Optimization Plan)
+While current throughput is high, the Macenko normalization currently employs a per-image loop for stain matrix estimation within each batch. The next phase includes:
+- **Batch-Wide Vectorization**: Re-engineering the `normalize_batch` logic to compute SVD-based stain matrices across the entire batch dimension simultaneously.
+- **Kernel Fusion**: Offloading the entire normalization and augmentation pipeline into a single fused CUDA kernel to minimize memory transfer overhead.
+- **Latency Target**: Aiming for a **500+ images/sec** validation throughput to enable real-time whole-slide screening.
