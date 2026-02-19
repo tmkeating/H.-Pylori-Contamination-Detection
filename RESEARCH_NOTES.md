@@ -902,6 +902,22 @@ While recall was perfect, **Specificity dropped significantly**.
 - **Stability**: Successful completion of the Hold-Out set without OOM kills.
 - **Diagnosis**: Robust Patient-Level Accuracy (>80%) via the Random Forest Meta-Classifier.
 - **Reliability**: Deployment of the "Reliability Score" to identify ambiguous clinical cases.
+- **Meta-Data Mass**: Generation of "Patient Signatures" for 100% of the patient population via K-Fold rotation.
+
+---
+
+## Run 62: K-Fold Rotation (Meta-Classifier Data Engine)
+**Context**: To provide enough diverse data for the Random Forest meta-classifier without data leakage, we implemented a 5-fold cross-validation system.
+
+### 🛠️ Strategic Changes
+1. **Parameterized Folds**:
+   - `train.py` now accepts `--fold` and `--num_folds`.
+   - Ensures that the patient-level split rotates systematically (Fold 0, 1, 2, 3, 4).
+2. **Automated Brain Pipeline**:
+   - `run_h_pylori.sh` now executes `meta_classifier.py` immediately after training.
+   - The Random Forest "brain" is automatically updated whenever new results are generated.
+3. **Out-of-Sample Signatures**:
+   - By running all 5 folds, we generate unbiased probabilistic signatures for every patient in the dataset, providing the perfect training set for Iteration 3.
 
 ---
 **Note for AI Continuity**: A context transfer prompt has been created at [CONTEXT_PROMPT.md](CONTEXT_PROMPT.md) for future sessions using the "Skeptic Data Scientist" persona.

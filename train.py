@@ -6,6 +6,7 @@ from torch.optim.adam import Adam # The specific algorithm to adjust the brain
 import numpy as np               # Numeric library
 import pandas as pd              # Data manipulation library
 import matplotlib.pyplot as plt  # Drawing/plotting library
+import argparse
 from torch.utils.data import DataLoader, random_split, Dataset, Subset, WeightedRandomSampler # Tools to manage and split data
 from torchvision import transforms # Tools to prep images for the AI
 from torchvision import disable_beta_transforms_warning
@@ -127,7 +128,7 @@ class TransformedSubset(Dataset):
     def __len__(self):
         return len(self.subset)
 
-def train_model():
+def train_model(fold_idx=0, num_folds=5):
     # --- Step 0: Prepare output directories ---
     results_dir = "results"
     os.makedirs(results_dir, exist_ok=True)
@@ -135,8 +136,8 @@ def train_model():
     # Get the numeric run ID and the SLURM job ID (if it exists)
     run_id = f"{get_next_run_number(results_dir):02d}"
     slurm_id = os.environ.get("SLURM_JOB_ID", "local")
-    prefix = f"{run_id}_{slurm_id}"
-    print(f"--- Starting Run ID: {run_id} (SLURM Job: {slurm_id}) ---")
+    prefix = f"{run_id}_{slurm_id}_f{fold_idx}" # Added fold index to prefix
+    print(f"--- Starting Run ID: {run_id} (Fold: {fold_idx}/{num_folds}, SLURM Job: {slurm_id}) ---")
 
     # Define versioned file paths
     best_model_path = os.path.join(results_dir, f"{prefix}_model_brain.pth")
@@ -245,14 +246,25 @@ def train_model():
         sample_patient_ids.append(patient_id)
     
     unique_patients = sorted(list(set(sample_patient_ids)))
-    np.random.seed(42)
+    np.random.seed(42) # Ensure same shuffle across all fold runs
     np.random.shuffle(unique_patients)
     
-    num_train_pats = int(0.8 * len(unique_patients))
-    train_patients = set(unique_patients[:num_train_pats])
+    # Calculate fold boundaries
+    fold_size = len(unique_patients) // num_folds
+    val_start = fold_idx * fold_size
+    # Ensure the last fold takes any remainder patients
+    val_end = val_start + fold_size if fold_idx < num_folds - 1 else len(unique_patients)
     
+    val_patients = set(unique_patients[val_start:val_end])
+    train_patients = set([p for p in unique_patients if p not in val_patients])
+    
+    print(f"--- Fold {fold_idx}/{num_folds} Split ---")
+    print(f"Total Patients: {len(unique_patients)}")
+    print(f"Training Patients: {len(train_patients)}")
+    print(f"Validation Patients: {len(val_patients)}")
+
     train_indices = [i for i, pid in enumerate(sample_patient_ids) if pid in train_patients]
-    val_indices = [i for i, pid in enumerate(sample_patient_ids) if pid not in train_patients]
+    val_indices = [i for i, pid in enumerate(sample_patient_ids) if pid in val_patients]
     
     print(f"Independent Patient-level split:")
     print(f" - Train: {len(train_patients)} patients, {len(train_indices)} patches")
@@ -840,4 +852,9 @@ def train_model():
     print(f"\nFinal Patient-Level Accuracy: {pat_acc:.2f}%")
 
 if __name__ == "__main__":
-    train_model() # Run the whole process start to finish
+    parser = argparse.ArgumentParser(description="H. Pylori K-Fold Training")
+    parser.add_argument("--fold", type=int, default=0, help="Index of the fold to use for validation (0 to num_folds-1)")
+    parser.add_argument("--num_folds", type=int, default=5, help="Total number of folds")
+    args = parser.parse_args()
+    
+    train_model(fold_idx=args.fold, num_folds=args.num_folds) # Run the fold-specific process
