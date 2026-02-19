@@ -875,4 +875,33 @@ While recall was perfect, **Specificity dropped significantly**.
 - **Accuracy Target**: >80% Patient-Level Accuracy on the Independent set.
 
 ---
+
+## Run 61: SLURM Memory Hardening (Iteration 3 Stable)
+**Context**: Run 60 crashed at 29% of the Hold-Out evaluation phase due to a `cgroup` Out-of-Memory (OOM) kill (48GB limit exceeded). The accumulation of memory from multi-threaded `DataLoader` workers and large result tensors in RAM was identified as the bottleneck.
+
+### 🛠️ Strategic Fixes
+1. **Explicit Memory Cleanup (Step 7.4)**:
+   - Implemented a mandatory garbage collection phase before the Hold-Out test.
+   - `del train_loader`, `del train_dataset`, `gc.collect()`, and `torch.cuda.empty_cache()`.
+   - **Rationale**: Reclaim ~15GB of system RAM occupied by training structures before launching the high-memory evaluation loop.
+
+2. **DataLoader Worker Throttling**:
+   - Throttled `num_workers` from 8 down to 4 for the Hold-Out loader.
+   - Disabled `persistent_workers` for evaluation.
+   - **Rationale**: Each worker process clones a portion of the memory space; reducing workers significantly drops the "baseline" RAM usage in containerized environments.
+
+3. **In-Place Tensor Consolidation**:
+   - Shifted from Python list `.extend()` to high-performance `torch.cat(...).numpy()` consolidation.
+   - **Rationale**: Reduces the overhead of managing millions of small NumPy objects in a list, preventing slow memory creep during long-running patient sets.
+
+4. **Meta-Classifier Feature Signature (Finalized)**:
+   - **18 Features**: Mean, Max, Min, Std, Median, P10, P25, P75, P90, Skew, Kurtosis, Counts (P50, P60, P70, P80, P90), Patch_Count, and **Spatial_Clustering**.
+   - **Spatial Logic**: Uses `NearestNeighbors` to calculate the density of high-confidence "hotspots" (biological colonies).
+
+### 📉 Expected Outcome
+- **Stability**: Successful completion of the Hold-Out set without OOM kills.
+- **Diagnosis**: Robust Patient-Level Accuracy (>80%) via the Random Forest Meta-Classifier.
+- **Reliability**: Deployment of the "Reliability Score" to identify ambiguous clinical cases.
+
+---
 **Note for AI Continuity**: A context transfer prompt has been created at [CONTEXT_PROMPT.md](CONTEXT_PROMPT.md) for future sessions using the "Skeptic Data Scientist" persona.

@@ -146,6 +146,9 @@ def train_model():
     pr_path = os.path.join(results_dir, f"{prefix}_pr_curve.png")
     history_path = os.path.join(results_dir, f"{prefix}_learning_curves.png")
     hist_path = os.path.join(results_dir, f"{prefix}_probability_histogram.png")
+    patient_cm_path = os.path.join(results_dir, f"{prefix}_patient_confusion_matrix.png")
+    patient_roc_path = os.path.join(results_dir, f"{prefix}_patient_roc_curve.png")
+    patient_pr_path = os.path.join(results_dir, f"{prefix}_patient_pr_curve.png")
     gradcam_dir = os.path.join(results_dir, f"{prefix}_gradcam_samples")
     os.makedirs(gradcam_dir, exist_ok=True)
 
@@ -462,6 +465,16 @@ def train_model():
 
     print(f"Training complete. Best Val Loss: {best_loss:.4f}")
 
+    # --- Step 7.4: Memory Cleanup ---
+    # Delete training loaders and clear cache to free up RAM for the Hold-Out test
+    del train_loader
+    del val_loader
+    del train_transformed
+    del val_transformed
+    import gc
+    gc.collect()
+    torch.cuda.empty_cache()
+
     # --- Step 7.5: Save Learning Curves ---
     plt.figure(figsize=(12, 5))
     plt.subplot(1, 2, 1)
@@ -487,64 +500,70 @@ def train_model():
     holdout_dataset = HPyloriDataset(holdout_dir, patient_csv, patch_csv, transform=None)
     holdout_transformed = TransformDataset(Subset(holdout_dataset, range(len(holdout_dataset))), val_transform)
     
+    # Reduced workers and prefetch to decrease cgroup RAM pressure (Run 61 Fix)
     holdout_loader = DataLoader(
         holdout_transformed, 
         batch_size=batch_size, 
         shuffle=False, 
-        num_workers=7, 
+        num_workers=4, 
         pin_memory=True,
-        prefetch_factor=4
+        persistent_workers=False, # Don't keep workers alive after eval
+        prefetch_factor=2
     )
     
-    print(f"Independent Patients in Hold-Out: {len(set([os.path.basename(os.path.dirname(p)).split('_')[0] for p, l, x, y in holdout_dataset.samples]))}")
+    # Efficient calculation of patient count
+    patient_ids_in_holdout = [os.path.basename(os.path.dirname(p)).split('_')[0] for p, l, x, y in holdout_dataset.samples]
+    print(f"Independent Patients in Hold-Out: {len(set(patient_ids_in_holdout))}")
     print(f"Total Patches in Hold-Out: {len(holdout_dataset)}")
 
     # Load our best saved brain
     model.load_state_dict(torch.load(best_model_path, weights_only=True))
     model.eval()
     
-    all_preds = []   # List to store the AI's final guesses (0 or 1)
-    all_labels = []  # List to store the actual correct answers
-    all_probs = []   # List to store how "sure" the AI was (e.g., 0.95 sure it's positive)
-    all_coords = []  # List to store the coordinates for spatial analysis
-    gradcam_samples = [] # Store a few images for visualization
+    all_preds_list = []
+    all_labels_list = []
+    all_probs_list = []
+    all_coords_list = []
+    gradcam_samples = []
 
     with torch.no_grad():
         for inputs, labels, paths, coords in tqdm(holdout_loader, desc="Patient-Independent Test"):
             inputs = inputs.to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)
             
-            # --- GPU-Based Preprocessing Pipeline (Optimization 5D) ---
             inputs = det_preprocess_batch(inputs)
             
             with torch.amp.autocast('cuda'):
-                outputs = model(inputs) # Get raw brain output
+                outputs = model(inputs)
             
-            probs = torch.softmax(outputs, dim=1) # Convert output to 100% probabilities
-            # picking a custom threshold for screening (e.g. 0.2 instead of 0.5)
-            # as requested: "In screening, we prefer 'False Alarms' over 'Missed Infections.'"
+            probs = torch.softmax(outputs, dim=1)
             thresh = 0.2
             preds = (probs[:, 1] > thresh).long()
             
-            all_preds.extend(preds.cpu().numpy())
-            all_labels.extend(labels.cpu().numpy())
-            all_probs.extend(probs.cpu().numpy()[:, 1]) # Probability of being "Contaminated"
-            all_coords.extend(coords.cpu().numpy())
+            all_preds_list.append(preds.cpu())
+            all_labels_list.append(labels.cpu())
+            all_probs_list.append(probs[:, 1].cpu())
+            all_coords_list.append(coords.cpu())
             
-            # Save a few samples for Grad-CAM
             if len(gradcam_samples) < 10:
-                # 1. Real Contaminated samples
                 pos_indices = (labels == 1).nonzero(as_tuple=True)[0]
                 if len(pos_indices) > 0:
                     idx = pos_indices[0].item()
                     gradcam_samples.append(('Real_Pos', inputs[idx:idx+1].clone()))
                 
-                # 2. High-Confidence False Positives (Diagnostic for artifacts)
-                # If label is Negative but probability is very high
                 fp_indices = ((labels == 0) & (probs[:, 1] > 0.9)).nonzero(as_tuple=True)[0]
                 if len(fp_indices) > 0:
                     idx = fp_indices[0].item()
                     gradcam_samples.append(('False_Alarm_Artifact', inputs[idx:idx+1].clone()))
+
+    # Consolidate results into numpy arrays efficiently
+    all_preds = torch.cat(all_preds_list).numpy()
+    all_labels = torch.cat(all_labels_list).numpy()
+    all_probs = torch.cat(all_probs_list).numpy()
+    all_coords = torch.cat(all_coords_list).numpy()
+    
+    del all_preds_list, all_labels_list, all_probs_list, all_coords_list
+    gc.collect()
 
     # --- Step 9: Detailed Reporting ---
     
@@ -618,7 +637,8 @@ def train_model():
         target_layer = actual_model.backbone.layer4[-1]
         for i, (sample_type, img_tensor) in enumerate(gradcam_samples):
             with torch.enable_grad(): # Grad-CAM needs gradients
-                cam, prob = generate_gradcam(model, img_tensor, target_layer)
+                # Use the uncompiled model (actual_model) for Grad-CAM to ensure hooks trigger
+                cam, prob = generate_gradcam(actual_model, img_tensor, target_layer)
             
             # Prepare image and CAM for display
             img = img_tensor.squeeze().detach().cpu().permute(1, 2, 0).numpy()
@@ -759,7 +779,61 @@ def train_model():
     print(f"Patient Consensus Report saved to: {consensus_report_path}")
     
     # Print summary for visibility
-    print(consensus_df[["PatientID", "Actual", "Predicted", "Confidence", "Spatial_Clustering", "Correct"]].to_string(index=False))
+    # Ensure all patients are shown in the log
+    pd.set_option('display.max_rows', None)
+    pd.set_option('display.max_columns', None)
+    pd.set_option('display.width', 1000)
+    
+    # Create a pretty-print version with words instead of numbers
+    print_df = consensus_df.copy()
+    print_df["Actual"] = print_df["Actual"].map({1: "Positive", 0: "Negative"})
+    print_df["Predicted"] = print_df["Predicted"].map({1: "Positive", 0: "Negative"})
+    print_df["Correct"] = print_df["Correct"].map({1: "Yes", 0: "No"})
+    
+    print("\nDetailed Patient-Level Metrics (Clinical Report):")
+    print(print_df[[
+        "PatientID", "Actual", "Predicted", "Mean_Prob", "Max_Prob", 
+        "Count_P90", "Patch_Count", "Spatial_Clustering", "Correct"
+    ]].to_string(index=False))
+
+    # --- Step 11: Patient-Level Visualizations ---
+    print("\nGenerating Patient-Level Visualizations...")
+    
+    # 1. Confusion Matrix
+    plt.figure(figsize=(8, 6))
+    cm_pat = confusion_matrix(consensus_df["Actual"], consensus_df["Predicted"])
+    disp_pat = ConfusionMatrixDisplay(confusion_matrix=cm_pat, display_labels=['Negative', 'Positive'])
+    disp_pat.plot(cmap='Blues', values_format='d')
+    plt.title(f"Patient-Level Confusion Matrix (HoldOut)")
+    plt.savefig(patient_cm_path)
+    plt.close()
+
+    # 2. ROC Curve (using Max_Prob as the continuous score)
+    fpr_pat, tpr_pat, _ = roc_curve(consensus_df["Actual"], consensus_df["Max_Prob"])
+    roc_auc_pat = auc(fpr_pat, tpr_pat)
+    plt.figure()
+    plt.plot(fpr_pat, tpr_pat, color='darkorange', lw=2, label=f'ROC curve (AUC = {roc_auc_pat:0.2f})')
+    plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+    plt.xlabel('False Positive Rate')
+    plt.ylabel('True Positive Rate')
+    plt.title('Patient-Level ROC (Score: Max Patch Prob)')
+    plt.legend(loc="lower right")
+    plt.savefig(patient_roc_path)
+    plt.close()
+
+    # 3. Precision-Recall Curve
+    prec_pat, rec_pat, _ = precision_recall_curve(consensus_df["Actual"], consensus_df["Max_Prob"])
+    ap_pat = average_precision_score(consensus_df["Actual"], consensus_df["Max_Prob"])
+    plt.figure()
+    plt.plot(rec_pat, prec_pat, color='blue', lw=2, label=f'PR curve (AP = {ap_pat:0.2f})')
+    plt.xlabel('Recall')
+    plt.ylabel('Precision')
+    plt.title('Patient-Level Precision-Recall')
+    plt.legend(loc="lower left")
+    plt.savefig(patient_pr_path)
+    plt.close()
+    
+    print(f"Saved patient-level plots to {results_dir}")
 
     # Calculate Patient-Level Accuracy
     pat_acc = consensus_df["Correct"].mean() * 100

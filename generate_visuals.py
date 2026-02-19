@@ -129,7 +129,8 @@ def full_visual_report():
                 actual_model = model._orig_mod if hasattr(model, "_orig_mod") else model
                 target_layer = actual_model.backbone.layer4[-1]
                 with torch.enable_grad():
-                    cam, prob = generate_gradcam(model, img_batch, target_layer)
+                    # Use uncompiled model for Grad-CAM
+                    cam, prob = generate_gradcam(actual_model, img_batch, target_layer)
                 
                 # Plot
                 img = img_batch.squeeze().permute(1, 2, 0).detach().cpu().numpy()
