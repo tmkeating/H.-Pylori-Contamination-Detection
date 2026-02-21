@@ -379,7 +379,7 @@ def train_model(fold_idx=0, num_folds=5):
     # --- Step 7: The Main Training Loop ---
     # We use Automatic Mixed Precision (AMP) to speed up training on the A40
     scaler = torch.amp.GradScaler('cuda')
-    num_epochs = 15 # Increased for high-specificity convergence (Run 42 pivot)
+    num_epochs = 1 # Increased for high-specificity convergence (Run 42 pivot)
     best_loss = float('inf')
     
     # Track the "History" to plot learning curves later
@@ -483,8 +483,9 @@ def train_model(fold_idx=0, num_folds=5):
     del val_loader
     del train_transformed
     del val_transformed
-    del train_dataset # Also delete datasets
-    del val_dataset
+    del full_dataset # Reclaim dataset memory
+    del train_data
+    del val_data
     import gc
     gc.collect()
     torch.cuda.empty_cache()
@@ -546,6 +547,7 @@ def train_model(fold_idx=0, num_folds=5):
         for inputs, labels, paths, coords in tqdm(holdout_loader, desc="Patient-Independent Test"):
             batch_size_actual = inputs.size(0)
             inputs = inputs.to(device, non_blocking=True)
+            labels = labels.to(device, non_blocking=True)
             
             inputs = det_preprocess_batch(inputs)
             

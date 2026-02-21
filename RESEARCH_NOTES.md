@@ -882,7 +882,7 @@ While recall was perfect, **Specificity dropped significantly**.
 ### 🛠️ Strategic Fixes
 1. **Explicit Memory Cleanup (Step 7.4)**:
    - Implemented a mandatory garbage collection phase before the Hold-Out test.
-   - `del train_loader`, `del train_dataset`, `gc.collect()`, and `torch.cuda.empty_cache()`.
+   - `del train_loader`, `del full_dataset`, `gc.collect()`, and `torch.cuda.empty_cache()`.
    - **Rationale**: Reclaim ~15GB of system RAM occupied by training structures before launching the high-memory evaluation loop.
 
 2. **DataLoader Worker Throttling**:
@@ -932,7 +932,7 @@ While recall was perfect, **Specificity dropped significantly**.
    - Replaced list `.append()` logic with pre-allocated `np.zeros` arrays for `all_probs`, `all_coords`, and `all_labels`.
    - **Rationale**: Standard Python lists of tensors cause significant memory fragmentation. Pre-allocation creates a fixed contiguous memory block, preventing RAM "creep."
 3. **Aggressive Object Eviction**:
-   - Added explicit `del train_dataset` and `del val_dataset` before the evaluation loop.
+   - Added explicit `del full_dataset` and `del train_data` before the evaluation loop.
    - **Rationale**: Reclaimed ~15GB of system RAM that was previously held "just in case" by the Python garbage collector.
 4. **Periodic Cache Flushing**:
    - Implemented `torch.cuda.empty_cache()` every 50 batches.
