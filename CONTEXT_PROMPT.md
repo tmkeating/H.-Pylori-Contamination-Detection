@@ -8,36 +8,43 @@
 **Objective:** Detect *H. pylori* bacteria in histology slides.
 **Constraint:** Must achieve clinical-grade throughput (>500 img/s) and break the 71% accuracy bottleneck of baseline ResNet18 models.
 
-### 🛠️ Current Technical Stack (Iteration 2: Scaling)
-- **Architecture:** ResNet50 Backbone + "Deep Head" (Bottleneck: 2048 → 512 → 2 with 50% Dropout).
-- **Optimization Strategy 5D:** 
-    - **Vectorized Preprocessing:** Full batch-wide Macenko normalization implemented in `normalization.py` using `torch.linalg.eigh`.
-    - **Kernel Fusion:** `torch.compile(mode="reduce-overhead")` applied to both the model and the deterministic preprocessing block.
-    - **Precision:** `torch.set_float32_matmul_precision('high')` for NVIDIA A40 (48GB) utilization.
-- **Pipeline Structure:**
-    1. **Eager Stage:** Stochastic augmentations (Flip, Rotate, Jitter) on CPU/GPU to prevent `torch.compile` recompilation (dynamo cache limits).
-    2. **Compiled Stage:** Deterministic normalization (Macenko + ImageNet Stats) fused with model inference.
-
-### 🛑 Critical Bug Fixes (The "Run 57" Milestone)
-- **Symbolic Size Fix:** Replaced `torch.nanquantile` with a manual `sort`/`gather` implementation in `normalization.py`. Native quantile functions were crashing the Inductor compiler because they attempt to access `numel()` inside the graph, which is incompatible with symbolic tensor sizes.
-- **Cache Stabilization:** Decoupled random augmentations from the compiled graph to solve the "Dynamo Recompilation Fatigue" that stalled previous runs (Job 102097).
-
-### 📊 Validation Protocol
-- **Patient-Level Split:** Absolute separation of patients between Train/Val/Holdout to prevent leakage.
-- **Clinical Thresholding:** Threshold fixed at **0.2** for screening (prioritizing Sensitivity/Recall over Precision).
-- **Consensus Logic:** Tiered patient-level diagnosis based on "High Density" signal (40+ patches at p > 0.90) to filter out common histological artifacts (mucus/debris).
+### 🛠️ Current Technical Stack (Iteration 3: Learned Aggregation)
+- **Architecture:** ResNet50 Backbone + Deep Head + **Random Forest Meta-Classifier**.
+- **Loss Function:** **Focal Loss** ($\gamma=2$) to prioritize sparse bacterial signals over background "easy negatives" (mucus/debris).
+- **Aggregator:** **HPyMetaClassifier** in `meta_classifier.py` replaces the fixed "Density Gate". It uses an 18-feature signature (Skewness, Kurtosis, Spatial Clustering, Confidence Percentiles).
+- **Validation:** 5-Fold Cross-Validation on the entire patient cohort to generate out-of-sample probabilistic signatures for Meta-Classifier training.
 
 ---
 
-## 🏃 Current State: Run 57 (Job 102099)
-**Action:** Monitoring the first successful run of the Optimized-Robust-Fusion pipeline.
+## 📈 Patch-Level Accuracy Suggestions (To break 71% bottleneck)
+1. **Dynamic Spatial Clustering (DBSCAN)**: Instead of global counts, use spatial density of high-probability patches. H. pylori cluster on the luminal surface; random noise is scattered.
+2. **Hard-Negative Mining (HNM)**: Retrain specifically on "Run 60" False Positives (mucus artifacts that triggered high RF confidence).
+3. **Resolution-Aware Training**: Test 512x512 crops vs 224x224. Bacterial "comma" morphology might require higher nyquist frequency than ResNet50's default input.
+4. **Stain-Invariant Augmentation**: Implement "Stain Jitter" on top of Macenko to prevent the 11% precision drop observed in Run 14.
+
+---
+
+## 🚀 Iteration 4: End-to-End Multiple Instance Learning (MIL)
+**Vision:** Shift from "Max/Mean Aggregation" to **Learned Slide-Level Context**.
+
+### 🛠️ Implementation Plan:
+1. **Feature Freezing**: Lock the ResNet50 backbone (weights from Iteration 3) to act as a pure feature extractor (2048-D per patch).
+2. **Attention Head**: Integrate the [AttentionGate](model.py#L5) into a new slide-level training loop.
+3. **Bag Processing**: Group all patches from a patient into a single "bag". The attention mechanism learns to "ignore" mucus artifacts and "highlight" true bacterial colonies.
+4. **Weighted Pooling**: Aggregate features using $M = \sum a_i h_i$, where $a_i$ is the attention weight.
+5. **Loss**: Joint Slide-Level Cross-Entropy + Sparsity Constraint (to prevent the model from hyper-focusing on single noise patches).
+
+---
+
+## 🏃 Current State: Run 62 (Stability Verification)
+**Action:** Stabilizing the 5-Fold CV pipeline.
 **Inquiry Goal:** 
-1. Did the `sort`-based quantile fix eliminate the `c10::Error`?
-2. Is the ResNet50 capacity finally capturing the fine-grained bacterial features missed by Iteration 1?
-3. verify throughput: We are targeting **500+ images/second** on the A40.
+1. Did the **Zero-Worker Evaluation** and **NumPy Pre-allocation** fix the OOM kills in the 1.5-hour harvest loop?
+2. Are the device mismatches (CPU/GPU) resolved for the Grad-CAM generation?
+3. Verify `results_csv_path` writing: We need the full out-of-sample signatures for the Meta-Classifier.
 
 **File reference:**
-- [train.py](train.py): Orchestrates the 2-stage pipeline.
-- [normalization.py](normalization.py): Contains the "Inductor-friendly" Macenko math.
-- [model.py](model.py): ResNet50 + Deep Head definition.
-- [RESEARCH_NOTES.md](RESEARCH_NOTES.md): Historical log of all runs.
+- [train.py](train.py): Now supports `--fold` and aggressive RAM cleanup.
+- [meta_classifier.py](meta_classifier.py): The Random Forest engine for patient-level verdict.
+- [model.py](model.py): Contains the `HPyNet` architecture with `AttentionGate` placeholder for Iteration 4.
+- [RESEARCH_NOTES.md](RESEARCH_NOTES.md): History of precision/recall trade-offs.

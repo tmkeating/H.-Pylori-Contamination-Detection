@@ -379,7 +379,7 @@ def train_model(fold_idx=0, num_folds=5):
     # --- Step 7: The Main Training Loop ---
     # We use Automatic Mixed Precision (AMP) to speed up training on the A40
     scaler = torch.amp.GradScaler('cuda')
-    num_epochs = 1 # Increased for high-specificity convergence (Run 42 pivot)
+    num_epochs = 15 # Increased for high-specificity convergence (Run 42 pivot)
     best_loss = float('inf')
     
     # Track the "History" to plot learning curves later
