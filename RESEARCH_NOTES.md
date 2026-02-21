@@ -920,4 +920,27 @@ While recall was perfect, **Specificity dropped significantly**.
    - By running all 5 folds, we generate unbiased probabilistic signatures for every patient in the dataset, providing the perfect training set for Iteration 3.
 
 ---
+
+## Run 61/62: Evaluation Stability & Pre-allocation Fix
+**Context**: Run 61 was killed by the `cgroup` OOM handler at 99.8% completion (1386/1388 batches). Although the model saved correctly, the diagnostic CSVs and plots were lost due to cumulative memory overhead in the `DataLoader` and Python list management.
+
+### 🛠️ Strategic Fixes (Evaluation Hardening)
+1. **Zero-Worker Evaluation**:
+   - Switched `holdout_loader` to `num_workers=0`.
+   - **Rationale**: Eliminates process-cloning overhead and IPC (Inter-Process Communication) memory buffers which were accumulating during the 1.5-hour evaluation period.
+2. **Numpy Pre-allocation**:
+   - Replaced list `.append()` logic with pre-allocated `np.zeros` arrays for `all_probs`, `all_coords`, and `all_labels`.
+   - **Rationale**: Standard Python lists of tensors cause significant memory fragmentation. Pre-allocation creates a fixed contiguous memory block, preventing RAM "creep."
+3. **Aggressive Object Eviction**:
+   - Added explicit `del train_dataset` and `del val_dataset` before the evaluation loop.
+   - **Rationale**: Reclaimed ~15GB of system RAM that was previously held "just in case" by the Python garbage collector.
+4. **Periodic Cache Flushing**:
+   - Implemented `torch.cuda.empty_cache()` every 50 batches.
+   - **Rationale**: Prevents VRAM fragmentation from long-running Grad-CAM and inference operations on the A40.
+
+### 📉 Expected Outcome
+- **Stability**: Zero-risk completion of the 116-patient holdout set.
+- **Workflow**: Systematic generation of the "Patient Signature" CSVs for the Iteration 3 Meta-Classifier.
+
+---
 **Note for AI Continuity**: A context transfer prompt has been created at [CONTEXT_PROMPT.md](CONTEXT_PROMPT.md) for future sessions using the "Skeptic Data Scientist" persona.

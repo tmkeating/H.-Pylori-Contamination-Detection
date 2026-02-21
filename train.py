@@ -137,7 +137,7 @@ def train_model(fold_idx=0, num_folds=5):
     run_id = f"{get_next_run_number(results_dir):02d}"
     slurm_id = os.environ.get("SLURM_JOB_ID", "local")
     prefix = f"{run_id}_{slurm_id}_f{fold_idx}" # Added fold index to prefix
-    print(f"--- Starting Run ID: {run_id} (Fold: {fold_idx}/{num_folds}, SLURM Job: {slurm_id}) ---")
+    print(f"--- Starting Run ID: {run_id} (Fold: {fold_idx + 1}/{num_folds}, SLURM Job: {slurm_id}) ---")
 
     # Define versioned file paths
     best_model_path = os.path.join(results_dir, f"{prefix}_model_brain.pth")
@@ -258,7 +258,7 @@ def train_model(fold_idx=0, num_folds=5):
     val_patients = set(unique_patients[val_start:val_end])
     train_patients = set([p for p in unique_patients if p not in val_patients])
     
-    print(f"--- Fold {fold_idx}/{num_folds} Split ---")
+    print(f"--- Fold {fold_idx + 1}/{num_folds} Split ---")
     print(f"Total Patients: {len(unique_patients)}")
     print(f"Training Patients: {len(train_patients)}")
     print(f"Validation Patients: {len(val_patients)}")
@@ -483,6 +483,8 @@ def train_model(fold_idx=0, num_folds=5):
     del val_loader
     del train_transformed
     del val_transformed
+    del train_dataset # Also delete datasets
+    del val_dataset
     import gc
     gc.collect()
     torch.cuda.empty_cache()
@@ -512,36 +514,38 @@ def train_model(fold_idx=0, num_folds=5):
     holdout_dataset = HPyloriDataset(holdout_dir, patient_csv, patch_csv, transform=None)
     holdout_transformed = TransformDataset(Subset(holdout_dataset, range(len(holdout_dataset))), val_transform)
     
-    # Reduced workers and prefetch to decrease cgroup RAM pressure (Run 61 Fix)
+    # Reduced workers to 0 to eliminate worker process memory overhead in SLURM (Run 61 final Fix)
     holdout_loader = DataLoader(
         holdout_transformed, 
         batch_size=batch_size, 
         shuffle=False, 
-        num_workers=4, 
-        pin_memory=True,
-        persistent_workers=False, # Don't keep workers alive after eval
-        prefetch_factor=2
+        num_workers=0, # Most stable for high-memory environments
+        pin_memory=True
     )
     
     # Efficient calculation of patient count
-    patient_ids_in_holdout = [os.path.basename(os.path.dirname(p)).split('_')[0] for p, l, x, y in holdout_dataset.samples]
-    print(f"Independent Patients in Hold-Out: {len(set(patient_ids_in_holdout))}")
+    pids_holdout = [os.path.basename(os.path.dirname(p)).split('_')[0] for p, l, x, y in holdout_dataset.samples]
+    print(f"Independent Patients in Hold-Out: {len(set(pids_holdout))}")
     print(f"Total Patches in Hold-Out: {len(holdout_dataset)}")
+    del pids_holdout # Reclaim string list memory
 
     # Load our best saved brain
     model.load_state_dict(torch.load(best_model_path, weights_only=True))
     model.eval()
     
-    all_preds_list = []
-    all_labels_list = []
-    all_probs_list = []
-    all_coords_list = []
+    # Pre-allocate numpy arrays for maximum memory efficiency (Run 62 Fix)
+    num_holdout = len(holdout_dataset)
+    all_preds = np.zeros(num_holdout, dtype=np.int8)
+    all_labels = np.zeros(num_holdout, dtype=np.int8)
+    all_probs = np.zeros(num_holdout, dtype=np.float32)
+    all_coords = np.zeros((num_holdout, 2), dtype=np.int32)
     gradcam_samples = []
 
+    pointer = 0
     with torch.no_grad():
         for inputs, labels, paths, coords in tqdm(holdout_loader, desc="Patient-Independent Test"):
+            batch_size_actual = inputs.size(0)
             inputs = inputs.to(device, non_blocking=True)
-            labels = labels.to(device, non_blocking=True)
             
             inputs = det_preprocess_batch(inputs)
             
@@ -552,10 +556,11 @@ def train_model(fold_idx=0, num_folds=5):
             thresh = 0.2
             preds = (probs[:, 1] > thresh).long()
             
-            all_preds_list.append(preds.cpu())
-            all_labels_list.append(labels.cpu())
-            all_probs_list.append(probs[:, 1].cpu())
-            all_coords_list.append(coords.cpu())
+            # Fill pre-allocated arrays
+            all_preds[pointer:pointer+batch_size_actual] = preds.cpu().numpy()
+            all_labels[pointer:pointer+batch_size_actual] = labels.cpu().numpy()
+            all_probs[pointer:pointer+batch_size_actual] = probs[:, 1].cpu().numpy()
+            all_coords[pointer:pointer+batch_size_actual] = coords.cpu().numpy()
             
             if len(gradcam_samples) < 10:
                 pos_indices = (labels == 1).nonzero(as_tuple=True)[0]
@@ -567,14 +572,14 @@ def train_model(fold_idx=0, num_folds=5):
                 if len(fp_indices) > 0:
                     idx = fp_indices[0].item()
                     gradcam_samples.append(('False_Alarm_Artifact', inputs[idx:idx+1].clone()))
+            
+            pointer += batch_size_actual
+            
+            # Periodically force cleanup
+            if pointer % (batch_size * 50) == 0:
+                torch.cuda.empty_cache()
+                gc.collect()
 
-    # Consolidate results into numpy arrays efficiently
-    all_preds = torch.cat(all_preds_list).numpy()
-    all_labels = torch.cat(all_labels_list).numpy()
-    all_probs = torch.cat(all_probs_list).numpy()
-    all_coords = torch.cat(all_coords_list).numpy()
-    
-    del all_preds_list, all_labels_list, all_probs_list, all_coords_list
     gc.collect()
 
     # --- Step 9: Detailed Reporting ---
