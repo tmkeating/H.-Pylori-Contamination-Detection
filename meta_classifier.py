@@ -2,9 +2,13 @@ import pandas as pd
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import LeaveOneGroupOut
-from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.metrics import (
+    classification_report, confusion_matrix, roc_curve, auc, 
+    precision_recall_curve, average_precision_score, ConfusionMatrixDisplay
+)
 import joblib
 import os
+import matplotlib.pyplot as plt
 
 class HPyMetaClassifier:
     """
@@ -78,6 +82,28 @@ class HPyMetaClassifier:
         joblib.dump(self.rf, self.model_path)
         print(f"Meta-Classifier saved to {self.model_path}")
 
+        # Save Feature Importance Report
+        importances = self.rf.feature_importances_
+        feat_df = pd.DataFrame({
+            'Feature': self.features,
+            'Importance': importances
+        }).sort_values(by='Importance', ascending=False)
+        
+        feat_path = "results/meta_feature_importance.csv"
+        # Ensure results/ exists
+        os.makedirs("results", exist_ok=True)
+        feat_df.to_csv(feat_path, index=False)
+        print(f"Feature Importance saved to {feat_path}")
+
+        # Plot Feature Importance
+        plt.figure(figsize=(10, 6))
+        plt.barh(feat_df['Feature'][::-1], feat_df['Importance'][::-1], color='steelblue')
+        plt.xlabel('Importance Weight')
+        plt.title('Meta-Classifier: Clinical Feature Importance')
+        plt.tight_layout()
+        plt.savefig("results/meta_feature_importance.png")
+        plt.close()
+
     def evaluate(self, data):
         """
         Performs Leave-One-Patient-Out Cross-Validation (LOPO-CV).
@@ -91,22 +117,67 @@ class HPyMetaClassifier:
         groups = data["PatientID"]
         
         logo = LeaveOneGroupOut()
-        y_true, y_pred = [], []
+        y_true, y_pred, y_probs = [], [], []
         
+        print("\nRunning Leave-One-Patient-Out Cross-Validation...")
         for train_idx, test_idx in logo.split(X, y, groups):
             X_train, X_test = X.iloc[train_idx], X.iloc[test_idx]
             y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
             
             # Use smaller params for quicker cross-val estimation
-            clf = RandomForestClassifier(n_estimators=50, max_depth=4, class_weight="balanced")
+            clf = RandomForestClassifier(n_estimators=50, max_depth=4, class_weight="balanced", random_state=42)
             clf.fit(X_train, y_train)
+            
             y_true.extend(y_test)
             y_pred.extend(clf.predict(X_test))
+            y_probs.extend(clf.predict_proba(X_test)[:, 1])
             
         print("\n--- Meta-Classifier (Leave-One-Out) Results ---")
+        report = classification_report(y_true, y_pred, output_dict=True)
         print(classification_report(y_true, y_pred))
-        print("Confusion Matrix:")
-        print(confusion_matrix(y_true, y_pred))
+
+        # Save Performance Metrics
+        metrics_df = pd.DataFrame(report).transpose()
+        metrics_df.to_csv("results/meta_performance_metrics.csv")
+        print(f"Performance metrics saved to results/meta_performance_metrics.csv")
+
+        # 1. Confusion Matrix Plot
+        plt.figure(figsize=(8, 6))
+        cm = confusion_matrix(y_true, y_pred)
+        disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=['Negative', 'Positive'])
+        disp.plot(cmap='Blues', values_format='d')
+        plt.title('Meta-Classifier: Patient-Level Confusion Matrix')
+        plt.savefig("results/meta_confusion_matrix.png")
+        plt.close()
+
+        # 2. ROC Curve Plot
+        fpr, tpr, _ = roc_curve(y_true, y_probs)
+        roc_auc = auc(fpr, tpr)
+        plt.figure()
+        plt.plot(fpr, tpr, color='darkorange', lw=2, label=f'Meta ROC curve (AUC = {roc_auc:0.2f})')
+        plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+        plt.xlim([0.0, 1.0])
+        plt.ylim([0.0, 1.05])
+        plt.xlabel('False Positive Rate')
+        plt.ylabel('True Positive Rate')
+        plt.title('Meta-Classifier: ROI Analysis')
+        plt.legend(loc="lower right")
+        plt.savefig("results/meta_roc.png")
+        plt.close()
+
+        # 3. Precision-Recall Curve Plot
+        precision, recall, _ = precision_recall_curve(y_true, y_probs)
+        ap_score = average_precision_score(y_true, y_probs)
+        plt.figure()
+        plt.plot(recall, precision, color='blue', lw=2, label=f'Meta PR curve (AP = {ap_score:0.2f})')
+        plt.xlabel('Recall')
+        plt.ylabel('Precision')
+        plt.title('Meta-Classifier: Precision-Recall (Artifact vs Signal)')
+        plt.legend(loc="upper right")
+        plt.savefig("results/meta_pr.png")
+        plt.close()
+        
+        print("Meta-level plots (ROC, PR, CM) saved to results/")
 
     def predict(self, patient_stats_df):
         """
