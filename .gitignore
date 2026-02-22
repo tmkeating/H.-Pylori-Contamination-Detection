@@ -14,12 +14,15 @@
 .pytest_cache/
 .tox/
 __pycache__/
+-beforeTree/
+-archive/
 best_model.pth
 coverage.xml
 env/
 # Whitelist finalResults for the checkpoint release
 !finalResults/
 !finalResults/**
+meta_rf_classifier.joblib
 nosetests.xml
 pip-delete-this-directory.txt
 pip-log.txt

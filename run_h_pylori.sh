@@ -46,12 +46,13 @@ source ../venv/bin/activate
 # pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
 
 # 4. Run the training script
-# Use environment variables if set, otherwise default to Fold 0
+# Use environment variables if set, otherwise default values
 FOLD=${FOLD:-0}
 NUM_FOLDS=${NUM_FOLDS:-5}
+MODEL_NAME=${MODEL_NAME:-"convnext_tiny"}
 
-echo "Starting Training for Fold: $FOLD of $NUM_FOLDS"
-python train.py --fold $FOLD --num_folds $NUM_FOLDS
+echo "Starting Training for Fold: $FOLD of $NUM_FOLDS using $MODEL_NAME"
+python train.py --fold $FOLD --num_folds $NUM_FOLDS --model_name "$MODEL_NAME"
 
 # 5. Integrate Meta-Classifier: Rebuild the diagnostic layer with the new data
 echo "Updating Meta-Classifier with latest results..."

@@ -3,6 +3,7 @@ import torch                    # Core library for deep learning
 import torch.nn as nn           # Tools for building neural network layers
 import torch.optim as optim     # Mathematical tools to "teach" the model
 from torch.optim.adam import Adam # The specific algorithm to adjust the brain
+from torch.optim import AdamW    # Better for ConvNeXt architectures
 import numpy as np               # Numeric library
 import pandas as pd              # Data manipulation library
 import matplotlib.pyplot as plt  # Drawing/plotting library
@@ -128,7 +129,7 @@ class TransformedSubset(Dataset):
     def __len__(self):
         return len(self.subset)
 
-def train_model(fold_idx=0, num_folds=5):
+def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
     # --- Step 0: Prepare output directories ---
     results_dir = "results"
     os.makedirs(results_dir, exist_ok=True)
@@ -136,8 +137,8 @@ def train_model(fold_idx=0, num_folds=5):
     # Get the numeric run ID and the SLURM job ID (if it exists)
     run_id = f"{get_next_run_number(results_dir):02d}"
     slurm_id = os.environ.get("SLURM_JOB_ID", "local")
-    prefix = f"{run_id}_{slurm_id}_f{fold_idx}" # Added fold index to prefix
-    print(f"--- Starting Run ID: {run_id} (Fold: {fold_idx + 1}/{num_folds}, SLURM Job: {slurm_id}) ---")
+    prefix = f"{run_id}_{slurm_id}_f{fold_idx}_{model_name}" # Added fold index and model name to prefix
+    print(f"--- Starting Run ID: {run_id} (Fold: {fold_idx + 1}/{num_folds}, Model: {model_name}, SLURM Job: {slurm_id}) ---")
 
     # Define versioned file paths
     best_model_path = os.path.join(results_dir, f"{prefix}_model_brain.pth")
@@ -328,7 +329,7 @@ def train_model(fold_idx=0, num_folds=5):
     )
 
     # --- Step 5: Build the customized AI brain ---
-    model = get_model(num_classes=2, pretrained=True).to(device)
+    model = get_model(model_name=model_name, num_classes=2, pretrained=True).to(device)
 
     # --- Step 6: Define the Learning Rules ---
     # strategy B: Focal Loss for Sparse Bacteremia Detection
@@ -347,14 +348,20 @@ def train_model(fold_idx=0, num_folds=5):
     
     # Enable torch.compile for Kernel Fusion (Optimization 5D)
     if hasattr(torch, "compile"):
-        print("Enabling torch.compile for Iteration 2 Optimization (5D)...")
+        print(f"Enabling torch.compile for {model_name} Optimization (5D)...")
         # Compile the model with extreme overhead reduction
         model = torch.compile(model, mode="reduce-overhead")
         # Compile the deterministic preprocessing pipeline (Folds Macenko into GPU Ops)
         det_preprocess_batch = torch.compile(det_preprocess_batch)
     
-    # Optimizer: Increased decay and slightly higher LR for better exploration (Run 50)
-    optimizer = Adam(model.parameters(), lr=2e-5, weight_decay=5e-3)
+    # Optimizer Choice:
+    # ConvNeXt is highly sensitive to the training recipe and benefits from AdamW.
+    if "convnext" in model_name:
+        print(f"Using AdamW Optimizer for {model_name} stability...")
+        optimizer = AdamW(model.parameters(), lr=1e-5, weight_decay=0.05)
+    else:
+        # ResNet default (Adam)
+        optimizer = Adam(model.parameters(), lr=2e-5, weight_decay=5e-3)
     
     # --- Step 6.2: Learning Rate Scheduler ---
     # Relaxed patience (3) to prevent premature collapse after Epoch 2 (Run 50)
@@ -649,40 +656,48 @@ def train_model(fold_idx=0, num_folds=5):
 
     # 7. Generate Grad-CAM for saved samples
     if gradcam_samples:
-        print("Generating Grad-CAM interpretability maps...")
-        # For ResNet50 in HPyNet, the target layer is under .backbone
-        # Check if model is compiled (wrapped in _CompiledModule)
+        print(f"Generating Grad-CAM interpretability maps for {model_name}...")
         actual_model = model._orig_mod if hasattr(model, "_orig_mod") else model
-        target_layer = actual_model.backbone.layer4[-1]
-        for i, (sample_type, img_tensor) in enumerate(gradcam_samples):
-            with torch.enable_grad(): # Grad-CAM needs gradients
-                # Use the uncompiled model (actual_model) for Grad-CAM to ensure hooks trigger
-                cam, prob = generate_gradcam(actual_model, img_tensor, target_layer)
-            
-            # Prepare image and CAM for display
-            img = img_tensor.squeeze().detach().cpu().permute(1, 2, 0).numpy()
-            # Un-normalize for display
-            img = img * np.array([0.229, 0.224, 0.225]) + np.array([0.485, 0.456, 0.406])
-            img = np.clip(img, 0, 1)
-            
-            cam = cam.squeeze().detach().cpu().numpy()
-            cam = (cam - cam.min()) / (cam.max() - cam.min() + 1e-8)
-            
-            plt.figure(figsize=(10, 5))
-            plt.subplot(1, 2, 1)
-            plt.imshow(img)
-            plt.title(f"{sample_type} (Prob: {prob[0,1]:.2f})")
-            plt.axis('off')
-            
-            plt.subplot(1, 2, 2)
-            plt.imshow(img)
-            plt.imshow(cam, cmap='jet', alpha=0.5)
-            plt.title("Grad-CAM Heatmap")
-            plt.axis('off')
-            
-            plt.savefig(os.path.join(gradcam_dir, f"{sample_type}_{i}.png"))
-            plt.close()
-        print(f"Saved Grad-CAM samples to {gradcam_dir}")
+        
+        # Architecture-aware target layer selection
+        if "resnet50" in model_name:
+            target_layer = actual_model.backbone.layer4[-1]
+        elif "convnext" in model_name:
+            # For ConvNeXt, the last feature block contains the final spatial activations
+            target_layer = actual_model.backbone.features[-1]
+        else:
+            target_layer = None
+
+        if target_layer:
+            for i, (sample_type, img_tensor) in enumerate(gradcam_samples):
+                with torch.enable_grad(): # Grad-CAM needs gradients
+                    # Use the uncompiled model (actual_model) for Grad-CAM to ensure hooks trigger
+                    cam, prob = generate_gradcam(actual_model, img_tensor, target_layer)
+                
+                # Prepare image and CAM for display
+                img = img_tensor.squeeze().detach().cpu().permute(1, 2, 0).numpy()
+                # Un-normalize for display
+                img = img * np.array([0.229, 0.224, 0.225]) + np.array([0.485, 0.456, 0.406])
+                img = np.clip(img, 0, 1)
+                
+                cam = cam.squeeze().detach().cpu().numpy()
+                cam = (cam - cam.min()) / (cam.max() - cam.min() + 1e-8)
+                
+                plt.figure(figsize=(10, 5))
+                plt.subplot(1, 2, 1)
+                plt.imshow(img)
+                plt.title(f"{sample_type} (Prob: {prob[0,1]:.2f})")
+                plt.axis('off')
+                
+                plt.subplot(1, 2, 2)
+                plt.imshow(img)
+                plt.imshow(cam, cmap='jet', alpha=0.5)
+                plt.title("Grad-CAM Heatmap")
+                plt.axis('off')
+                
+                plt.savefig(os.path.join(gradcam_dir, f"{sample_type}_{i}.png"))
+                plt.close()
+            print(f"Saved Grad-CAM samples to {gradcam_dir}")
 
     # --- Step 10: Patient-Level Consensus Analysis ---
     # In the real world, a doctor doesn't care about one patch; they care if the PATIENT has H. Pylori.
@@ -862,6 +877,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="H. Pylori K-Fold Training")
     parser.add_argument("--fold", type=int, default=0, help="Index of the fold to use for validation (0 to num_folds-1)")
     parser.add_argument("--num_folds", type=int, default=5, help="Total number of folds")
+    parser.add_argument("--model_name", type=str, default="resnet50", choices=["resnet50", "convnext_tiny"], 
+                        help="Backbone architecture to use (resnet50/convnext_tiny)")
     args = parser.parse_args()
     
-    train_model(fold_idx=args.fold, num_folds=args.num_folds) # Run the fold-specific process
+    train_model(fold_idx=args.fold, num_folds=args.num_folds, model_name=args.model_name)

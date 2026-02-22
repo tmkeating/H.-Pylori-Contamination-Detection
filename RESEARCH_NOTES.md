@@ -944,3 +944,48 @@ While recall was perfect, **Specificity dropped significantly**.
 
 ---
 **Note for AI Continuity**: A context transfer prompt has been created at [CONTEXT_PROMPT.md](CONTEXT_PROMPT.md) for future sessions using the "Skeptic Data Scientist" persona.
+
+---
+
+## Run 62-66: Final 5-Fold Cross-Validation (ResNet50)
+**Context**: Successfully completed the full k-fold rotation (580 patients) using the Iteration 3 "Learned Aggregation" strategy.
+
+### 📊 Results Breakdown: Meta-Classifier (LOGO-CV)
+| Metric          | Class 0 (Negative) | Class 1 (Positive) | Overall (Accuracy) |
+|-----------------|--------------------|--------------------|--------------------|
+| **Precision**   | 0.71               | **0.83**           | -                  |
+| **Recall**      | 0.87               | **0.65**           | -                  |
+| **F1-Score**    | 0.78               | 0.73               | -                  |
+| **Accuracy**    | -                  | -                  | **76%**            |
+
+**Performance Analysis**:
+- **Baseline Broken**: Exceeded the 71% heuristic gate accuracy by **5%**.
+- **Artifact Suppression**: High Precision (0.83) confirms the Random Forest successfully "ignored" histological artifacts that previously triggered false positives.
+- **Recall Trade-off**: Lower recall (0.65) indicates the meta-classifier is slightly too conservative, likely due to small bacterial populations not meeting the "signature" density.
+
+### 🧠 Clinical Feature Importance
+| Feature        | Importance | Note                                                                 |
+|----------------|------------|----------------------------------------------------------------------|
+| **Max_Prob**   | 17.3%      | Confidence of the strongest single detection remains the top predictor. |
+| **P90_Prob**   | 11.2%      | 90th percentile of probability distribution is a key artifact filter. |
+| **Skew**       | 8.8%       | Asymmetry of patch distribution effectively identifies sparse signal. |
+| **Clustering** | 0.005%     | **Spatial_Clustering** had almost zero impact; density is more diagnostic. |
+
+---
+
+## Run 67+: Transition to ConvNeXt-Tiny (Architecture Scaling)
+**Context**: To push toward 80%+ accuracy, we are replacing the ResNet50 backbone with **ConvNeXt-Tiny**, which provides deeper inverted bottleneck blocks and a 7x7 receptive field.
+
+### 🛠️ Strategic Implementation: HPyNet Wrapper
+1. **Architecture-Agnostic Design**:
+   - `model.py` now supports both `resnet50` and `convnext_tiny`.
+   - **ResNet50**: Extracts 2048-D features via `backbone.fc -> Identity`.
+   - **ConvNeXt**: Extracts 768-D features via `backbone.classifier[2] -> Identity`.
+2. **Optimizer Recipe (AdamW)**:
+   - ConvNeXt is highly sensitive to the optimizer. We implemented **AdamW** with a high weight decay (**0.05**) specifically for this architecture to ensure stable convergence.
+3. **Architecture-Aware Grad-CAM**:
+   - Resolved `AttributeError` by adding dynamic target layer selection:
+     - **ResNet**: `backbone.layer4[-1]`
+     - **ConvNeXt**: `backbone.features[-1]`
+4. **Improved Visual Reporting**:
+   - `generate_visuals.py` updated to include **Patient-level ROC/PR Curves** (overlaying Patch stats) for direct comparison of aggregation effectiveness.
