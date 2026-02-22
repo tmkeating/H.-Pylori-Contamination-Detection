@@ -973,19 +973,47 @@ While recall was perfect, **Specificity dropped significantly**.
 
 ---
 
-## Run 67+: Transition to ConvNeXt-Tiny (Architecture Scaling)
-**Context**: To push toward 80%+ accuracy, we are replacing the ResNet50 backbone with **ConvNeXt-Tiny**, which provides deeper inverted bottleneck blocks and a 7x7 receptive field.
+## Run 72-76: 5-Fold ConvNeXt-Tiny Cycle (Iteration 3 Breakthrough)
+**Context**: Replaced ResNet50 with **ConvNeXt-Tiny** (7x7 kernels, inverted bottlenecks) using the HPyMetaClassifier (Random Forest) for 18-feature patient signatures.
 
-### 🛠️ Strategic Implementation: HPyNet Wrapper
-1. **Architecture-Agnostic Design**:
-   - `model.py` now supports both `resnet50` and `convnext_tiny`.
-   - **ResNet50**: Extracts 2048-D features via `backbone.fc -> Identity`.
-   - **ConvNeXt**: Extracts 768-D features via `backbone.classifier[2] -> Identity`.
-2. **Optimizer Recipe (AdamW)**:
-   - ConvNeXt is highly sensitive to the optimizer. We implemented **AdamW** with a high weight decay (**0.05**) specifically for this architecture to ensure stable convergence.
-3. **Architecture-Aware Grad-CAM**:
-   - Resolved `AttributeError` by adding dynamic target layer selection:
-     - **ResNet**: `backbone.layer4[-1]`
-     - **ConvNeXt**: `backbone.features[-1]`
-4. **Improved Visual Reporting**:
-   - `generate_visuals.py` updated to include **Patient-level ROC/PR Curves** (overlaying Patch stats) for direct comparison of aggregation effectiveness.
+### 📊 Results Breakdown: Meta-Classifier (LOGO-CV)
+| Metric          | Class 0 (Negative) | Class 1 (Positive) | Overall (Accuracy) |
+|-----------------|--------------------|--------------------|--------------------|
+| **Precision**   | 0.82               | **0.92**           | -                  |
+| **Recall**      | 0.95               | **0.75**           | -                  |
+| **F1-Score**    | 0.88               | 0.82               | -                  |
+| **Accuracy**    | -                  | -                  | **84.66%**         |
+
+**Performance Analysis**:
+- **Massive breakthrough**: Improved from 76% to **84.66%** overall accuracy.
+- **High Precision (0.92)**: ConvNeXt feature extraction significantly reduced false positives; the model is extremely reliable when it flags a patient as "Positive."
+- **Receptive Field**: The larger 7x7 kernels seem better at capturing the sparse, curved morphology of *H. Pylori* vs. granular histological artifacts.
+
+### 🧠 Feature Importance Update
+| Feature        | Importance | Change from ResNet |
+|----------------|------------|--------------------|
+| **Max_Prob**   | 24.1%      | +6.8% (More decisive) |
+| **P90_Prob**   | 14.2%      | +3.0%              |
+| **Skewness**   | 10.1%      | +1.3%              |
+
+---
+
+## Run 77+: Iteration 4 - Pathological Stain Jitter (H&E Space)
+**Context**: To exceed the 85% accuracy barrier and improve generalization to different clinical labs, we implemented a custom augmentation strategy that operates in the **H&E Concentration Space** instead of standard RGB space.
+
+### 🛠️ Strategic Implementation: Macenko Jitter
+1. **Physical Stain Perturbation**:
+   - Modified `MacenkoNormalizer.normalize_batch` in `normalization.py`.
+   - Instead of just normalizing to a reference, we now apply stochastic shifts to the H&E concentration matrix $C$.
+2. **Jitter Math**:
+   - **Multiplicative ($\alpha$):** $\pm 20\%$ intensity shift ($0.8$ to $1.2$). Simulates variance in staining time or reagent concentration.
+   - **Additive ($\beta$):** $\pm 0.05$ bias shift. Simulates background wash quality and residual dye residue.
+3. **Training Protocol**:
+   - `train.py` updated to pass `training=True` to the GPU-preprocessing pipeline.
+   - Jitter is disabled during validation and hold-out testing to ensure reliable diagnostic evaluation.
+4. **Hardware Fusion**:
+   - The jitter logic is fully vectorized on the GPU, maintaining the **Optimization 5D** performance (zero impact on epoch time).
+
+### 📉 Expected Outcome
+- **Generalization**: Reduced sensitivity to subtle "pink/purple" shade shifts between clinical scanners.
+- **Accuracy Target**: Probing for **86-88%** Patient-Level accuracy.

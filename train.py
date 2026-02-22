@@ -387,9 +387,10 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
     # --- Optimization 5D: Preprocessing & Model Compilation (Kernel Fusion) ---
     # We define a fused preprocessing function for deterministic operations.
     # Moving augmentations OUT of the compiled block to avoid Dynamo recompilation.
-    def det_preprocess_batch(inputs):
+    def det_preprocess_batch(inputs, training=False):
         # normalize_batch is now fully vectorized (Optimization 5D)
-        inputs = normalizer.normalize_batch(inputs)
+        # Includes optional pathological stain jittering (H&E space)
+        inputs = normalizer.normalize_batch(inputs, jitter=training)
         inputs = gpu_normalize(inputs)
         return inputs
     
@@ -399,7 +400,9 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
         # Compile the model with extreme overhead reduction
         model = torch.compile(model, mode="reduce-overhead")
         # Compile the deterministic preprocessing pipeline (Folds Macenko into GPU Ops)
-        det_preprocess_batch = torch.compile(det_preprocess_batch)
+        # We don't compile det_preprocess_batch because the 'training' flag 
+        # would cause recompilation or complex graph breaks. 
+        # The vectorized ops in normalize_batch are already fast.
     
     # Optimizer Choice:
     # ConvNeXt is highly sensitive to the training recipe and benefits from AdamW.
@@ -458,8 +461,8 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
             # --- GPU-Based Preprocessing Pipeline (Optimization 5D) ---
             # 1. Apply stochastic augmentations (Outside compilation)
             inputs = gpu_augment(inputs)
-            # 2. Apply deterministic normalization (Compiled Kernel)
-            inputs = det_preprocess_batch(inputs)
+            # 2. Apply deterministic normalization with jitter (Training=True)
+            inputs = det_preprocess_batch(inputs, training=True)
             
             optimizer.zero_grad()
             
@@ -494,7 +497,8 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
                 labels = labels.to(device, non_blocking=True)
                 
                 # --- GPU-Based Preprocessing Pipeline (Optimization 5D) ---
-                inputs = det_preprocess_batch(inputs)
+                # No jitter during validation (Training=False)
+                inputs = det_preprocess_batch(inputs, training=False)
                 
                 with torch.amp.autocast('cuda'):
                     outputs = model(inputs)
@@ -603,7 +607,8 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
             inputs = inputs.to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)
             
-            inputs = det_preprocess_batch(inputs)
+            # No jitter during test (Training=False)
+            inputs = det_preprocess_batch(inputs, training=False)
             
             with torch.amp.autocast('cuda'):
                 outputs = model(inputs)

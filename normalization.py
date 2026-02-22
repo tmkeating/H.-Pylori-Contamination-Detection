@@ -63,75 +63,59 @@ class MacenkoNormalizer:
         except Exception as e:
             return img
 
-    def normalize_batch(self, batch_tensor):
+    def normalize_batch(self, batch_tensor, jitter=False):
         """
         Fully vectorized batch normalization for Macenko (Optimization 5D).
+        Includes optional pathological stain jittering (H&E space).
         batch_tensor: (B, C, H, W) on GPU, values in [0, 1]
         """
         if not self.fitted:
             return batch_tensor
             
         device = batch_tensor.device
+        dtype = batch_tensor.dtype
         B, C, H, W = batch_tensor.shape
         Io = 240.0
         alpha = 1
         beta = 0.15
         
         # 1. Convert whole batch to OD (Vectorized)
-        # batch_tensor is [0,1], scale to [0,255]
         I = (batch_tensor * 255.0).permute(0, 2, 3, 1) # (B, H, W, 3)
         N = H * W
         OD = -torch.log((I.reshape(B, N, 3).float() + 1.0) / Io) # (B, N, 3)
         
         # 2. Batch-Wide Stain Matrix Estimation (Vectorized)
-        # Create mask for tissue pixels
         mask = (OD >= beta).all(dim=-1).float() # (B, N)
-        counts = mask.sum(dim=1, keepdim=True).clamp(min=100) # (B, 1) to avoid low-pixel noise
+        counts = mask.sum(dim=1, keepdim=True).clamp(min=100) # (B, 1)
         
-        # Weighted mean and covariance across batch
         mean = (OD * mask.unsqueeze(-1)).sum(dim=1) / counts # (B, 3)
         OD_centered = (OD - mean.unsqueeze(1)) * mask.unsqueeze(-1) # (B, N, 3)
-        
-        # Batch covariance: (B, 3, 3)
         Cov = torch.matmul(OD_centered.transpose(1, 2), OD_centered) / (counts.unsqueeze(-1) - 1).clamp(min=1)
         
-        # Batch Eigenvalue Decomposition
-        # Using a small epsilon on diagonal for stability
         eps = 1e-6 * torch.eye(3, device=device).unsqueeze(0)
         L, V = torch.linalg.eigh(Cov + eps)
-        # Top 2 eigenvectors (B, 3, 2)
         eigvecs = V[:, :, [1, 2]]
         
-        # Project OD onto plane and find quantiles (Vectorized find_HE)
-        # We use a sort-based quantile approach to avoid symbolic numel errors in torch.compile
         That = torch.matmul(OD, eigvecs) # (B, N, 2)
         phi = torch.atan2(That[:, :, 1], That[:, :, 0]) # (B, N)
-        
-        # Filter and sort to find quantiles manually (more robust for torch.compile)
         phi_masked = torch.where(mask > 0, phi, torch.tensor(float('nan'), device=device))
         
         def batch_nanquantile(x, q):
-            # Move to a context where we handle nans by replacing with infinity for sorting
             x_filled = torch.where(torch.isnan(x), torch.tensor(float('inf'), device=device), x)
             x_sorted, _ = torch.sort(x_filled, dim=1)
-            # Count non-nan values per row
             valid_counts = mask.sum(dim=1)
             indices = (q * (valid_counts - 1)).long()
-            # Gather the values at calculated indices
             return x_sorted.gather(1, indices.unsqueeze(1).clamp(min=0)).squeeze(1)
 
         min_phi = batch_nanquantile(phi_masked, alpha / 100) # (B,)
         max_phi = batch_nanquantile(phi_masked, 1 - alpha / 100) # (B,)
         
-        # Reconstruct HE components
         vMin = torch.matmul(eigvecs, torch.stack([torch.cos(min_phi), torch.sin(min_phi)], dim=1).unsqueeze(-1)).squeeze(-1)
         vMax = torch.matmul(eigvecs, torch.stack([torch.cos(max_phi), torch.sin(max_phi)], dim=1).unsqueeze(-1)).squeeze(-1)
         
-        # Determine H and E order (B, 3, 2)
         condition = (vMin[:, 0] > vMax[:, 0]).unsqueeze(-1).unsqueeze(-1)
         HE_batch = torch.where(condition, torch.stack([vMin, vMax], dim=2), torch.stack([vMax, vMin], dim=2))
         
-        # Robustness Check: Replace failed batches with reference HERef
         ref_HE = self.normalizer.HERef.to(device) # (3, 2)
         is_nan = torch.any(torch.isnan(HE_batch.view(B, -1)), dim=1).unsqueeze(-1).unsqueeze(-1)
         HE_batch = torch.where(is_nan, ref_HE.unsqueeze(0), HE_batch)
@@ -142,9 +126,7 @@ class MacenkoNormalizer:
         C = torch.matmul(HE_pinv, Y) # (B, 2, N)
         
         # 4. Normalize Concentrations
-        # Replace nanquantile with manual batch quantile for torch.compile stability
         def batch_quantile_positive(x, q):
-            # Focus on positive values for concentration normalization
             x_pos = torch.where(x > 0, x, torch.tensor(float('-inf'), device=device))
             x_sorted, _ = torch.sort(x_pos, dim=2)
             valid_counts = (x > 0).sum(dim=2)
@@ -157,13 +139,23 @@ class MacenkoNormalizer:
         ref_maxC = self.normalizer.maxCRef.to(device)
         scale = (ref_maxC / maxC_source).unsqueeze(-1) # (B, 2, 1)
         C_norm = C * scale
-        
+
+        # --- PATHOLOGICAL STAIN JITTER (Optional) ---
+        # Apply jitter in H&E concentration space instead of RGB ColorJitter
+        if jitter:
+            # Multiplicative Jitter (alpha): simulate staining intensity variation
+            # Sigma 0.2 means +/- 20% intensity shift
+            alpha_jitter = (torch.rand(B, 2, 1, device=device) * 0.4) + 0.8
+            # Additive Jitter (beta): simulate background noise/wash variation
+            beta_jitter = (torch.rand(B, 2, 1, device=device) * 0.1) - 0.05
+            C_norm = C_norm * alpha_jitter + beta_jitter
+
         # 5. Reconstruct and convert back to image space
         OD_norm = torch.matmul(ref_HE, C_norm)
         Inorm = Io * torch.exp(-OD_norm)
         
         Inorm = torch.clamp(Inorm, 0, 255).reshape(B, 3, H, W) / 255.0
-        return Inorm.to(batch_tensor.dtype)
+        return Inorm.to(dtype)
 
 
     def __repr__(self):
