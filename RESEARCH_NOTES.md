@@ -1017,3 +1017,45 @@ While recall was perfect, **Specificity dropped significantly**.
 ### 📉 Expected Outcome
 - **Generalization**: Reduced sensitivity to subtle "pink/purple" shade shifts between clinical scanners.
 - **Accuracy Target**: Probing for **86-88%** Patient-Level accuracy.
+
+---
+
+## Run 77-81: Online Hard Negative Mining (Optimization 6)
+**Context**: To push through the final 15% error rate, we implemented an **Online Hard Negative Mining (OHNM)** system to prioritize learning from difficult histological artifacts.
+
+### 🛠️ Strategic Implementation: Hard Negative Mining
+1. **Dynamic Weighted Sampling**:
+   - `train.py` now tracks per-sample loss for the entire training set (100k+ patches).
+   - `TransformDataset` updated to return relative sample indices for back-mapping batch losses.
+2. **Online Mining Logic**:
+   - At the end of each epoch, the system identifies "Hard Negatives" (patches with `Actual=0` and `Loss > Average`).
+   - Hard negatives receive a **1.5x cumulative weight boost** via `WeightedRandomSampler.weights`. 
+   - Forces the ConvNeXt-Tiny backbone to repeatedly examine "bacterium-like" artifacts until it learns to discriminate them.
+3. **Clinical Difficulty Reporting**:
+   - Generates a new `hardest_patches.csv` report containing the top 100 highest-loss patches from the training set.
+   - This allows clinicians to audit which specific tissue features are "confusing" the AI.
+4. **Integration with Macenko Jitter**:
+   - OHNM works synergistically with Iteration 4's stain jitter: the model now learns to ignore artifacts across a wide spectrum of H&E shades.
+
+### 📊 Preliminary Expectations
+- **Artifact Suppression**: Further reduction in false positives from mucin and granular debris.
+- **Decision Boundary**: Sharpened decision boundary near the most difficult diagnostic thresholds.
+- **Convergence**: Training may show slower loss reduction (as difficulty increases each epoch), but validation accuracy should see a corresponding boost.
+
+---
+
+## Run 82+: Label Smoothing Calibration (Optimization 7)
+**Context**: Re-integrated Label Smoothing into the `FocalLoss` pipeline after an audit revealed it was lost during the architecture scaling phase.
+
+### 🛠️ Strategic Implementation: Label Smoothing (0.05)
+1. **Calibrated Confidence**:
+   - Implemented `label_smoothing=0.05` within the `FocalLoss` class and the Hard Negative Mining loss calculation.
+   - **Rationale**: 0.05 is the "Goldilocks" value for pathology; it prevents the ConvNeXt-Tiny from becoming overconfident on stain artifacts while retaining enough signal for precise detection of sparse bacteria.
+2. **Recall/Precision Balance**:
+   - By "softening" the targets, we specifically aim to improve **Recall** (currently 76%) by allowing the model to be less than 100% sure about borderline morphologies.
+3. **Mining Stability**:
+   - Applying smoothing to the OHNM loss prevents the mining system from over-prioritizing outliers or mislabeled patches, leading to a more stable training trajectory.
+
+### 📉 Target
+- **Recall**: Push from **76% → 82%+**
+- **Overall Accuracy**: Target **86.5%+**

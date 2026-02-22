@@ -22,6 +22,7 @@ from dataset import HPyloriDataset # Our custom code that finds images/labels
 from model import get_model        # Our custom code that builds the AI brain
 from tqdm import tqdm              # A library that shows a "progress bar"
 import re                          # Regexp to handle file numbering
+import gc
 import torch.nn.functional as F
 from normalization import MacenkoNormalizer
 from meta_classifier import HPyMetaClassifier
@@ -31,15 +32,18 @@ class FocalLoss(nn.Module):
     Focal Loss for Dense Diagnostic Screening.
     Reduces the relative loss for well-classified examples, focusing on 
     the sparse, hard-to-detect bacterial signals.
+    Includes Label Smoothing (Optimization 7) to prevent overconfidence.
     """
-    def __init__(self, alpha=1, gamma=2, weight=None):
+    def __init__(self, alpha=1, gamma=2, weight=None, smoothing=0.05):
         super(FocalLoss, self).__init__()
         self.alpha = alpha
         self.gamma = gamma
         self.weight = weight
+        self.smoothing = smoothing
 
     def forward(self, inputs, targets):
-        ce_loss = F.cross_entropy(inputs, targets, reduction='none', weight=self.weight)
+        # Apply Label Smoothing to the Cross Entropy base (Optimization 7)
+        ce_loss = F.cross_entropy(inputs, targets, reduction='none', weight=self.weight, label_smoothing=self.smoothing)
         pt = torch.exp(-ce_loss)
         focal_loss = self.alpha * (1 - pt)**self.gamma * ce_loss
         return focal_loss.mean()
@@ -333,7 +337,8 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
             img, label, path, coords = self.subset[index]
             if self.transform:
                 img = self.transform(img)
-            return img, label, path, coords
+            # Return index for Hard Negative Mining (Optimization 6)
+            return img, label, path, coords, index
         def __len__(self):
             return len(self.subset)
 
@@ -350,8 +355,10 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
     # strategy A: Weighted Sampling (Oversampling)
     # This ensures that every batch of 32 images is balanced (approx 16 Neg, 16 Pos)
     class_weights = [1.0/max(1, neg_count), 1.0/max(1, pos_count)]
-    sample_weights = [class_weights[t] for t in train_labels]
-    sampler = WeightedRandomSampler(sample_weights, len(sample_weights))
+    # Use torch tensors for Hard Negative Mining (Optimization 6)
+    base_weights = torch.FloatTensor([class_weights[t] for t in train_labels])
+    current_weights = base_weights.clone()
+    sampler = WeightedRandomSampler(current_weights, len(current_weights))
 
     # DataLoaders optimized for NVIDIA A40 (48GB VRAM)
     # Reduced batch_size for ResNet50 (Iteration 2)
@@ -445,6 +452,10 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
         'val_loss': [], 'val_acc': []
     }
 
+    # Initialize Hard Negative Mining (Optimization 6)
+    per_sample_loss = torch.zeros(len(train_indices), device='cpu')
+    num_hard_negatives = 0
+
     for epoch in range(num_epochs):
         print(f"Epoch {epoch+1}/{num_epochs}")
         
@@ -454,7 +465,8 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
         running_corrects = 0
         
         # Hand batches of images to the AI one by one
-        for inputs, labels, paths, coords in tqdm(train_loader, desc="Training"):
+        # Added indices for Hard Negative Mining (Optimization 6)
+        for inputs, labels, paths, coords, indices in tqdm(train_loader, desc="Training"):
             inputs = inputs.to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)
             
@@ -469,7 +481,13 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
             # Use autocast for the forward pass (Mixed Precision)
             with torch.amp.autocast('cuda'):
                 outputs = model(inputs)
-                loss = criterion(outputs, labels)
+                # For OHNM, we need individual losses (no reduction)
+                # Apply same label smoothing for consistency (Optimization 7)
+                batch_loss_individual = F.cross_entropy(outputs, labels, reduction='none', label_smoothing=0.05)
+                loss = criterion(outputs, labels) # Re-compute with weight/focal reduction for optimization
+            
+            # Store individual losses for sampling weight adjustment (Mining)
+            per_sample_loss[indices] = batch_loss_individual.detach().cpu()
             
             _, preds = torch.max(outputs, 1)
             
@@ -486,13 +504,28 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
         epoch_acc = float(running_corrects) / len(train_indices)
         print(f"Train Loss: {epoch_loss:.4f} Acc: {epoch_acc:.4f}")
 
+        # --- Hard Negative Mining Update (Optimization 6) ---
+        avg_loss = per_sample_loss.mean()
+        # Find negatives (0) that have higher-than-average loss
+        train_labels_tensor = torch.LongTensor(train_labels)
+        hard_neg_mask = (train_labels_tensor == 0) & (per_sample_loss > avg_loss)
+        num_hard_negatives = hard_neg_mask.sum().item()
+        
+        if num_hard_negatives > 0:
+            print(f"Hard Negative Mining: Increasing weights for {num_hard_negatives} hard samples.")
+            # Apply 1.5x multiplier to current weights for these samples
+            current_weights[hard_neg_mask] *= 1.5
+            # Update the sampler weights in-place
+            sampler.weights = current_weights
+        
         # --- Self-Test Mode (Validation) ---
         model.eval() # Tell brain it's testing time (no more updating connections)
         val_loss = 0.0
         val_corrects = 0
         
         with torch.no_grad(): # Don't take any math notes, just grade
-            for inputs, labels, paths, coords in tqdm(val_loader, desc="Validation"):
+            # Unpack the 5th index but discard it (Validation)
+            for inputs, labels, paths, coords, _ in tqdm(val_loader, desc="Validation"):
                 inputs = inputs.to(device, non_blocking=True)
                 labels = labels.to(device, non_blocking=True)
                 
@@ -535,6 +568,31 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
 
     print(f"Training complete. Best Val Loss: {best_loss:.4f}")
 
+    # --- Step 7.3: Extract Difficulty Report (Mining) ---
+    # Save the top 100 most difficult patches from the training set
+    # These are the ones where the AI learned the most (highest loss)
+    top_k = 100
+    if len(per_sample_loss) > top_k:
+        top_vals, top_idx = torch.topk(per_sample_loss, k=top_k)
+        difficulty_data = []
+        for i in range(top_k):
+            # Map index back to full dataset to get metadata
+            global_idx = train_indices[top_idx[i].item()]
+            img_path, label, x, y = full_dataset.samples[global_idx]
+            difficulty_data.append({
+                "Rank": i + 1,
+                "Loss": top_vals[i].item(),
+                "Path": img_path,
+                "Label": "Contaminated" if label == 1 else "Negative",
+                "X": x,
+                "Y": y
+            })
+        
+        difficulty_df = pd.DataFrame(difficulty_data)
+        difficulty_csv_path = os.path.join(results_dir, f"{prefix}_hardest_patches.csv")
+        difficulty_df.to_csv(difficulty_csv_path, index=False)
+        print(f"Difficulty Report (Top {top_k} Hardest Patches) saved to {difficulty_csv_path}")
+
     # --- Step 7.4: Memory Cleanup ---
     # Delete training loaders and clear cache to free up RAM for the Hold-Out test
     del train_loader
@@ -544,7 +602,6 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
     del full_dataset # Reclaim dataset memory
     del train_data
     del val_data
-    import gc
     gc.collect()
     torch.cuda.empty_cache()
 
@@ -602,7 +659,8 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
 
     pointer = 0
     with torch.no_grad():
-        for inputs, labels, paths, coords in tqdm(holdout_loader, desc="Patient-Independent Test"):
+        # Unpack indices (discarded for test set evaluation)
+        for inputs, labels, paths, coords, _ in tqdm(holdout_loader, desc="Patient-Independent Test"):
             batch_size_actual = inputs.size(0)
             inputs = inputs.to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)
