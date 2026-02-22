@@ -84,35 +84,82 @@ def generate_gradcam(model, input_batch, target_layer):
     
     return cam, probs
 
-def get_next_run_number(results_dir="results"):
-    """Finds the next available numeric prefix for output files."""
+def get_next_run_number(results_dir="results", current_slurm_id=None):
+    """
+    Finds the next available numeric prefix for output files, 
+    respecting SLURM Job ID order to prevent race conditions during 
+    multi-fold submissions.
+    """
     if not os.path.exists(results_dir):
         return 0
     
     files = os.listdir(results_dir)
-    prefixes = []
-    for f in files:
-        # Check for numeric prefix in results files
-        match = re.match(r"^(\d+)_", f)
-        if match:
-            prefixes.append(int(match.group(1)))
-        
-        # Also check output logs for "Starting Run ID" in case job failed early
-        if f.startswith("output_") and f.endswith(".txt"):
-            try:
-                with open(os.path.join(results_dir, f), 'r') as log:
-                    # Headers are usually at the very top
-                    for _ in range(50):
-                        line = log.readline()
-                        if not line: break
-                        m = re.search(r"Starting Run ID: (\d+)", line)
-                        if m:
-                            prefixes.append(int(m.group(1)))
-                            break
-            except:
-                pass
+    # Map JobID to RunID (to find the most recent anchor)
+    job_to_run = {}
     
-    return max(prefixes) + 1 if prefixes else 0
+    # 1. Scan results for existing mappings
+    for f in files:
+        # Matches formats like "62_102498_..."
+        match = re.match(r"^(\d+)_(\d+)_", f)
+        if match:
+            run_id = int(match.group(1))
+            job_id = int(match.group(2))
+            if job_id not in job_to_run or run_id > job_to_run[job_id]:
+                job_to_run[job_id] = run_id
+        
+        # Also check existing output logs for "Starting Run ID" 
+        if f.startswith("output_") and f.endswith(".txt"):
+            jid_match = re.search(r"output_(\d+).txt", f)
+            if jid_match:
+                jid = int(jid_match.group(1))
+                try:
+                    with open(os.path.join(results_dir, f), 'r') as log:
+                        # Scan top of file for the header we printed
+                        for _ in range(50):
+                            line = log.readline()
+                            if not line: break
+                            m = re.search(r"Run ID: (\d+)", line)
+                            if m:
+                                rid = int(m.group(1))
+                                if jid not in job_to_run or rid > job_to_run[jid]:
+                                    job_to_run[jid] = rid
+                                break
+                except: pass
+
+    # If not running in SLURM, use standard max+1 logic
+    if current_slurm_id is None or not str(current_slurm_id).isdigit():
+        return max(job_to_run.values()) + 1 if job_to_run else 0
+        
+    current_jid = int(current_slurm_id)
+    
+    # 2. Identify all Job IDs in the queue (from output_*.txt placeholders)
+    all_job_ids = set(job_to_run.keys())
+    for f in files:
+        if f.startswith("output_") and f.endswith(".txt"):
+            jid_m = re.search(r"output_(\d+).txt", f)
+            if jid_m:
+                all_job_ids.add(int(jid_m.group(1)))
+    
+    all_job_ids.add(current_jid)
+    sorted_jids = sorted(list(all_job_ids))
+    
+    # 3. Find the most recent anchor point (highest Job ID < current that has a Run ID)
+    older_assigned = sorted([jid for jid in job_to_run.keys() if jid < current_jid])
+    
+    if not older_assigned:
+        # No older jobs found with labels. We are the beginning of this results directory.
+        return sorted_jids.index(current_jid)
+    
+    last_known_jid = older_assigned[-1]
+    last_known_run = job_to_run[last_known_jid]
+    
+    # 4. Count the number of 'slots' (output logs) between then and now
+    rank_offset = 0
+    for jid in sorted_jids:
+        if jid > last_known_jid and jid <= current_jid:
+            rank_offset += 1
+            
+    return last_known_run + rank_offset
 
 # This helper class allows us to have different transforms for train and validation split
 class TransformedSubset(Dataset):
@@ -135,9 +182,9 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
     os.makedirs(results_dir, exist_ok=True)
     
     # Get the numeric run ID and the SLURM job ID (if it exists)
-    run_id = f"{get_next_run_number(results_dir):02d}"
     slurm_id = os.environ.get("SLURM_JOB_ID", "local")
-    prefix = f"{run_id}_{slurm_id}_f{fold_idx}_{model_name}" # Added fold index and model name to prefix
+    run_id = f"{get_next_run_number(results_dir, slurm_id):02d}"
+    prefix = f"{run_id}_{slurm_id}_f{fold_idx}_{model_name}" 
     print(f"--- Starting Run ID: {run_id} (Fold: {fold_idx + 1}/{num_folds}, Model: {model_name}, SLURM Job: {slurm_id}) ---")
 
     # Define versioned file paths
