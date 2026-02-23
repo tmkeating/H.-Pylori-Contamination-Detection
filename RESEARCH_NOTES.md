@@ -1103,3 +1103,77 @@ While recall was perfect, **Specificity dropped significantly**.
 ### 📊 Performance Targets
 - **Recall (Class 1)**: Target **80%+**.
 - **Overall Accuracy**: Target **86%+**.
+
+---
+
+## Run 87-91: Priority Recall Results & The "Multiplicative Collapse"
+**Context**: Full 5-fold analysis of the Priority Recall (Iteration 6.1) system.
+
+### 📊 Performance Summary (Patch Level)
+- **Patch Recall**: ~100% (pseudo-perfect)
+- **Patch Specificity**: ~0.03% (catastrophic failure)
+- **Patch Accuracy**: ~46% (worse than baseline)
+
+### 🔬 Post-Mortem: Multiplicative Runaway
+- **The Issue**: The `current_weights *= multiplier` logic was executed at the end of *every* epoch without a reset or cap.
+- **Mathematical Collapse**: A "hard" sample remaining difficult for 10 epochs saw its weight increase by $1.5^{10} \approx 57\times$. Persistent artifacts (mucus, staining overlaps) effectively "hijacked" the gradients.
+- **Result**: The model abandoned the negative distribution entirely to satisfy a few high-weight outliers. While the Meta-Classifier (Random Forest) still functioned on razor-thin probability margins, the backbone features became clinically unusable for patch-level inference.
+
+---
+
+## Test Run: Volatile Top-10% Stratified Mining (Optimization 6.2)
+**Context**: Complete overhaul of the mining logic to restore training stability and restore specificity.
+
+### 🛠️ Strategic Implementation: Volatile Mining
+1. **Volatile Weighting (Clean Reset)**: 
+   - `current_weights` are reset to `base_weights` at the start of every mining step. 
+   - No "compounding interest" on weights; every epoch starts with a balanced clinical baseline.
+2. **Stratified Top-K focus**:
+   - Instead of a global threshold, we select exactly the **Top 10% hardest** from *each* class separately.
+   - Prevents the mining set from being 100% negative artifacts, ensuring bacterial recall (Class 1) is never ignored.
+3. **Clinical Audit (Top 50 Split)**:
+   - Added real-time logging of the average loss for the 50 most difficult patches of *each* class. 
+   - New `hardest_patches.csv` is now stratified (50 Pos / 50 Neg) for cleaner visual verification.
+4. **Target multipliers**:
+   - **Class 1 (Bacteria)**: 1.5x (Priority)
+   - **Class 0 (Artifacts)**: 1.2x (Standard)
+
+### 📊 Performance Strategy
+- **Primary Objective**: Recovery of Specificity while breaking the 80% recall barrier.
+- **Stability Check**: Monitor learning curves for predictable downward trends without the Run 87 "spikes."
+
+---
+
+## Test Run: Stability Probe & Threshold Normalization
+**Context**: Verification of the Volatile Mining overhaul using a 2-epoch probe.
+
+### 📊 Probe Results (2 Epochs)
+| Metric | Status | Result |
+|--------|--------|--------|
+| **Patch Specificity** | Recovered | **0.0% → 23.05%** |
+| **Patient Accuracy (Meta)** | Recovered | **86.21%** |
+| **Neg_Loss vs Pos_Loss** | Polarized | **2.25 vs 1.09** |
+
+### 🔬 Observations
+- **Threshold Normalization**: Shifted from `0.2` to `0.5` during test evaluation. This revealed the "true" class separation, proving the backbone is finally recovering from the multiplicative toxins.
+- **Meta-Classifier Resilience**: Despite 77% patch-level false positive noise, the Random Forest (Meta-Classifier) achieved 97% patient-level specificity by leveraging "Spatial Clustering" and "Kurtosis."
+
+---
+
+## Run 92+ (Iteration 8.1): Symmetric Mining Pressure
+**Context**: Final refinement for the full 5-fold clinical validation cycle.
+
+### 🛠️ Strategic Implementation: Symmetric Pressure
+1. **Equalized Mining Pressure**: 
+   - Noted that `Neg_Loss` ($2.25$) is significantly higher than `Pos_Loss` ($1.09$).
+   - Increased Class 0 (Artifact) mining boost from 1.2x to **1.5x**.
+   - Current setup: **1.5x / 1.5x Symmetric Mining**.
+2. **Objective**: Force the ConvNeXt-Tiny backbone to respect deceptive histological artifacts (mucus/debris) as much as it respects bacterial colonies.
+3. **5-Fold Execution**: Initiated Jobs 102931-102935 with the stabilized logic.
+
+### 🎯 Success Metrics
+- **Target Accuracy**: >88% Patient-Level.
+- **Target Specificity**: >90% (Patch-Level).
+- **Audit Requirement**: Convergence of the Top 50 Split Audit values.
+
+

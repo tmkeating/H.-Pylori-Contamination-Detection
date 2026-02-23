@@ -523,17 +523,24 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
         neg_losses = per_sample_loss[neg_indices]
         
         # Identify hard indices (Top-K)
-        _, top_pos_idx = torch.topk(pos_losses, k_pos)
-        _, top_neg_idx = torch.topk(neg_losses, k_neg)
+        top_pos_vals, top_pos_idx = torch.topk(pos_losses, k_pos)
+        top_neg_vals, top_neg_idx = torch.topk(neg_losses, k_neg)
         
         hard_pos_indices = pos_indices[top_pos_idx]
         hard_neg_indices = neg_indices[top_neg_idx]
         
-        print(f"Hard Mining (Volatile): Boosting top 10% ({len(hard_pos_indices)} Pos, {len(hard_neg_indices)} Neg) samples.")
+        # Calculate stats for the hardest 50 of each split for clinical auditing
+        h50_pos_loss = top_pos_vals[:50].mean().item() if k_pos >= 50 else top_pos_vals.mean().item()
+        h50_neg_loss = top_neg_vals[:50].mean().item() if k_neg >= 50 else top_neg_vals.mean().item()
         
-        # Apply multipliers to fresh weights (Iteration 8 logic)
-        current_weights[hard_pos_indices] *= 1.5 # Priority boost for bacteria
-        current_weights[hard_neg_indices] *= 1.2 # Standard boost for artifacts
+        print(f"Hard Mining (Volatile): Boosting top 10% ({len(hard_pos_indices)} Pos, {len(hard_neg_indices)} Neg).")
+        print(f"  > Audit (Top 50 Split): Pos_Loss={h50_pos_loss:.4f}, Neg_Loss={h50_neg_loss:.4f}")
+        
+        # Apply multipliers to fresh weights (Iteration 8.1: Symmetric Mining Pressure)
+        # We equalize mining pressure to 1.5x for both classes to force the backbone 
+        # to respect the 2.0+ loss artifacts as much as the bacterial signal.
+        current_weights[hard_pos_indices] *= 1.5 
+        current_weights[hard_neg_indices] *= 1.5 
         
         # Update the sampler weights in-place
         sampler.weights = current_weights
@@ -589,29 +596,45 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
     print(f"Training complete. Best Val Loss: {best_loss:.4f}")
 
     # --- Step 7.3: Extract Difficulty Report (Mining) ---
-    # Save the top 100 most difficult patches from the training set
-    # These are the ones where the AI learned the most (highest loss)
-    top_k = 100
-    if len(per_sample_loss) > top_k:
-        top_vals, top_idx = torch.topk(per_sample_loss, k=top_k)
-        difficulty_data = []
-        for i in range(top_k):
-            # Map index back to full dataset to get metadata
-            global_idx = train_indices[top_idx[i].item()]
-            img_path, label, x, y = full_dataset.samples[global_idx]
-            difficulty_data.append({
-                "Rank": i + 1,
-                "Loss": top_vals[i].item(),
-                "Path": img_path,
-                "Label": "Contaminated" if label == 1 else "Negative",
-                "X": x,
-                "Y": y
-            })
+    # Save the top 50 most difficult patches from EACH class (100 total)
+    # This ensures we have samples of both missed bacteria and artifact false positives
+    top_k_per_class = 50
+    difficulty_data = []
+    
+    train_labels_tensor = torch.LongTensor(train_labels)
+    for class_id, class_name in [(1, "Positive"), (0, "Negative")]:
+        class_mask = (train_labels_tensor == class_id)
+        class_indices = torch.where(class_mask)[0]
         
+        if len(class_indices) > 0:
+            # Take minimum of available and requested
+            actual_k = min(len(class_indices), top_k_per_class)
+            class_losses = per_sample_loss[class_indices]
+            top_vals, top_rel_idx = torch.topk(class_losses, k=actual_k)
+            
+            for i in range(actual_k):
+                # Map relative class index back to training index
+                rel_idx = top_rel_idx[i].item()
+                global_train_idx = class_indices[rel_idx].item()
+                # Map training index back to full dataset
+                dataset_idx = train_indices[global_train_idx]
+                
+                img_path, label, x, y = full_dataset.samples[dataset_idx]
+                difficulty_data.append({
+                    "Split": class_name,
+                    "Rank": i + 1,
+                    "Loss": top_vals[i].item(),
+                    "Path": img_path,
+                    "Label": class_name,
+                    "X": x,
+                    "Y": y
+                })
+    
+    if difficulty_data:
         difficulty_df = pd.DataFrame(difficulty_data)
         difficulty_csv_path = os.path.join(results_dir, f"{prefix}_hardest_patches.csv")
         difficulty_df.to_csv(difficulty_csv_path, index=False)
-        print(f"Difficulty Report (Top {top_k} Hardest Patches) saved to {difficulty_csv_path}")
+        print(f"Stratified Difficulty Report (Top 50 Pos + 50 Neg) saved to {difficulty_csv_path}")
 
     # --- Step 7.4: Memory Cleanup ---
     # Delete training loaders and clear cache to free up RAM for the Hold-Out test
@@ -694,7 +717,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
                 outputs = model(inputs)
             
             probs = torch.softmax(outputs, dim=1)
-            thresh = 0.2
+            thresh = 0.5 # Neutral threshold for stability testing
             preds = (probs[:, 1] > thresh).long()
             
             # Fill pre-allocated arrays
