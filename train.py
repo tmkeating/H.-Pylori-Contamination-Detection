@@ -337,7 +337,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
             img, label, path, coords = self.subset[index]
             if self.transform:
                 img = self.transform(img)
-            # Return index for Hard Negative Mining (Optimization 6)
+            # Return index for Hard Mining (Optimization 6)
             return img, label, path, coords, index
         def __len__(self):
             return len(self.subset)
@@ -355,7 +355,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
     # strategy A: Weighted Sampling (Oversampling)
     # This ensures that every batch of 32 images is balanced (approx 16 Neg, 16 Pos)
     class_weights = [1.0/max(1, neg_count), 1.0/max(1, pos_count)]
-    # Use torch tensors for Hard Negative Mining (Optimization 6)
+    # Use torch tensors for Hard Mining (Optimization 6)
     base_weights = torch.FloatTensor([class_weights[t] for t in train_labels])
     current_weights = base_weights.clone()
     sampler = WeightedRandomSampler(current_weights, len(current_weights))
@@ -388,7 +388,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
     # --- Step 6: Define the Learning Rules ---
     # strategy B: Focal Loss for Sparse Bacteremia Detection
     # Optimized to ignore common histological background and focus on sparse bacteria.
-    loss_weights = torch.FloatTensor([1.0, 1.25]).to(device) # High sensitivity push (Run 58)
+    loss_weights = torch.FloatTensor([1.0, 1.5]).to(device) # High sensitivity push (Optimization 6.1)
     criterion = FocalLoss(gamma=2, weight=loss_weights)
 
     # --- Optimization 5D: Preprocessing & Model Compilation (Kernel Fusion) ---
@@ -452,9 +452,9 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
         'val_loss': [], 'val_acc': []
     }
 
-    # Initialize Hard Negative Mining (Optimization 6)
+    # Initialize Hard Mining (Optimization 6)
     per_sample_loss = torch.zeros(len(train_indices), device='cpu')
-    num_hard_negatives = 0
+    num_hard_samples = 0
 
     for epoch in range(num_epochs):
         print(f"Epoch {epoch+1}/{num_epochs}")
@@ -465,7 +465,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
         running_corrects = 0
         
         # Hand batches of images to the AI one by one
-        # Added indices for Hard Negative Mining (Optimization 6)
+        # Added indices for Hard Mining (Optimization 6)
         for inputs, labels, paths, coords, indices in tqdm(train_loader, desc="Training"):
             inputs = inputs.to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)
@@ -504,17 +504,22 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
         epoch_acc = float(running_corrects) / len(train_indices)
         print(f"Train Loss: {epoch_loss:.4f} Acc: {epoch_acc:.4f}")
 
-        # --- Hard Negative Mining Update (Optimization 6) ---
+        # --- Priority Recall Mining (Optimization 6.1) ---
+        # We boost both types of "hard" samples but give priority to bacteremia (Class 1)
+        # to break the 75% recall bottleneck.
         avg_loss = per_sample_loss.mean()
-        # Find negatives (0) that have higher-than-average loss
         train_labels_tensor = torch.LongTensor(train_labels)
-        hard_neg_mask = (train_labels_tensor == 0) & (per_sample_loss > avg_loss)
-        num_hard_negatives = hard_neg_mask.sum().item()
         
-        if num_hard_negatives > 0:
-            print(f"Hard Negative Mining: Increasing weights for {num_hard_negatives} hard samples.")
-            # Apply 1.5x multiplier to current weights for these samples
-            current_weights[hard_neg_mask] *= 1.5
+        # Identify hard samples of each class
+        hard_pos_mask = (train_labels_tensor == 1) & (per_sample_loss > avg_loss)
+        hard_neg_mask = (train_labels_tensor == 0) & (per_sample_loss > avg_loss)
+        num_hard_samples = (hard_pos_mask | hard_neg_mask).sum().item()
+        
+        if num_hard_samples > 0:
+            print(f"Priority Recall Mining: Increasing weights for {hard_pos_mask.sum().item()} Pos and {hard_neg_mask.sum().item()} Neg hard samples.")
+            # Apply asymmetric multipliers (Optimization 6.1)
+            current_weights[hard_pos_mask] *= 1.5 # Priority boost for bacteria
+            current_weights[hard_neg_mask] *= 1.2 # Standard boost for artifacts
             # Update the sampler weights in-place
             sampler.weights = current_weights
         
@@ -595,6 +600,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
 
     # --- Step 7.4: Memory Cleanup ---
     # Delete training loaders and clear cache to free up RAM for the Hold-Out test
+    print(f"Fold {fold_idx} finished. Max Hard Samples: {num_hard_samples}")
     del train_loader
     del val_loader
     del train_transformed
@@ -602,6 +608,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
     del full_dataset # Reclaim dataset memory
     del train_data
     del val_data
+    del num_hard_samples
     gc.collect()
     torch.cuda.empty_cache()
 

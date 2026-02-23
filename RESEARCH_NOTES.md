@@ -1044,18 +1044,62 @@ While recall was perfect, **Specificity dropped significantly**.
 
 ---
 
-## Run 82+: Label Smoothing Calibration (Optimization 7)
-**Context**: Re-integrated Label Smoothing into the `FocalLoss` pipeline after an audit revealed it was lost during the architecture scaling phase.
+## Run 83+: Symmetrical Hard Mining (Iteration 5 Optimization)
+**Context**: Evaluation of the OHNM (Online Hard Negative Mining) test run (Run 77-81) revealed a recall bottleneck (74-76%). The unilateral focus on negatives (Class 0) effectively suppressed artifacts but caused the model to become over-conservative. To resolve this, we are upgrading to **Symmetrical Hard Mining**.
 
-### 🛠️ Strategic Implementation: Label Smoothing (0.05)
-1. **Calibrated Confidence**:
-   - Implemented `label_smoothing=0.05` within the `FocalLoss` class and the Hard Negative Mining loss calculation.
-   - **Rationale**: 0.05 is the "Goldilocks" value for pathology; it prevents the ConvNeXt-Tiny from becoming overconfident on stain artifacts while retaining enough signal for precise detection of sparse bacteria.
-2. **Recall/Precision Balance**:
-   - By "softening" the targets, we specifically aim to improve **Recall** (currently 76%) by allowing the model to be less than 100% sure about borderline morphologies.
-3. **Mining Stability**:
-   - Applying smoothing to the OHNM loss prevents the mining system from over-prioritizing outliers or mislabeled patches, leading to a more stable training trajectory.
+### 🛠️ Strategic Implementation: Symmetrical Mining
+1. **Balanced Edge-Case Learning**:
+   - Switched from Hard Negative Mining to **Symmetrical Hard Mining**.
+   - The system now identifies "hard" samples from **BOTH** classes (Actual=0 and Actual=1) based on `Loss > Average_Loss`.
+   - **Multiplier Tuning**: Reduced the boost from **1.5x** to **1.2x** to prevent training instability and over-fitting to outliers as we expand the mining scope.
+2. **Recall/Precision Synergy**:
+   - Boosting difficult positive patches (false negatives) aims to push the Recall toward **80%+**.
+   - Boosting difficult negative patches (false positives) maintains the High Precision (**90%+**) achieved in Iteration 4.
+3. **Optimized Training Loop**:
+   - Refined the `per_sample_loss` tracking to be class-agnostic.
+   - Standardized nomenclature to "Hard Samples" in logs for clarity.
+4. **Validation Calibration**:
+   - Retained Label Smoothing (0.05) to ensure the mining system focuses on "legitimately difficult" boundaries rather than noise.
 
-### 📉 Target
-- **Recall**: Push from **76% → 82%+**
-- **Overall Accuracy**: Target **86.5%+**
+### 📊 Performance Strategy
+- **Primary Objective**: Break the **85% Accuracy** barrier.
+- **Secondary Objective**: Improve sensitivity to sparse bacteremia cases that were previously being "filtered out" by the conservative artifact-suppression behavior.
+
+---
+
+## Run 82-86: Symmetrical Hard Mining Results (Iteration 5)
+**Context**: Comprehensive 5-fold cross-validation analysis of the Symmetrical Hard Mining strategy.
+
+### 📊 Performance Summary (Meta Classifier)
+| Metric | Previous Baseline | Run 82-86 | Status |
+|--------|-------------------|-----------|--------|
+| **Overall Accuracy** | 84.66% | **84.31%** | ↓ 0.35% |
+| **Recall (Class 1)**| 74.00% - 76.00% | **74.48%** | No Change |
+| **Precision (Class 1)**| - | 92.70% | High |
+| **F1-Score (Class 1)**| - | 0.826 | Stable |
+
+### 🔍 Symmetrical Mining Audit
+- **Verification**: `hardest_patches.csv` files for all folds confirm that the model is now identifying both **Class 0 (Negative)** and **Class 1 (Contaminated)** as "hard" samples.
+- **Finding**: While the system is successfully identifying hard positives, the 1.2x weight boost was insufficient to overcome the 75% recall bottleneck.
+
+### 📝 Conclusion
+- **85% Barrier Status**: **NOT BROKEN**. 
+- **Next Steps**: Move to Priority Recall Mining with asymmetric multipliers.
+
+---
+
+## Run 87+: Priority Recall Mining (Optimization 6.1)
+**Context**: Optimization 6.1 shifts focus to prioritize "Hard Positives" while maintaining artifact suppression to break the 75% recall bottleneck.
+
+### 🛠️ Strategic Implementation: Priority Recall
+1. **Asymmetric Mining Multipliers**:
+   - **Hard Positives (Class 1)**: Increased boost from 1.2x to **1.5x**.
+   - **Hard Negatives (Class 0)**: Retained **1.2x** boost.
+2. **Focal Loss sensitivity**:
+   - Increased Class 1 `loss_weights` from 1.25 to **1.5**.
+3. **Synergy**:
+   - High-precision ConvNeXt backbone (92.7%) allows for more aggressive recall tuning.
+
+### 📊 Performance Targets
+- **Recall (Class 1)**: Target **80%+**.
+- **Overall Accuracy**: Target **86%+**.
