@@ -1034,7 +1034,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="H. Pylori K-Fold Training")
     parser.add_argument("--fold", type=int, default=0, help="Index of the fold to use for validation (0 to num_folds-1)")
     parser.add_argument("--num_folds", type=int, default=5, help="Total number of folds")
-    parser.add_argument("--model_name", type=str, default="resnet50", choices=["resnet50", "convnext_tiny"], 
+    parser.add_argument("--model_name", type=str, default="convnext_tiny", choices=["resnet50", "convnext_tiny"], 
                         help="Backbone architecture to use (resnet50/convnext_tiny)")
     args = parser.parse_args()
     
