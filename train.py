@@ -504,24 +504,39 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
         epoch_acc = float(running_corrects) / len(train_indices)
         print(f"Train Loss: {epoch_loss:.4f} Acc: {epoch_acc:.4f}")
 
-        # --- Priority Recall Mining (Optimization 6.1) ---
-        # We boost both types of "hard" samples but give priority to bacteremia (Class 1)
-        # to break the 75% recall bottleneck.
-        avg_loss = per_sample_loss.mean()
+        # --- Volatile Top-10% Stratified Mining (Optimization 6.2) ---
+        # We reset weights every epoch to prevent exponential runaway and lock focus
+        # to the 10% hardest samples per class.
+        current_weights = base_weights.clone()
         train_labels_tensor = torch.LongTensor(train_labels)
         
-        # Identify hard samples of each class
-        hard_pos_mask = (train_labels_tensor == 1) & (per_sample_loss > avg_loss)
-        hard_neg_mask = (train_labels_tensor == 0) & (per_sample_loss > avg_loss)
-        num_hard_samples = (hard_pos_mask | hard_neg_mask).sum().item()
+        # Segment by class to ensure stratified mining
+        pos_indices = torch.where(train_labels_tensor == 1)[0]
+        neg_indices = torch.where(train_labels_tensor == 0)[0]
         
-        if num_hard_samples > 0:
-            print(f"Priority Recall Mining: Increasing weights for {hard_pos_mask.sum().item()} Pos and {hard_neg_mask.sum().item()} Neg hard samples.")
-            # Apply asymmetric multipliers (Optimization 6.1)
-            current_weights[hard_pos_mask] *= 1.5 # Priority boost for bacteria
-            current_weights[hard_neg_mask] *= 1.2 # Standard boost for artifacts
-            # Update the sampler weights in-place
-            sampler.weights = current_weights
+        # Select top 10% hardest from each class
+        k_pos = max(1, int(0.10 * len(pos_indices)))
+        k_neg = max(1, int(0.10 * len(neg_indices)))
+        
+        # Get losses for these groups
+        pos_losses = per_sample_loss[pos_indices]
+        neg_losses = per_sample_loss[neg_indices]
+        
+        # Identify hard indices (Top-K)
+        _, top_pos_idx = torch.topk(pos_losses, k_pos)
+        _, top_neg_idx = torch.topk(neg_losses, k_neg)
+        
+        hard_pos_indices = pos_indices[top_pos_idx]
+        hard_neg_indices = neg_indices[top_neg_idx]
+        
+        print(f"Hard Mining (Volatile): Boosting top 10% ({len(hard_pos_indices)} Pos, {len(hard_neg_indices)} Neg) samples.")
+        
+        # Apply multipliers to fresh weights (Iteration 8 logic)
+        current_weights[hard_pos_indices] *= 1.5 # Priority boost for bacteria
+        current_weights[hard_neg_indices] *= 1.2 # Standard boost for artifacts
+        
+        # Update the sampler weights in-place
+        sampler.weights = current_weights
         
         # --- Self-Test Mode (Validation) ---
         model.eval() # Tell brain it's testing time (no more updating connections)

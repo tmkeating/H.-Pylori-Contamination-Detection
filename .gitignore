@@ -15,7 +15,7 @@
 .tox/
 __pycache__/
 -beforeTree/
--archive/
+_archive/
 best_model.pth
 coverage.xml
 env/
