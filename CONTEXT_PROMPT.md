@@ -6,7 +6,7 @@
 
 ## 🔬 Project: H. Pylori Contamination Detection
 **Objective:** Detect *H. pylori* bacteria in histology slides.
-**Constraint:** Must achieve clinical-grade throughput (>500 img/s) and break the 71% accuracy bottleneck of baseline ResNet18 models.
+**Constraint:** Must achieve clinical-grade throughput (>500 img/s) and break the 90% patient accuracy bottleneck.
 
 ### 🛠️ Current Technical Stack (Iteration 8: Dynamic Feature Set)
 - **Architecture:** **ConvNeXt-Tiny** Backbone (Pre-trained) + **Random Forest Meta-Classifier**.
@@ -18,10 +18,9 @@
 ---
 
 ## 📈 Current Performance & Bottlenecks
-1. **The 85% Barrier**: We have broken the 71% bottleneck, reaching **~84%** patient-level accuracy, but sensitivity remains the primary challenge in low-density cases (Sparse Bacteremia).
+1. **The 85% Barrier**: We have reached **~84%** patient-level accuracy, but sensitivity remains the primary challenge in low-density cases (Sparse Bacteremia).
 2. **Artifact Robustness**: We successfully identified a "Multiplicative Collapse" in Run 87-91 where uncontrolled hard mining destroyed specificity. Iteration 6.2 (Volatile Mining) is the stabilization fix.
 3. **Clinical Signature**: The Meta-Classifier thrives on "Spatial Clustering" scores. High-confidence patches that are geographically clumped are the primary differentiator from scattered "Staining Debris."
-
 ---
 
 ## 🚀 Iteration 9: Geometric & Contextual Refinement

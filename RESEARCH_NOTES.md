@@ -1160,20 +1160,36 @@ While recall was perfect, **Specificity dropped significantly**.
 
 ---
 
-## Run 92+ (Iteration 8.1): Symmetric Mining Pressure
-**Context**: Final refinement for the full 5-fold clinical validation cycle.
+## Run 92-96: Iteration 8.1 Results
+**Context**: Evaluation of the Symmetric Mining Pressure (1.5x / 1.5x).
 
-### 🛠️ Strategic Implementation: Symmetric Pressure
-1. **Equalized Mining Pressure**: 
-   - Noted that `Neg_Loss` ($2.25$) is significantly higher than `Pos_Loss` ($1.09$).
-   - Increased Class 0 (Artifact) mining boost from 1.2x to **1.5x**.
-   - Current setup: **1.5x / 1.5x Symmetric Mining**.
-2. **Objective**: Force the ConvNeXt-Tiny backbone to respect deceptive histological artifacts (mucus/debris) as much as it respects bacterial colonies.
-3. **5-Fold Execution**: Initiated Jobs 102931-102935 with the stabilized logic.
+### 📊 Performance Summary (Patch Level)
+- **Mean Patch Sensitivity**: 80.4%
+- **Mean Patch Specificity**: **34.8%** (Floor)
+- **Mean Patient Accuracy**: **86.8%** (excluding Fold 4)
 
-### 🎯 Success Metrics
-- **Target Accuracy**: >88% Patient-Level.
-- **Target Specificity**: >90% (Patch-Level).
-- **Audit Requirement**: Convergence of the Top 50 Split Audit values.
+### 🔬 Post-Mortem
+- **Specificity Ceiling**: Even with symmetric mining, the model finds artifacts ($2.27$ loss) significantly harder than bacteria ($1.43$ loss). The $35\%$ specificity is not enough for clinical confidence.
+- **Orchestration Failure**: Fold 4 dropped to **68%** accuracy because of a race condition; it evaluated using heuristic gates before the Meta-Classifier was trained.
+
+---
+
+## Run 97-101: Iteration 8.2 (Specificity Restoration & Orchestration Fix)
+**Context**: Implementing clinical stabilization to break the specificity floor.
+
+### 🛠️ Strategic Implementation: Inverse Pressure
+1. **Inverse Loss Weights**: 
+   - Shifted `loss_weights` to **[1.5, 1.0]** (favoring Class 0/Negative).
+   - **Rationale**: Force the backbone to prioritize learning the histological background to provide cleaner feature vectors for the meta-layer.
+2. **SLURM Dependency Chain**: 
+   - Moved calling `meta_classifier.py` to a dedicated `HPy_FinalSummary` job.
+   - Used `--dependency=afterok` to ensure the Meta-Classifier only trains once ALL 5 folds have completed.
+3. **Threshold Stability**: Maintained the neutral **0.5** evaluation threshold.
+
+### 🎯 Expected Outcome
+- **Patch Specificity**: Target **>50%**.
+- **System Integrity**: 100% of folds should successfully utilize the trained Meta-Classifier.
+- **Audit Requirement**: Reduction in the `Neg_Loss` baseline in the early epochs.
+
 
 

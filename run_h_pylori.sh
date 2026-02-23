@@ -54,6 +54,5 @@ MODEL_NAME=${MODEL_NAME:-"convnext_tiny"}
 echo "Starting Training for Fold: $FOLD of $NUM_FOLDS using $MODEL_NAME"
 python train.py --fold $FOLD --num_folds $NUM_FOLDS --model_name "$MODEL_NAME"
 
-# 5. Integrate Meta-Classifier: Rebuild the diagnostic layer with the new data
-echo "Updating Meta-Classifier with latest results..."
-python meta_classifier.py
+# Note: Meta-Classifier is now handled globally in submit_all_folds.sh 
+# to avoid race conditions during parallel training.

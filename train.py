@@ -388,7 +388,9 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
     # --- Step 6: Define the Learning Rules ---
     # strategy B: Focal Loss for Sparse Bacteremia Detection
     # Optimized to ignore common histological background and focus on sparse bacteria.
-    loss_weights = torch.FloatTensor([1.0, 1.5]).to(device) # High sensitivity push (Optimization 6.1)
+    # We invert weights to [1.5, 1.0] (Optimization 8.2) to recover specificity
+    # from the 20-30% floor and provide cleaner features for the Meta-Classifier.
+    loss_weights = torch.FloatTensor([1.5, 1.0]).to(device) 
     criterion = FocalLoss(gamma=2, weight=loss_weights)
 
     # --- Optimization 5D: Preprocessing & Model Compilation (Kernel Fusion) ---
