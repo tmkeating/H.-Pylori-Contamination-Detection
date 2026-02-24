@@ -1191,5 +1191,26 @@ While recall was perfect, **Specificity dropped significantly**.
 - **System Integrity**: 100% of folds should successfully utilize the trained Meta-Classifier.
 - **Audit Requirement**: Reduction in the `Neg_Loss` baseline in the early epochs.
 
+---
+
+## Run 102-106: Iteration 8.3 (IHC Calibration & Preprocessing Pivot)
+**Context**: Discovered a critical "Stain-Assumptive Bottleneck". Previous runs (87-101) utilized Macenko Normalization, which is mathematically optimized for H&E (Pink/Blue) stains. The H. Pylori dataset actually uses **IHC (Immunohistochemistry)**, which is **Blue (Hematoxylin) and Brown (DAB)**.
+
+### 🛠️ Strategic Fix: Preprocessing Restoration
+1. **Deactivated Macenko Normalization**: 
+   - Found that Macenko was causing "Categorical Collapse," turning IHC color images into black-and-white silhouettes. This destroyed internal cellular context and textures.
+   - Reverted to standard RGB loading and ImageNet normalization.
+2. **Augmentation Heavy Strategy**:
+   - Increased **Color Jitter** (Brightness/Contrast: 0.15, Saturation: 0.1) and **Random Grayscale** (p=0.15).
+   - **Rationale**: Since we are no longer "Normalizing" to a reference, the model must learn to be color-invariant through exposure to high-variance data.
+3. **Loss weights & Orchestration**:
+   - Maintained **[1.5, 1.0]** inverse weighting to continue the specificity push.
+   - Kept the SLURM orchestration fixes (dependency-linked summary).
+
+### 🎯 Expected Outcome
+- **Color Context Recovery**: Grad-CAM outputs should now show clear Brown bacteria against Blue/Grey backgrounds.
+- **Specificity Breakthrough**: By restoring the "Brown" color signal (DAB), the model should better distinguish bacteria from black histological artifacts/debris.
+- **Patient Accuracy**: Aiming to break the **90% accuracy barrier** with clean IHC features.
+
 
 

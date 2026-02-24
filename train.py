@@ -241,15 +241,17 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
     
     # Use a fixed reference patch for Macenko normalization consistency
     # We prioritize paths relative to our base_data_path for portability
-    rel_ref_path = "CrossValidation/Annotated/B22-47_0/01653.png"
-    reference_patch_path = os.path.join(base_data_path, rel_ref_path)
+    # rel_ref_path = "CrossValidation/Annotated/B22-47_0/01653.png"
+    # reference_patch_path = os.path.join(base_data_path, rel_ref_path)
     
-    if os.path.exists(reference_patch_path):
-        print(f"Fitting Macenko Normalizer (GPU-ready) to reference: {reference_patch_path}")
-        ref_img = Image.open(reference_patch_path).convert("RGB")
-        normalizer.fit(ref_img, device=device)
-    else:
-        print(f"WARNING: Reference patch {reference_patch_path} not found. Normalization disabled.")
+    # if os.path.exists(reference_patch_path):
+    #     print(f"Fitting Macenko Normalizer (GPU-ready) to reference: {reference_patch_path}")
+    #     ref_img = Image.open(reference_patch_path).convert("RGB")
+    #     normalizer.fit(ref_img, device=device)
+    # else:
+    #     print(f"WARNING: Reference patch {reference_patch_path} not found. Normalization disabled.")
+    
+    print("Pre-processing: Using Standard ImageNet Normalization (IHC-mode).")
 
     patient_csv = os.path.join(base_data_path, "PatientDiagnosis.csv")
     patch_csv = os.path.join(base_data_path, "HP_WSI-CoordAnnotatedAllPatches.xlsx") # Use Excel directly
@@ -265,12 +267,13 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
     ])
 
     # GPU-bound: Advanced augmentations performed significantly faster on A40
+    # IHC Pivot: Increased Jitter to compensate for removing Macenko
     gpu_augment = v2.Compose([
         v2.RandomHorizontalFlip(), 
         v2.RandomVerticalFlip(),
         v2.RandomRotation(90),
-        v2.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.05, hue=0.02),
-        v2.RandomGrayscale(p=0.1),
+        v2.ColorJitter(brightness=0.15, contrast=0.15, saturation=0.1, hue=0.05),
+        v2.RandomGrayscale(p=0.15),
         v2.GaussianBlur(kernel_size=3, sigma=(0.1, 2.0)),
     ])
 
@@ -395,11 +398,10 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
 
     # --- Optimization 5D: Preprocessing & Model Compilation (Kernel Fusion) ---
     # We define a fused preprocessing function for deterministic operations.
-    # Moving augmentations OUT of the compiled block to avoid Dynamo recompilation.
+    # IHC Pivot: Disabling Macenko Normalization because dataset is IHC (Blue/Brown),
+    # not H&E. Macenko was causing color collapse to black & white.
     def det_preprocess_batch(inputs, training=False):
-        # normalize_batch is now fully vectorized (Optimization 5D)
-        # Includes optional pathological stain jittering (H&E space)
-        inputs = normalizer.normalize_batch(inputs, jitter=training)
+        # inputs = normalizer.normalize_batch(inputs, jitter=training) # DISABLED for IHC
         inputs = gpu_normalize(inputs)
         return inputs
     
@@ -445,7 +447,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
     # --- Step 7: The Main Training Loop ---
     # We use Automatic Mixed Precision (AMP) to speed up training on the A40
     scaler = torch.amp.GradScaler('cuda')
-    num_epochs = 15 # Increased for high-specificity convergence (Run 42 pivot)
+    num_epochs = 1 # Increased for high-specificity convergence (Run 42 pivot)
     best_loss = float('inf')
     
     # Track the "History" to plot learning curves later
@@ -485,7 +487,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
                 outputs = model(inputs)
                 # For OHNM, we need individual losses (no reduction)
                 # Apply same label smoothing for consistency (Optimization 7)
-                batch_loss_individual = F.cross_entropy(outputs, labels, reduction='none', label_smoothing=0.05)
+                batch_loss_individual = F.cross_entropy(outputs, labels, reduction='none', label_smoothing=0.00)
                 loss = criterion(outputs, labels) # Re-compute with weight/focal reduction for optimization
             
             # Store individual losses for sampling weight adjustment (Mining)
