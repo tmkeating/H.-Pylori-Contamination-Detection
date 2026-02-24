@@ -261,8 +261,9 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
 
     # --- Step 3: Define "Study Habits" (Transforms) ---
     # CPU-bound: Minimal prep to save worker time
+    # Turned off upscaling: patches are original 256x256
     train_transform = transforms.Compose([
-        transforms.Resize((448, 448)), 
+        transforms.Resize((256, 256)), 
         transforms.ToTensor(), 
     ])
 
@@ -279,7 +280,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
 
     # Validation habits: No random variety here, just high resolution
     val_transform = transforms.Compose([
-        transforms.Resize((448, 448)),
+        transforms.Resize((256, 256)),
         transforms.ToTensor(),
     ])
     
@@ -362,8 +363,9 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
     sampler = WeightedRandomSampler(sampler_weights, len(sampler_weights))
 
     # DataLoaders optimized for NVIDIA A40 (48GB VRAM)
-    batch_size = 64
-    accumulation_steps = 2 # Effective batch size = 128 (Optimization 8.4)
+    # Increased batch size due to 256x256 resolution (was 64 @ 448x448)
+    batch_size = 128
+    accumulation_steps = 2 # Effective batch size = 256 (Optimization 8.4)
     train_loader = DataLoader(
         train_transformed, 
         batch_size=batch_size, 
@@ -426,8 +428,9 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
     # --- Step 6.2: OneCycle Learning Rate Scheduler (Optimization 8.4) ---
     # Replaces Step/Plateau with a much smoother Warmup + Cosine Annealing path.
     # We use 1e-4 max LR for ConvNeXt as it is more stable than earlier versions.
+    # We divide by accumulation_steps since we step the scheduler only after an update.
     num_epochs = 15
-    steps_per_epoch = len(train_loader)
+    steps_per_epoch = len(train_loader) // accumulation_steps
     scheduler = optim.lr_scheduler.OneCycleLR(
         optimizer, 
         max_lr=1e-4, 
@@ -500,9 +503,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
                 scaler.step(optimizer)
                 scaler.update()
                 optimizer.zero_grad()
-            
-            # Step scheduler every batch for OneCycle smoothness (Optimization 8.4)
-            scheduler.step()
+                scheduler.step() # Step only after optimizer.step() to avoid warning
             
             # Keep track of scores
             running_loss += (loss.item() * accumulation_steps) * inputs.size(0)

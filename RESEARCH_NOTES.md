@@ -1186,14 +1186,18 @@ While recall was perfect, **Specificity dropped significantly**.
    - Used `--dependency=afterok` to ensure the Meta-Classifier only trains once ALL 5 folds have completed.
 3. **Threshold Stability**: Maintained the neutral **0.5** evaluation threshold.
 
-### 🎯 Expected Outcome
-- **Patch Specificity**: Target **>50%**.
-- **System Integrity**: 100% of folds should successfully utilize the trained Meta-Classifier.
-- **Audit Requirement**: Reduction in the `Neg_Loss` baseline in the early epochs.
+### 🎯 Actual Outcome (Post-Mortem Run 97-101)
+- **Patch Specificity**: Improved significantly.
+- **Patient-Level Performance (LOPO-CV)**:
+  - **Overall Accuracy**: **85.0%**
+  - **Clinical Specificity**: **93.0%** (Significant jump from 35% base)
+  - **Clinical Sensitivity**: **77.0%**
+- **Observation**: These results were achieved **with Macenko Normalization still active**. Despite the "Categorical Collapse" (B&W imagery), the Meta-Classifier successfully distinguished artifacts from bacteria by leveraging distributional signatures (High-order moments/Skewness), even on degraded visual features.
 
 ---
 
 ## Run 102-106: Iteration 8.3 (IHC Calibration & Preprocessing Pivot)
+... (existing content) ...
 **Context**: Discovered a critical "Stain-Assumptive Bottleneck". Previous runs (87-101) utilized Macenko Normalization, which is mathematically optimized for H&E (Pink/Blue) stains. The H. Pylori dataset actually uses **IHC (Immunohistochemistry)**, which is **Blue (Hematoxylin) and Brown (DAB)**.
 
 ### 🛠️ Strategic Fix: Preprocessing Restoration
@@ -1218,18 +1222,24 @@ While recall was perfect, **Specificity dropped significantly**.
 **Context**: While Iteration 8.3 restored color integrity (IHC), validation loss remained highly erratic ("Sawtooth" patterns) and failed to converge smoothly. The "Volatile Top-10% Mining" was causing "Catastrophic Forgetting" by excessively shifting focus to noise artifacts every epoch.
 
 ### 🛠️ Strategic Fix: Smooth Learning Landscape
-1. **Effective Batch Size (128)**: 
-   - Implemented **Gradient Accumulation** (steps=2). 
-   - **Rationale**: Smoothing the stochastic noise of sparse detection. Smaller batches were causing the model to jump between "all-negative" and "all-positive" updates.
+1. **Effective Batch Size (256)**: 
+   - Implemented **Gradient Accumulation** (steps=2) with a physical batch size of 128.
+   - **Rationale**: Smoothing the stochastic noise of sparse detection.
 2. **OneCycleLR Scheduler**:
    - Switched from `ReduceLROnPlateau` to `OneCycleLR` (Linear Warmup + Cosine Annealing).
-   - **Rationale**: The 10% warmup phase protects pre-trained ImageNet weights during early high-loss states, while the cosine decay ensures a smooth finish.
-3. **Removal of Discrete Hard Mining**:
+   - **Rationale**: The 10% warmup phase protects pre-trained ImageNet weights during early high-loss states.
+3. **Native Patch Resolution (256x256)**:
+   - Disabled upscaling to 448x448; now training on native patch dimensions.
+   - **Rationale**: Reduces VRAM footprint and computational overhead while preserving original morphological fidelity. Combined with larger batch sizes to improve throughput.
+4. **Removal of Discrete Hard Mining**:
    - Replaced "Hard Mining" logic with continuous **Focal Loss weighting**.
    - **Rationale**: Focal Loss naturally "mines" hard samples by increasing gradients for high-loss items ($\gamma=2$). Removing the manual weight-reset cycles prevents the "sawtooth" loss collapse.
 4. **Clinical Evaluation Update**:
    - Meta-Classifier now compares results against "Max Prob" and "Suspicious Count" baselines.
    - **Rationale**: Prove that the Meta-Classifier provides "Added Value" over simple heuristic rules.
+5. **SLURM Environment Fix**:
+   - Added `source ../venv/bin/activate` to the dependent summary job in `submit_all_folds.sh`.
+   - **Rationale**: Prevent "python: command not found" errors in the summary job by ensuring the virtual environment is active.
 
 ### 🎯 Expected Outcome
 - **Stability**: Monotonic (or near-monotonic) validation loss descent.

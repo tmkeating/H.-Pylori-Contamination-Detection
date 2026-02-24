@@ -35,6 +35,10 @@ sbatch --dependency=afterok:$DEPENDENCIES <<EOF
 #SBATCH --mem=16G
 #SBATCH -c 4
 #SBATCH -J HPy_FinalSummary
+#SBATCH -o slurm-%j.out
+
+# Activate virtual environment
+source ../venv/bin/activate
 
 echo "All folds finished. Executing Global Meta-Classifier training..."
 python meta_classifier.py

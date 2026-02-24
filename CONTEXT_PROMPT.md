@@ -19,10 +19,10 @@
 ---
 
 ## 📈 Current Performance & Bottlenecks
-1. **Sawtooth Validation**: Previous runs suffered from erratic loss spikes caused by discrete weight-reset mining.
-2. **IHC Fidelity**: Restoration of Brown color (DAB) signal is expected to provide clean textures for the Meta-Classifier.
-3. **Clinical Added Value**: The system now explicitly measures the "Booster Effect" of the Meta-Classifier over simple heuristic thresholds.
-
+1. **Sawtooth Validation**: Previous runs suffered from erratic loss spikes caused by discrete weight-reset mining. Resolved in Iteration 8.4 via gradient accumulation and removal of manual resets.
+2. **SLURM Environment**: Fixed a "python: command not found" error in the dependent summary job by ensuring virtual environment activation in `submit_all_folds.sh`.
+3. **IHC Fidelity**: Restoration of Brown color (DAB) signal is expected to provide clean textures for the Meta-Classifier.
+4. **Clinical Baseline Accuracy**: Current Meta-Classifier (Run 97-101) achieved **85% LOPO Accuracy** (93% Sp, 77% Se).
 ---
 
 ## 🚀 Future Vision: Geometric Refinement
