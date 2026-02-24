@@ -356,16 +356,14 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
     print(f"Training distribution: Negative={neg_count}, Contaminated={pos_count}")
 
     # strategy A: Weighted Sampling (Oversampling)
-    # This ensures that every batch of 32 images is balanced (approx 16 Neg, 16 Pos)
+    # This ensures that every batch of 64 images is balanced (approx 32 Neg, 32 Pos)
     class_weights = [1.0/max(1, neg_count), 1.0/max(1, pos_count)]
-    # Use torch tensors for Hard Mining (Optimization 6)
-    base_weights = torch.FloatTensor([class_weights[t] for t in train_labels])
-    current_weights = base_weights.clone()
-    sampler = WeightedRandomSampler(current_weights, len(current_weights))
+    sampler_weights = torch.FloatTensor([class_weights[t] for t in train_labels])
+    sampler = WeightedRandomSampler(sampler_weights, len(sampler_weights))
 
     # DataLoaders optimized for NVIDIA A40 (48GB VRAM)
-    # Reduced batch_size for ResNet50 (Iteration 2)
     batch_size = 64
+    accumulation_steps = 2 # Effective batch size = 128 (Optimization 8.4)
     train_loader = DataLoader(
         train_transformed, 
         batch_size=batch_size, 
@@ -373,7 +371,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
         num_workers=7, 
         pin_memory=True, 
         persistent_workers=True,
-        prefetch_factor=4 # Increase buffer of ready batches
+        prefetch_factor=4 
     )
     val_loader = DataLoader(
         val_transformed, 
@@ -393,8 +391,9 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
     # Optimized to ignore common histological background and focus on sparse bacteria.
     # We invert weights to [1.5, 1.0] (Optimization 8.2) to recover specificity
     # from the 20-30% floor and provide cleaner features for the Meta-Classifier.
+    # Label Smoothing is disabled (0.0) to maximize bacterial signal contrast (8.4).
     loss_weights = torch.FloatTensor([1.5, 1.0]).to(device) 
-    criterion = FocalLoss(gamma=2, weight=loss_weights)
+    criterion = FocalLoss(gamma=2, weight=loss_weights, smoothing=0.0)
 
     # --- Optimization 5D: Preprocessing & Model Compilation (Kernel Fusion) ---
     # We define a fused preprocessing function for deterministic operations.
@@ -424,9 +423,19 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
         # ResNet default (Adam)
         optimizer = Adam(model.parameters(), lr=2e-5, weight_decay=5e-3)
     
-    # --- Step 6.2: Learning Rate Scheduler ---
-    # Relaxed patience (3) to prevent premature collapse after Epoch 2 (Run 50)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
+    # --- Step 6.2: OneCycle Learning Rate Scheduler (Optimization 8.4) ---
+    # Replaces Step/Plateau with a much smoother Warmup + Cosine Annealing path.
+    # We use 1e-4 max LR for ConvNeXt as it is more stable than earlier versions.
+    num_epochs = 15
+    steps_per_epoch = len(train_loader)
+    scheduler = optim.lr_scheduler.OneCycleLR(
+        optimizer, 
+        max_lr=1e-4, 
+        epochs=num_epochs, 
+        steps_per_epoch=steps_per_epoch,
+        pct_start=0.1, # 10% Warmup phase
+        anneal_strategy='cos'
+    )
     
     # --- Step 6.5: Hardware Optimization (Optional) ---
     # Set this to True ONLY if you have an Intel CPU and compatible IPEX installed.
@@ -447,7 +456,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
     # --- Step 7: The Main Training Loop ---
     # We use Automatic Mixed Precision (AMP) to speed up training on the A40
     scaler = torch.amp.GradScaler('cuda')
-    num_epochs = 1 # Increased for high-specificity convergence (Run 42 pivot)
+    # num_epochs = 15 // Set via scheduler in Step 6.2
     best_loss = float('inf')
     
     # Track the "History" to plot learning curves later
@@ -456,10 +465,6 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
         'val_loss': [], 'val_acc': []
     }
 
-    # Initialize Hard Mining (Optimization 6)
-    per_sample_loss = torch.zeros(len(train_indices), device='cpu')
-    num_hard_samples = 0
-
     for epoch in range(num_epochs):
         print(f"Epoch {epoch+1}/{num_epochs}")
         
@@ -467,88 +472,46 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
         model.train() # Tell the brain it is in learning mode
         running_loss = 0.0
         running_corrects = 0
+        optimizer.zero_grad() # Moved outside to support accumulation
         
         # Hand batches of images to the AI one by one
-        # Added indices for Hard Mining (Optimization 6)
-        for inputs, labels, paths, coords, indices in tqdm(train_loader, desc="Training"):
+        for i, (inputs, labels, paths, coords, indices) in enumerate(tqdm(train_loader, desc="Training")):
             inputs = inputs.to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)
             
             # --- GPU-Based Preprocessing Pipeline (Optimization 5D) ---
-            # 1. Apply stochastic augmentations (Outside compilation)
             inputs = gpu_augment(inputs)
-            # 2. Apply deterministic normalization with jitter (Training=True)
             inputs = det_preprocess_batch(inputs, training=True)
-            
-            optimizer.zero_grad()
             
             # Use autocast for the forward pass (Mixed Precision)
             with torch.amp.autocast('cuda'):
                 outputs = model(inputs)
-                # For OHNM, we need individual losses (no reduction)
-                # Apply same label smoothing for consistency (Optimization 7)
-                batch_loss_individual = F.cross_entropy(outputs, labels, reduction='none', label_smoothing=0.00)
-                loss = criterion(outputs, labels) # Re-compute with weight/focal reduction for optimization
-            
-            # Store individual losses for sampling weight adjustment (Mining)
-            per_sample_loss[indices] = batch_loss_individual.detach().cpu()
+                # Focal Loss already handles "hard mining" via weighted gradients (Optimization 8.4)
+                loss = criterion(outputs, labels) 
+                loss = loss / accumulation_steps # Normalize for accumulation
             
             _, preds = torch.max(outputs, 1)
             
             # Use scaler for the backward pass
             scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
+            
+            # Perform optimization step only after enough gradients have accumulated
+            if (i + 1) % accumulation_steps == 0:
+                scaler.step(optimizer)
+                scaler.update()
+                optimizer.zero_grad()
+            
+            # Step scheduler every batch for OneCycle smoothness (Optimization 8.4)
+            scheduler.step()
             
             # Keep track of scores
-            running_loss += loss.item() * inputs.size(0)
+            running_loss += (loss.item() * accumulation_steps) * inputs.size(0)
             running_corrects += torch.sum(preds == labels.data).item()
             
         epoch_loss = running_loss / len(train_indices)
         epoch_acc = float(running_corrects) / len(train_indices)
         print(f"Train Loss: {epoch_loss:.4f} Acc: {epoch_acc:.4f}")
 
-        # --- Volatile Top-10% Stratified Mining (Optimization 6.2) ---
-        # We reset weights every epoch to prevent exponential runaway and lock focus
-        # to the 10% hardest samples per class.
-        current_weights = base_weights.clone()
-        train_labels_tensor = torch.LongTensor(train_labels)
-        
-        # Segment by class to ensure stratified mining
-        pos_indices = torch.where(train_labels_tensor == 1)[0]
-        neg_indices = torch.where(train_labels_tensor == 0)[0]
-        
-        # Select top 10% hardest from each class
-        k_pos = max(1, int(0.10 * len(pos_indices)))
-        k_neg = max(1, int(0.10 * len(neg_indices)))
-        
-        # Get losses for these groups
-        pos_losses = per_sample_loss[pos_indices]
-        neg_losses = per_sample_loss[neg_indices]
-        
-        # Identify hard indices (Top-K)
-        top_pos_vals, top_pos_idx = torch.topk(pos_losses, k_pos)
-        top_neg_vals, top_neg_idx = torch.topk(neg_losses, k_neg)
-        
-        hard_pos_indices = pos_indices[top_pos_idx]
-        hard_neg_indices = neg_indices[top_neg_idx]
-        
-        # Calculate stats for the hardest 50 of each split for clinical auditing
-        h50_pos_loss = top_pos_vals[:50].mean().item() if k_pos >= 50 else top_pos_vals.mean().item()
-        h50_neg_loss = top_neg_vals[:50].mean().item() if k_neg >= 50 else top_neg_vals.mean().item()
-        
-        print(f"Hard Mining (Volatile): Boosting top 10% ({len(hard_pos_indices)} Pos, {len(hard_neg_indices)} Neg).")
-        print(f"  > Audit (Top 50 Split): Pos_Loss={h50_pos_loss:.4f}, Neg_Loss={h50_neg_loss:.4f}")
-        
-        # Apply multipliers to fresh weights (Iteration 8.1: Symmetric Mining Pressure)
-        # We equalize mining pressure to 1.5x for both classes to force the backbone 
-        # to respect the 2.0+ loss artifacts as much as the bacterial signal.
-        current_weights[hard_pos_indices] *= 1.5 
-        current_weights[hard_neg_indices] *= 1.5 
-        
-        # Update the sampler weights in-place
-        sampler.weights = current_weights
-        
         # --- Self-Test Mode (Validation) ---
         model.eval() # Tell brain it's testing time (no more updating connections)
         val_loss = 0.0
@@ -577,13 +540,6 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
         val_epoch_acc = float(val_corrects) / len(val_indices)
         print(f"Val Loss: {val_epoch_loss:.4f} Acc: {val_epoch_acc:.4f}")
 
-        # --- Step 7.2: Reduce LR on Plateau ---
-        old_lr = optimizer.param_groups[0]['lr']
-        scheduler.step(val_epoch_loss)
-        new_lr = optimizer.param_groups[0]['lr']
-        if new_lr < old_lr:
-            print(f"Learning rate reduced from {old_lr:.2e} to {new_lr:.2e}")
-
         # Store history
         history['train_loss'].append(epoch_loss)
         history['train_acc'].append(epoch_acc)
@@ -599,50 +555,9 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
 
     print(f"Training complete. Best Val Loss: {best_loss:.4f}")
 
-    # --- Step 7.3: Extract Difficulty Report (Mining) ---
-    # Save the top 50 most difficult patches from EACH class (100 total)
-    # This ensures we have samples of both missed bacteria and artifact false positives
-    top_k_per_class = 50
-    difficulty_data = []
-    
-    train_labels_tensor = torch.LongTensor(train_labels)
-    for class_id, class_name in [(1, "Positive"), (0, "Negative")]:
-        class_mask = (train_labels_tensor == class_id)
-        class_indices = torch.where(class_mask)[0]
-        
-        if len(class_indices) > 0:
-            # Take minimum of available and requested
-            actual_k = min(len(class_indices), top_k_per_class)
-            class_losses = per_sample_loss[class_indices]
-            top_vals, top_rel_idx = torch.topk(class_losses, k=actual_k)
-            
-            for i in range(actual_k):
-                # Map relative class index back to training index
-                rel_idx = top_rel_idx[i].item()
-                global_train_idx = class_indices[rel_idx].item()
-                # Map training index back to full dataset
-                dataset_idx = train_indices[global_train_idx]
-                
-                img_path, label, x, y = full_dataset.samples[dataset_idx]
-                difficulty_data.append({
-                    "Split": class_name,
-                    "Rank": i + 1,
-                    "Loss": top_vals[i].item(),
-                    "Path": img_path,
-                    "Label": class_name,
-                    "X": x,
-                    "Y": y
-                })
-    
-    if difficulty_data:
-        difficulty_df = pd.DataFrame(difficulty_data)
-        difficulty_csv_path = os.path.join(results_dir, f"{prefix}_hardest_patches.csv")
-        difficulty_df.to_csv(difficulty_csv_path, index=False)
-        print(f"Stratified Difficulty Report (Top 50 Pos + 50 Neg) saved to {difficulty_csv_path}")
-
     # --- Step 7.4: Memory Cleanup ---
     # Delete training loaders and clear cache to free up RAM for the Hold-Out test
-    print(f"Fold {fold_idx} finished. Max Hard Samples: {num_hard_samples}")
+    print(f"Fold {fold_idx} finished.")
     del train_loader
     del val_loader
     del train_transformed
@@ -650,7 +565,6 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
     del full_dataset # Reclaim dataset memory
     del train_data
     del val_data
-    del num_hard_samples
     gc.collect()
     torch.cuda.empty_cache()
 

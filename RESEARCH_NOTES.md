@@ -1212,5 +1212,27 @@ While recall was perfect, **Specificity dropped significantly**.
 - **Specificity Breakthrough**: By restoring the "Brown" color signal (DAB), the model should better distinguish bacteria from black histological artifacts/debris.
 - **Patient Accuracy**: Aiming to break the **90% accuracy barrier** with clean IHC features.
 
+---
 
+## Run 102-106 (Continued): Iteration 8.4 (Convergence Stabilization & Smooth Optimization)
+**Context**: While Iteration 8.3 restored color integrity (IHC), validation loss remained highly erratic ("Sawtooth" patterns) and failed to converge smoothly. The "Volatile Top-10% Mining" was causing "Catastrophic Forgetting" by excessively shifting focus to noise artifacts every epoch.
+
+### 🛠️ Strategic Fix: Smooth Learning Landscape
+1. **Effective Batch Size (128)**: 
+   - Implemented **Gradient Accumulation** (steps=2). 
+   - **Rationale**: Smoothing the stochastic noise of sparse detection. Smaller batches were causing the model to jump between "all-negative" and "all-positive" updates.
+2. **OneCycleLR Scheduler**:
+   - Switched from `ReduceLROnPlateau` to `OneCycleLR` (Linear Warmup + Cosine Annealing).
+   - **Rationale**: The 10% warmup phase protects pre-trained ImageNet weights during early high-loss states, while the cosine decay ensures a smooth finish.
+3. **Removal of Discrete Hard Mining**:
+   - Replaced "Hard Mining" logic with continuous **Focal Loss weighting**.
+   - **Rationale**: Focal Loss naturally "mines" hard samples by increasing gradients for high-loss items ($\gamma=2$). Removing the manual weight-reset cycles prevents the "sawtooth" loss collapse.
+4. **Clinical Evaluation Update**:
+   - Meta-Classifier now compares results against "Max Prob" and "Suspicious Count" baselines.
+   - **Rationale**: Prove that the Meta-Classifier provides "Added Value" over simple heuristic rules.
+
+### 🎯 Expected Outcome
+- **Stability**: Monotonic (or near-monotonic) validation loss descent.
+- **Recall Restoration**: OneCycleLR's high-momentum phase should help the model escape the "Negative-only" local minima.
+- **Accuracy Target**: Clinical validation > 92%.
 
