@@ -1,0 +1,25 @@
+All folds finished. Executing Global Meta-Classifier training...
+
+--- Starting Meta-Classifier Hyperparameter Sweep (LOPO-CV) ---
+Fitting 116 folds for each of 72 candidates, totalling 8352 fits
+Best Configuration: {'max_depth': 5, 'max_features': 'sqrt', 'min_samples_leaf': 2, 'n_estimators': 400}
+Grid Cross-Val Accuracy: 0.9241
+
+Running Leave-One-Patient-Out Cross-Validation...
+
+--- Meta-Classifier (Leave-One-Out) Results ---
+              precision    recall  f1-score   support
+
+           0       0.90      0.95      0.93       290
+           1       0.95      0.90      0.92       290
+
+    accuracy                           0.92       580
+   macro avg       0.93      0.92      0.92       580
+weighted avg       0.93      0.92      0.92       580
+
+Performance metrics saved to results/meta_performance_metrics.csv
+Meta-level plots (ROC, PR, CM) saved to results/
+Training Meta-Classifier on 580 patients...
+Meta-Classifier saved to meta_rf_classifier.joblib
+Feature Importance saved to results/meta_feature_importance.csv
+Clinical analysis complete.

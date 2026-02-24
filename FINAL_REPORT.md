@@ -58,7 +58,7 @@ The model’s 7.59% accuracy gap is concentrated in **Sparse Bacteremia** cases 
 ---
 
 ## 4. Hardware Efficiency & Deployment
-- **Throughput**: Optimized for **NVIDIA A40 GPUs**, achieving scanning speeds of **~380 patches/sec**.
+- **Throughput**: Optimized for **NVIDIA A40 GPUs**, achieving scanning speeds of **~728 images/sec** (5.69 iter/sec with batch size 128).
 - **Deployment**: The 17-feature signature is highly interpretable, allowing pathologists to audit the **Reliability Score** (Confidence) of each diagnosis.
 
 ## 5. Final Verdict

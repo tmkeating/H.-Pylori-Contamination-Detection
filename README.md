@@ -23,7 +23,7 @@ The pipeline has achieved **Clinical-Grade Reliability** by implementing "Spatia
 | **Patient Accuracy** | **92.41%** | ↑ Project Peak |
 | **Clinical Precision** | **94.57%** | ✓ Minimized False Contaminations |
 | **Sensitivity (Recall)** | **90.00%** | ✓ High Detection Rate |
-| **Throughput (A40)** | **~380 patches/sec** | Optimized for ROI scanning |
+| **Throughput (A40)** | **~728 images/sec** | Optimized for ROI scanning |
 
 ## Diagnostic Architecture: The 17-Feature Meta-Layer
 
@@ -37,7 +37,7 @@ To break the 92% barrier, this model replaces manual heuristic "gates" with a **
 - **Backbone**: `convnext_tiny` (pre-trained on ImageNet-1K).
 - **Scheduler**: `OneCycleLR` (Max LR: 5e-4).
 - **Augmentation**: Geometric (Rotate, Flip) + Color Jittering (0.2) + Morphological (Blur).
-- **Compute**: Optimized for **NVIDIA A40 (48GB)** using a batch size of 128 at 448x448 resolution.
+- **Compute**: Optimized for **NVIDIA A40 (48GB)** using a batch size of 128 (accumulation steps: 2) at 448x448 resolution, achieving **5.69 iterations/second** (~728 images/sec).
 
 ## How to Get Started
 

@@ -1,0 +1,220 @@
+Synchronizing dataset to local scratch: /tmp/ricse03_h_pylori_data
+Data synchronization complete.
+Starting Training for Fold: 3 of 5 using convnext_tiny
+--- Starting Run ID: 115 (Fold: 4/5, Model: convnext_tiny, SLURM Job: 103189) ---
+Using device: cuda
+Set float32 matmul precision to 'high' for A40 hardware optimization.
+Using Data Path: /tmp/ricse03_h_pylori_data
+Pre-processing: Using Standard ImageNet Normalization (IHC-mode).
+--- Fold 4/5 Split ---
+Total Patients: 155
+Training Patients: 124
+Validation Patients: 31
+Independent Patient-level split:
+ - Train: 124 patients, 102754 patches
+ - Val:   31 patients, 27441 patches
+Training distribution: Negative=53223, Contaminated=49531
+Enabling torch.compile for convnext_tiny Optimization (5D)...
+Using AdamW Optimizer for convnext_tiny stability...
+Running on standard PyTorch (IPEX disabled).
+Epoch 1/15
+Train Loss: 0.2213 Acc: 0.6600
+Val Loss: 0.1805 Acc: 0.7650
+Best model saved to results/115_103189_f3_convnext_tiny_model_brain.pth (Val Loss: 0.1805)
+Epoch 2/15
+Train Loss: 0.1748 Acc: 0.7685
+Val Loss: 0.1607 Acc: 0.7987
+Best model saved to results/115_103189_f3_convnext_tiny_model_brain.pth (Val Loss: 0.1607)
+Epoch 3/15
+Train Loss: 0.1544 Acc: 0.7994
+Val Loss: 0.1975 Acc: 0.7717
+Epoch 4/15
+Train Loss: 0.1421 Acc: 0.8167
+Val Loss: 0.1921 Acc: 0.7839
+Epoch 5/15
+Train Loss: 0.1320 Acc: 0.8321
+Val Loss: 0.1859 Acc: 0.8006
+Epoch 6/15
+Train Loss: 0.1237 Acc: 0.8433
+Val Loss: 0.2010 Acc: 0.7960
+Epoch 7/15
+Train Loss: 0.1153 Acc: 0.8563
+Val Loss: 0.2119 Acc: 0.7977
+Epoch 8/15
+Train Loss: 0.1109 Acc: 0.8615
+Val Loss: 0.2014 Acc: 0.8037
+Epoch 9/15
+Train Loss: 0.1034 Acc: 0.8726
+Val Loss: 0.1952 Acc: 0.8204
+Epoch 10/15
+Train Loss: 0.0967 Acc: 0.8806
+Val Loss: 0.2211 Acc: 0.7964
+Epoch 11/15
+Train Loss: 0.0932 Acc: 0.8851
+Val Loss: 0.2369 Acc: 0.8001
+Epoch 12/15
+Train Loss: 0.0905 Acc: 0.8895
+Val Loss: 0.2312 Acc: 0.8002
+Epoch 13/15
+Train Loss: 0.0874 Acc: 0.8927
+Val Loss: 0.2287 Acc: 0.8059
+Epoch 14/15
+Train Loss: 0.0838 Acc: 0.8988
+Val Loss: 0.2323 Acc: 0.8019
+Epoch 15/15
+Train Loss: 0.0833 Acc: 0.9000
+Val Loss: 0.2309 Acc: 0.8033
+Training complete. Best Val Loss: 0.1607
+Fold 3 finished.
+Saved learning curves to results/115_103189_f3_convnext_tiny_learning_curves.png
+
+Evaluating on Independent Hold-Out set from: /tmp/ricse03_h_pylori_data/HoldOut
+Independent Patients in Hold-Out: 116
+Total Patches in Hold-Out: 88794
+
+Classification Report:
+              precision    recall  f1-score   support
+
+    Negative       0.65      0.91      0.76     47557
+Contaminated       0.81      0.43      0.56     41237
+
+    accuracy                           0.69     88794
+   macro avg       0.73      0.67      0.66     88794
+weighted avg       0.72      0.69      0.67     88794
+
+Saved machine-readable report to results/115_103189_f3_convnext_tiny_evaluation_report.csv
+Saved results/115_103189_f3_convnext_tiny_confusion_matrix.png
+Saved results/115_103189_f3_convnext_tiny_roc_curve.png
+Saved results/115_103189_f3_convnext_tiny_pr_curve.png
+Saved results/115_103189_f3_convnext_tiny_probability_histogram.png
+Generating Grad-CAM interpretability maps for convnext_tiny...
+Saved Grad-CAM samples to results/115_103189_f3_convnext_tiny_gradcam_samples
+
+--- Patient-Level Consensus Report (Independent Set) ---
+Warning: Meta-model not found. Falling back to heuristic gates.
+No Meta-Classifier found. Using Heuristic Gates (Fallback)...
+Patient Consensus Report saved to: results/115_103189_f3_convnext_tiny_patient_consensus.csv
+
+Detailed Patient-Level Metrics (Clinical Report):
+PatientID   Actual Predicted  Mean_Prob  Max_Prob  Count_P90  Patch_Count Correct
+   B22-01 Positive  Negative   0.260415  0.529785          0          486      No
+   B22-02 Positive  Positive   0.641329  0.967773         70          391     Yes
+   B22-03 Negative  Negative   0.260415  0.529785          0          486     Yes
+   B22-04 Negative  Negative   0.319984  0.749023          0          287     Yes
+   B22-05 Negative  Negative   0.369454  0.756836          0          810     Yes
+   B22-06 Negative  Negative   0.317409  0.784180          0          891     Yes
+   B22-07 Negative  Negative   0.310263  0.534668          0          154     Yes
+   B22-08 Negative  Negative   0.227093  0.717285          0          321     Yes
+   B22-09 Negative  Negative   0.352725  0.688477          0          360     Yes
+  B22-100 Positive  Positive   0.542246  0.964355         52          400     Yes
+  B22-105 Positive  Negative   0.399423  0.926270          2          412      No
+   B22-10 Negative  Negative   0.435987  0.887695          0         1822     Yes
+   B22-11 Negative  Negative   0.420250  0.824219          0         1217     Yes
+  B22-120 Positive  Negative   0.604904  0.958008         24          719      No
+  B22-128 Positive  Negative   0.586428  0.943848          7          184      No
+   B22-12 Negative  Negative   0.463410  0.840332          0          821     Yes
+  B22-130 Positive  Negative   0.363697  0.960449         25          849      No
+  B22-132 Positive  Positive   0.657070  0.974121        181          729     Yes
+  B22-134 Positive  Negative   0.508235  0.974121         21          296      No
+  B22-135 Positive  Positive   0.683640  0.978516        215          688     Yes
+  B22-136 Positive  Positive   0.563772  0.970215        150         1252     Yes
+  B22-139 Positive  Negative   0.467822  0.944824          5          330      No
+   B22-13 Negative  Negative   0.322062  0.696289          0         1104     Yes
+  B22-146 Negative  Negative   0.236345  0.674805          0          325     Yes
+   B22-14 Negative  Negative   0.448884  0.823242          0          676     Yes
+  B22-159 Positive  Negative   0.446965  0.951172         34         1208      No
+   B22-15 Negative  Negative   0.315343  0.685059          0         1206     Yes
+  B22-161 Positive  Positive   0.452239  0.977051         98         1795     Yes
+  B22-169 Positive  Positive   0.534298  0.966309         63          462     Yes
+   B22-16 Negative  Negative   0.306050  0.694824          0          237     Yes
+   B22-17 Positive  Negative   0.474167  0.968750         11          625      No
+   B22-18 Positive  Positive   0.498344  0.971680         95          953     Yes
+  B22-196 Negative  Negative   0.348880  0.613770          0          179     Yes
+  B22-198 Negative  Negative   0.304552  0.581543          0          223     Yes
+  B22-199 Negative  Negative   0.397567  0.769531          0          438     Yes
+   B22-19 Positive  Positive   0.630882  0.976074        107          395     Yes
+  B22-201 Negative  Negative   0.279098  0.834961          0          744     Yes
+  B22-202 Negative  Negative   0.333474  0.785645          0          964     Yes
+  B22-203 Negative  Negative   0.261093  0.670898          0          730     Yes
+  B22-205 Negative  Negative   0.272482  0.731934          0          654     Yes
+  B22-206 Positive  Negative   0.384788  0.801758          0          769      No
+  B22-207 Negative  Negative   0.312054  0.739258          0          458     Yes
+  B22-208 Negative  Negative   0.254113  0.797852          0         1419     Yes
+  B22-209 Negative  Negative   0.276168  0.587402          0          677     Yes
+   B22-20 Positive  Negative   0.383133  0.955078         23          720      No
+  B22-211 Negative  Negative   0.311905  0.640137          0          377     Yes
+  B22-212 Negative  Negative   0.280952  0.805176          0          898     Yes
+  B22-213 Negative  Negative   0.294854  0.641113          0          520     Yes
+  B22-215 Negative  Negative   0.322633  0.834961          0         1611     Yes
+  B22-220 Negative  Negative   0.287140  0.648438          0         1212     Yes
+  B22-222 Positive  Positive   0.580700  0.971680         49          742     Yes
+  B22-224 Positive  Negative   0.416744  0.931152          3          341      No
+  B22-225 Positive  Negative   0.549100  0.965332         29          637      No
+  B22-226 Negative  Negative   0.268811  0.649414          0          269     Yes
+  B22-227 Negative  Negative   0.224569  0.821777          0          773     Yes
+  B22-229 Negative  Negative   0.243802  0.731934          0         2348     Yes
+  B22-231 Positive  Positive   0.765951  0.974121        904         1839     Yes
+  B22-233 Negative  Negative   0.302292  0.622559          0          308     Yes
+  B22-236 Negative  Negative   0.244798  0.620605          0         1471     Yes
+  B22-237 Negative  Negative   0.285918  0.655762          0          876     Yes
+  B22-238 Negative  Negative   0.434422  0.705078          0          236     Yes
+  B22-239 Negative  Negative   0.306210  0.663574          0          568     Yes
+  B22-242 Negative  Negative   0.338305  0.775879          0          545     Yes
+  B22-243 Negative  Negative   0.271459  0.791504          0          776     Yes
+  B22-246 Negative  Negative   0.290792  0.837891          0          363     Yes
+  B22-247 Negative  Negative   0.395217  0.798340          0         1182     Yes
+  B22-252 Negative  Negative   0.278899  0.560059          0          342     Yes
+  B22-255 Positive  Positive   0.678483  0.978516        350         1243     Yes
+  B22-257 Negative  Negative   0.347561  0.878418          0          193     Yes
+  B22-259 Negative  Negative   0.329187  0.697266          0         1217     Yes
+  B22-261 Negative  Negative   0.326368  0.629883          0          330     Yes
+  B22-262 Positive  Negative   0.263807  0.749023          0          644      No
+  B22-263 Positive  Positive   0.521126  0.977051         43          323     Yes
+  B22-266 Negative  Negative   0.259416  0.775391          0          832     Yes
+  B22-267 Positive  Positive   0.638827  0.973145         97          366     Yes
+  B22-268 Negative  Negative   0.304268  0.804688          0         1092     Yes
+  B22-269 Negative  Negative   0.301615  0.682129          0          838     Yes
+  B22-271 Negative  Negative   0.282023  0.784180          0         1135     Yes
+  B22-272 Positive  Negative   0.390347  0.922363          1          565      No
+  B22-273 Positive  Positive   0.620728  0.976074         93          439     Yes
+  B22-281 Positive  Positive   0.566424  0.976562         74          560     Yes
+  B22-282 Negative  Negative   0.302733  0.609863          0          338     Yes
+  B22-283 Negative  Negative   0.274724  0.764648          0          418     Yes
+  B22-285 Negative  Negative   0.321440  0.721680          0          556     Yes
+  B22-286 Positive  Negative   0.316996  0.929199          4         1167      No
+  B22-293 Positive  Negative   0.492825  0.959961         13          364      No
+  B22-294 Positive  Negative   0.435651  0.962891          2          760      No
+  B22-295 Positive  Negative   0.330281  0.943359          5          762      No
+  B22-309 Positive  Positive   0.486170  0.964355         52          893     Yes
+  B22-310 Positive  Positive   0.443911  0.967773         99         1034     Yes
+  B22-314 Negative  Negative   0.379682  0.712402          0          349     Yes
+  B22-315 Negative  Negative   0.237413  0.705078          0          607     Yes
+   B22-31 Positive  Negative   0.563106  0.965820         28          456      No
+   B22-32 Positive  Positive   0.454043  0.976562         74          803     Yes
+   B22-36 Positive  Negative   0.369033  0.943359          7          379      No
+   B22-39 Positive  Positive   0.509760  0.973633         42          371     Yes
+   B22-41 Positive  Negative   0.487338  0.958496         20          444      No
+   B22-44 Positive  Negative   0.306889  0.881348          0          945      No
+   B22-48 Positive  Negative   0.642398  0.968262          6          580      No
+   B22-49 Positive  Negative   0.384799  0.915527          4          986      No
+   B22-58 Negative  Negative   0.246406  0.609863          0          283     Yes
+   B22-62 Positive  Positive   0.729658  0.976074        225          637     Yes
+   B22-65 Positive  Positive   0.777824  0.974609        215          434     Yes
+   B22-66 Positive  Negative   0.546396  0.953125          7          349      No
+   B22-69 Positive  Negative   0.431286  0.901367          1          385      No
+   B22-72 Positive  Positive   0.739364  0.977539        765         2021     Yes
+   B22-73 Positive  Negative   0.643172  0.960449         12          333      No
+   B22-75 Positive  Positive   0.593283  0.980469        163         1199     Yes
+   B22-78 Positive  Negative   0.629441  0.957520         28          195      No
+   B22-79 Positive  Positive   0.739595  0.970215        188          798     Yes
+   B22-81 Positive  Negative   0.434845  0.786133          0          134      No
+   B22-82 Positive  Negative   0.290609  0.927246          1          598      No
+   B22-85 Positive  Negative   0.359404  0.849609          0          814      No
+   B22-88 Negative  Negative   0.376017  0.775879          0          139     Yes
+   B22-89 Negative  Negative   0.359108  0.924316          2         7352     Yes
+   B22-96 Positive  Negative   0.364018  0.954590          7         2034      No
+
+Generating Patient-Level Visualizations...
+Saved patient-level plots to results
+
+Final Patient-Level Accuracy: 71.55%

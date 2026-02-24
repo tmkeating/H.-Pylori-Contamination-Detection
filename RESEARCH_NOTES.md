@@ -1278,7 +1278,7 @@ While recall was perfect, **Specificity dropped significantly**.
 
 ---
 
-## Run 113+: Iteration 9.2 (Feature Simplification & Spatial De-Noising)
+## Run 112-116: Iteration 9.2 (Feature Simplification & Spatial De-Noising)
 **Context**: Investigation into the "Spatial Clustering" feature revealed a critical data-integrity bottleneck. The coordinate metadata (X, Y) was successfully mapped for less than 2% of the total dataset (2,695 out of 130,195 patches). Maintaining this feature was introducing statistical noise and "fake" signals (e.g., all unmapped patches clumping at [0,0]).
 
 ### 🛠️ Strategic Fix: Feature Pruning
@@ -1315,7 +1315,7 @@ While recall was perfect, **Specificity dropped significantly**.
 
 ---
 
-## Run 116+: Iteration 9.3 (Clinical Visual Refinement)
+## Run 117+: Iteration 9.3 (Clinical Visual Refinement)
 **Context**: Repositioned legends on diagnostics plots to avoid obscuring high-performance quadrants.
 
 ### 🛠️ Strategic Fix: Visual Polish
