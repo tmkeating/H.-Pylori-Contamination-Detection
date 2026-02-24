@@ -287,40 +287,57 @@ def full_visual_report(RUN_ID, MODEL_PATH, MODEL_NAME="resnet50", fold_idx=4, nu
     meta_results = meta.predict(consensus_df)
     
     if meta_results is not None:
-        meta_preds, _ = meta_results
-        pat_probs_final = meta_preds # Using binary as proxy or we'd need probs
-        # To get meta-probs: 
-        clf = joblib.load(meta.model_path)
-        pat_probs_final = clf.predict_proba(consensus_df[meta.features])[:, 1]
+        meta_preds, _, meta_probs = meta_results
+        pat_probs_final = meta_probs
     else:
         # Fallback to Max probability aggregation
         pat_probs_final = pat_probs_max
 
     # --- Step 3: Patient-Level Plots ---
-    # 1. Patient ROC
+    # 1. Patient ROC (Comparing Meta-Classifier, Patch-Level, Max Prob, and Suspicious Count)
     fpr_pat, tpr_pat, _ = roc_curve(pat_labels, pat_probs_final)
     roc_auc_pat = auc(fpr_pat, tpr_pat)
+    
+    fpr_max, tpr_max, _ = roc_curve(pat_labels, pat_probs_max)
+    roc_auc_max = auc(fpr_max, tpr_max)
+    
+    fpr_susp, tpr_susp, _ = roc_curve(pat_labels, consensus_df["Count_P90"])
+    roc_auc_susp = auc(fpr_susp, tpr_susp)
+    
     plt.figure()
-    plt.plot(fpr_pat, tpr_pat, label=f'Patient ROC (AUC = {roc_auc_pat:.4f})')
-    plt.plot(fpr_patch, tpr_patch, '--', alpha=0.5, label=f'Patch ROC (AUC = {roc_auc_patch:.4f})')
-    plt.plot([0, 1], [0, 1], 'k--')
-    plt.xlabel('FPR')
-    plt.ylabel('TPR')
-    plt.title('Patient vs Patch Level ROC')
-    plt.legend()
+    plt.plot(fpr_pat, tpr_pat, color='darkorange', lw=3, label=f'Meta-Classifier (AUC = {roc_auc_pat:.4f})')
+    plt.plot(fpr_max, tpr_max, color='green', linestyle='--', alpha=0.8, label=f'Max Probability (AUC = {roc_auc_max:.4f})')
+    plt.plot(fpr_susp, tpr_susp, color='purple', linestyle=':', alpha=0.8, label=f'Suspicious Count (AUC = {roc_auc_susp:.4f})')
+    plt.plot(fpr_patch, tpr_patch, color='black', linestyle='--', alpha=0.3, label=f'Patch-Level (AUC = {roc_auc_patch:.4f})')
+    
+    plt.plot([0, 1], [0, 1], 'k--', lw=1)
+    plt.xlabel('False Positive Rate')
+    plt.ylabel('True Positive Rate')
+    plt.title('Patient-Level ROC: Clinical Comparison')
+    plt.legend(loc="lower right")
     plt.savefig(f"results/{RUN_ID}_patient_roc_curve.png")
     plt.close()
     
     # 2. Patient PR
     prec_pat, recall_pat, _ = precision_recall_curve(pat_labels, pat_probs_final)
     pr_auc_pat = average_precision_score(pat_labels, pat_probs_final)
+    
+    prec_max, recall_max, _ = precision_recall_curve(pat_labels, pat_probs_max)
+    pr_auc_max = average_precision_score(pat_labels, pat_probs_max)
+    
+    prec_susp, recall_susp, _ = precision_recall_curve(pat_labels, consensus_df["Count_P90"])
+    pr_auc_susp = average_precision_score(pat_labels, consensus_df["Count_P90"])
+    
     plt.figure()
-    plt.plot(recall_pat, prec_pat, label=f'Patient PR (AUC = {pr_auc_pat:.4f})')
-    plt.plot(recall_patch, prec_patch, '--', alpha=0.5, label=f'Patch PR (AUC = {pr_auc_patch:.4f})')
+    plt.plot(recall_pat, prec_pat, color='blue', lw=3, label=f'Meta-Classifier (AP = {pr_auc_pat:.4f})')
+    plt.plot(recall_max, prec_max, color='green', linestyle='--', alpha=0.8, label=f'Max Probability (AP = {pr_auc_max:.4f})')
+    plt.plot(recall_susp, prec_susp, color='purple', linestyle=':', alpha=0.8, label=f'Suspicious Count (AP = {pr_auc_susp:.4f})')
+    plt.plot(recall_patch, prec_patch, color='black', linestyle='--', alpha=0.3, label=f'Patch-Level (AP = {pr_auc_patch:.4f})')
+    
     plt.xlabel('Recall')
     plt.ylabel('Precision')
-    plt.title('Patient vs Patch Level PR')
-    plt.legend()
+    plt.title('Patient-Level Precision-Recall: Clinical Comparison')
+    plt.legend(loc="lower left")
     plt.savefig(f"results/{RUN_ID}_patient_pr_curve.png")
     plt.close()
 

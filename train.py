@@ -951,16 +951,19 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
     meta = HPyMetaClassifier()
     meta_results = meta.predict(consensus_df)
     
+    meta_probs = None
     if meta_results is not None:
-        meta_preds, meta_reliability = meta_results
+        meta_preds, meta_reliability, meta_probs = meta_results
         print("Using Learned Meta-Classifier for Diagnosis...")
         consensus_df["Predicted"] = meta_preds
         consensus_df["Confidence"] = meta_reliability
+        consensus_df["Meta_Prob"] = meta_probs
         consensus_df["Method"] = "RandomForest"
     else:
         print("No Meta-Classifier found. Using Heuristic Gates (Fallback)...")
         consensus_df["Method"] = "HeuristicGate"
         consensus_df["Confidence"] = 1.0 # Heuristic is binary/hard
+        consensus_df["Meta_Prob"] = consensus_df["Max_Prob"] # Fallback for plotting
         
     # Recalculate 'Correct' after potential meta-prediction update
     consensus_df["Correct"] = (consensus_df["Predicted"] == consensus_df["Actual"]).astype(int)
@@ -999,27 +1002,47 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
     plt.savefig(patient_cm_path)
     plt.close()
 
-    # 2. ROC Curve (using Max_Prob as the continuous score)
-    fpr_pat, tpr_pat, _ = roc_curve(consensus_df["Actual"], consensus_df["Max_Prob"])
-    roc_auc_pat = auc(fpr_pat, tpr_pat)
+    # 2. ROC Curve (comparing Meta-Classifier, Max Prob, and Suspicious Count)
+    fpr_meta, tpr_meta, _ = roc_curve(consensus_df["Actual"], consensus_df["Meta_Prob"])
+    roc_auc_meta = auc(fpr_meta, tpr_meta)
+    
+    fpr_max, tpr_max, _ = roc_curve(consensus_df["Actual"], consensus_df["Max_Prob"])
+    roc_auc_max = auc(fpr_max, tpr_max)
+    
+    fpr_susp, tpr_susp, _ = roc_curve(consensus_df["Actual"], consensus_df["Count_P90"])
+    roc_auc_susp = auc(fpr_susp, tpr_susp)
+
     plt.figure()
-    plt.plot(fpr_pat, tpr_pat, color='darkorange', lw=2, label=f'ROC curve (AUC = {roc_auc_pat:0.2f})')
+    plt.plot(fpr_meta, tpr_meta, color='darkorange', lw=3, label=f'Meta-Classifier (AUC = {roc_auc_meta:0.2f})')
+    plt.plot(fpr_max, tpr_max, color='green', lw=2, linestyle='--', label=f'Max Probability (AUC = {roc_auc_max:0.2f})')
+    plt.plot(fpr_susp, tpr_susp, color='purple', lw=2, linestyle=':', label=f'Suspicious Count (AUC = {roc_auc_susp:0.2f})')
+    
     plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
     plt.xlabel('False Positive Rate')
     plt.ylabel('True Positive Rate')
-    plt.title('Patient-Level ROC (Score: Max Patch Prob)')
+    plt.title('Patient-Level ROC: Clinical Comparison')
     plt.legend(loc="lower right")
     plt.savefig(patient_roc_path)
     plt.close()
 
     # 3. Precision-Recall Curve
-    prec_pat, rec_pat, _ = precision_recall_curve(consensus_df["Actual"], consensus_df["Max_Prob"])
-    ap_pat = average_precision_score(consensus_df["Actual"], consensus_df["Max_Prob"])
+    prec_meta, rec_meta, _ = precision_recall_curve(consensus_df["Actual"], consensus_df["Meta_Prob"])
+    ap_meta = average_precision_score(consensus_df["Actual"], consensus_df["Meta_Prob"])
+    
+    prec_max, rec_max, _ = precision_recall_curve(consensus_df["Actual"], consensus_df["Max_Prob"])
+    ap_max = average_precision_score(consensus_df["Actual"], consensus_df["Max_Prob"])
+    
+    prec_susp, rec_susp, _ = precision_recall_curve(consensus_df["Actual"], consensus_df["Count_P90"])
+    ap_susp = average_precision_score(consensus_df["Actual"], consensus_df["Count_P90"])
+
     plt.figure()
-    plt.plot(rec_pat, prec_pat, color='blue', lw=2, label=f'PR curve (AP = {ap_pat:0.2f})')
+    plt.plot(rec_meta, prec_meta, color='blue', lw=3, label=f'Meta-Classifier (AP = {ap_meta:0.2f})')
+    plt.plot(rec_max, prec_max, color='green', lw=2, linestyle='--', label=f'Max Probability (AP = {ap_max:0.2f})')
+    plt.plot(rec_susp, prec_susp, color='purple', lw=2, linestyle=':', label=f'Suspicious Count (AP = {ap_susp:0.2f})')
+    
     plt.xlabel('Recall')
     plt.ylabel('Precision')
-    plt.title('Patient-Level Precision-Recall')
+    plt.title('Patient-Level Precision-Recall: Clinical Comparison')
     plt.legend(loc="lower left")
     plt.savefig(patient_pr_path)
     plt.close()

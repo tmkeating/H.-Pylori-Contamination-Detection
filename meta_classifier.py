@@ -153,8 +153,20 @@ class HPyMetaClassifier:
         # 2. ROC Curve Plot
         fpr, tpr, _ = roc_curve(y_true, y_probs)
         roc_auc = auc(fpr, tpr)
+        
+        # Baseline: Max Probability (Backbone only)
+        fpr_max, tpr_max, _ = roc_curve(data["Actual"], data["Max_Prob"])
+        auc_max = auc(fpr_max, tpr_max)
+        
+        # Baseline: Suspicious Count (Count_P90)
+        fpr_susp, tpr_susp, _ = roc_curve(data["Actual"], data["Count_P90"])
+        auc_susp = auc(fpr_susp, tpr_susp)
+
         plt.figure()
-        plt.plot(fpr, tpr, color='darkorange', lw=2, label=f'Meta ROC curve (AUC = {roc_auc:0.2f})')
+        plt.plot(fpr, tpr, color='darkorange', lw=3, label=f'Meta-Classifier (AUC = {roc_auc:0.2f})')
+        plt.plot(fpr_max, tpr_max, color='green', lw=2, linestyle='--', label=f'Max Probability (AUC = {auc_max:0.2f})')
+        plt.plot(fpr_susp, tpr_susp, color='purple', lw=2, linestyle=':', label=f'Suspicious Count (AUC = {auc_susp:0.2f})')
+        
         plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
         plt.xlim([0.0, 1.0])
         plt.ylim([0.0, 1.05])
@@ -168,8 +180,20 @@ class HPyMetaClassifier:
         # 3. Precision-Recall Curve Plot
         precision, recall, _ = precision_recall_curve(y_true, y_probs)
         ap_score = average_precision_score(y_true, y_probs)
+        
+        # Max Prob PR
+        prec_max, rec_max, _ = precision_recall_curve(data["Actual"], data["Max_Prob"])
+        ap_max = average_precision_score(data["Actual"], data["Max_Prob"])
+        
+        # Suspicious Count PR
+        prec_susp, rec_susp, _ = precision_recall_curve(data["Actual"], data["Count_P90"])
+        ap_susp = average_precision_score(data["Actual"], data["Count_P90"])
+
         plt.figure()
-        plt.plot(recall, precision, color='blue', lw=2, label=f'Meta PR curve (AP = {ap_score:0.2f})')
+        plt.plot(recall, precision, color='blue', lw=3, label=f'Meta-Classifier (AP = {ap_score:0.2f})')
+        plt.plot(rec_max, prec_max, color='green', lw=2, linestyle='--', label=f'Max Probability (AP = {ap_max:0.2f})')
+        plt.plot(rec_susp, prec_susp, color='purple', lw=2, linestyle=':', label=f'Suspicious Count (AP = {ap_susp:0.2f})')
+        
         plt.xlabel('Recall')
         plt.ylabel('Precision')
         plt.title('Meta-Classifier: Precision-Recall (Artifact vs Signal)')
@@ -200,7 +224,7 @@ class HPyMetaClassifier:
         # Reliability = np.abs(prob_positive - 0.5) * 2
         reliability = np.abs(probs[:, 1] - 0.5) * 2 
         
-        return preds, reliability
+        return preds, reliability, probs[:, 1]
 
 if __name__ == "__main__":
     # Orchestration: Automatically find all historical data and rebuild the meta-classifier.
