@@ -93,7 +93,7 @@ def full_visual_report(RUN_ID, MODEL_PATH, MODEL_NAME="resnet50", fold_idx=4, nu
     # Replicate Patient Split (K-Fold strategy from train.py)
     sample_patient_ids = []
     patient_gt = {} 
-    for img_path, label, x, y in full_dataset.samples:
+    for img_path, label in full_dataset.samples:
         folder_name = os.path.basename(os.path.dirname(img_path))
         patient_id = folder_name.split('_')[0]
         sample_patient_ids.append(patient_id)
@@ -136,12 +136,11 @@ def full_visual_report(RUN_ID, MODEL_PATH, MODEL_NAME="resnet50", fold_idx=4, nu
     
     # For patient-level aggregation
     patient_probs = {pid: [] for pid in val_pats}
-    patient_coords = {pid: [] for pid in val_pats}
     
     gradcam_saved = 0
 
     print("Running evaluation on Independent Patient Set...")
-    for inputs, labels, paths, coords in tqdm(test_loader):
+    for inputs, labels, paths in tqdm(test_loader):
         inputs = inputs.to(DEVICE)
         with torch.no_grad():
             outputs = model(inputs)
@@ -158,7 +157,6 @@ def full_visual_report(RUN_ID, MODEL_PATH, MODEL_NAME="resnet50", fold_idx=4, nu
             pid = folder_name.split('_')[0]
             if pid in patient_probs:
                 patient_probs[pid].append(probs_batch[i])
-                patient_coords[pid].append((coords[0][i].item(), coords[1][i].item()))
         
         # Save a few Grad-CAMs while we are at it
         if gradcam_saved < 10:
@@ -240,17 +238,6 @@ def full_visual_report(RUN_ID, MODEL_PATH, MODEL_NAME="resnet50", fold_idx=4, nu
         kurt_val = kurtosis(probs) if len(probs) > 2 else 0
         p90_count = sum(1 for p in probs if p > 0.90)
 
-        # Spatial Context (Optional but recommended for consistency)
-        clustering_score = 0
-        coords_np = np.array(patient_coords[pat_id])
-        high_conf_idx = np.where(probs > 0.90)[0]
-        if len(high_conf_idx) > 1:
-            from sklearn.neighbors import NearestNeighbors
-            pts = coords_np[high_conf_idx]
-            nbrs = NearestNeighbors(n_neighbors=min(5, len(pts))).fit(pts)
-            distances, _ = nbrs.kneighbors(pts)
-            clustering_score = 1.0 / (np.mean(distances) + 1.0)
-
         # Build feature vector
         pat_ids.append(pat_id)
         pat_labels.append(patient_gt[pat_id])
@@ -276,8 +263,7 @@ def full_visual_report(RUN_ID, MODEL_PATH, MODEL_NAME="resnet50", fold_idx=4, nu
             "Count_P70": sum(1 for p in probs if p > 0.70),
             "Count_P80": sum(1 for p in probs if p > 0.80),
             "Count_P90": p90_count,
-            "Patch_Count": len(probs),
-            "Spatial_Clustering": clustering_score
+            "Patch_Count": len(probs)
         })
 
     consensus_df = pd.DataFrame(consensus_data)

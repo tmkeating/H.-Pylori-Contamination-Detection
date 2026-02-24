@@ -338,11 +338,11 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
             self.subset = subset
             self.transform = transform
         def __getitem__(self, index):
-            img, label, path, coords = self.subset[index]
+            img, label, path = self.subset[index]
             if self.transform:
                 img = self.transform(img)
             # Return index for Hard Mining (Optimization 6)
-            return img, label, path, coords, index
+            return img, label, path, index
         def __len__(self):
             return len(self.subset)
 
@@ -478,7 +478,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
         optimizer.zero_grad() # Moved outside to support accumulation
         
         # Hand batches of images to the AI one by one
-        for i, (inputs, labels, paths, coords, indices) in enumerate(tqdm(train_loader, desc="Training")):
+        for i, (inputs, labels, paths, indices) in enumerate(tqdm(train_loader, desc="Training")):
             inputs = inputs.to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)
             
@@ -519,8 +519,8 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
         val_corrects = 0
         
         with torch.no_grad(): # Don't take any math notes, just grade
-            # Unpack the 5th index but discard it (Validation)
-            for inputs, labels, paths, coords, _ in tqdm(val_loader, desc="Validation"):
+            # Unpack the 4th index but discard it (Validation)
+            for inputs, labels, paths, _ in tqdm(val_loader, desc="Validation"):
                 inputs = inputs.to(device, non_blocking=True)
                 labels = labels.to(device, non_blocking=True)
                 
@@ -618,13 +618,12 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
     all_preds = np.zeros(num_holdout, dtype=np.int8)
     all_labels = np.zeros(num_holdout, dtype=np.int8)
     all_probs = np.zeros(num_holdout, dtype=np.float32)
-    all_coords = np.zeros((num_holdout, 2), dtype=np.int32)
     gradcam_samples = []
 
     pointer = 0
     with torch.no_grad():
         # Unpack indices (discarded for test set evaluation)
-        for inputs, labels, paths, coords, _ in tqdm(holdout_loader, desc="Patient-Independent Test"):
+        for inputs, labels, paths, _ in tqdm(holdout_loader, desc="Patient-Independent Test"):
             batch_size_actual = inputs.size(0)
             inputs = inputs.to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)
@@ -643,7 +642,6 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
             all_preds[pointer:pointer+batch_size_actual] = preds.cpu().numpy()
             all_labels[pointer:pointer+batch_size_actual] = labels.cpu().numpy()
             all_probs[pointer:pointer+batch_size_actual] = probs[:, 1].cpu().numpy()
-            all_coords[pointer:pointer+batch_size_actual] = coords.cpu().numpy()
             
             if len(gradcam_samples) < 10:
                 pos_indices = (labels == 1).nonzero(as_tuple=True)[0]
@@ -781,24 +779,20 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
     patient_gt = {}    # { patientID: label }
     
     for idx, prob in enumerate(all_probs):
-        img_path, _, _, _ = holdout_dataset.samples[idx]
+        img_path, _ = holdout_dataset.samples[idx]
         label = all_labels[idx]
-        coord = all_coords[idx]
         
         folder_name = os.path.basename(os.path.dirname(img_path))
         pat_id = folder_name.split('_')[0]
         
         if pat_id not in patient_probs:
             patient_probs[pat_id] = []
-            patient_coords[pat_id] = []
             patient_gt[pat_id] = label
         patient_probs[pat_id].append(prob)
-        patient_coords[pat_id].append(coord)
     
     consensus_data = []
     for pat_id, probs in patient_probs.items():
         probs_np = np.array(probs)
-        coords_np = np.array(patient_coords[pat_id])
         
         avg_prob = np.mean(probs_np)
         max_prob = np.max(probs_np)
@@ -810,21 +804,6 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
         prob_series = pd.Series(probs_np)
         skew = prob_series.skew() if len(probs_np) > 2 else 0
         kurt = prob_series.kurt() if len(probs_np) > 3 else 0
-        
-        # --- Spatial Clustering Logic (New for Run 58) ---
-        # Calculate how 'clumped' the high-probability patches are.
-        # High confidence patches (>0.7) that are close to each other indicate biological colonies.
-        high_conf_idx = np.where(probs_np > 0.70)[0]
-        clustering_score = 0
-        if len(high_conf_idx) > 1:
-            from sklearn.neighbors import NearestNeighbors
-            # Use X, Y coordinates to find nearest neighbors among hot patches
-            pts = coords_np[high_conf_idx]
-            if len(pts) > 1:
-                nbrs = NearestNeighbors(n_neighbors=min(5, len(pts))).fit(pts)
-                distances, _ = nbrs.kneighbors(pts)
-                # Lower average distance means higher clustering
-                clustering_score = 1.0 / (np.mean(distances) + 1.0)
         
         high_conf_count = sum(1 for p in probs if p > 0.90)
         is_dense = high_conf_count >= 40
@@ -858,7 +837,6 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
             "Count_P80": sum(1 for p in probs if p > 0.80),
             "Count_P90": high_conf_count,
             "Patch_Count": len(probs),
-            "Spatial_Clustering": clustering_score,
             "Correct": 1 if pred_label == actual_label else 0
         })
     
@@ -904,7 +882,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
     print("\nDetailed Patient-Level Metrics (Clinical Report):")
     print(print_df[[
         "PatientID", "Actual", "Predicted", "Mean_Prob", "Max_Prob", 
-        "Count_P90", "Patch_Count", "Spatial_Clustering", "Correct"
+        "Count_P90", "Patch_Count", "Correct"
     ]].to_string(index=False))
 
     # --- Step 11: Patient-Level Visualizations ---

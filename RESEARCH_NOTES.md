@@ -1234,10 +1234,10 @@ While recall was perfect, **Specificity dropped significantly**.
 4. **Removal of Discrete Hard Mining**:
    - Replaced "Hard Mining" logic with continuous **Focal Loss weighting**.
    - **Rationale**: Focal Loss naturally "mines" hard samples by increasing gradients for high-loss items ($\gamma=2$). Removing the manual weight-reset cycles prevents the "sawtooth" loss collapse.
-4. **Clinical Evaluation Update**:
+5. **Clinical Evaluation Update**:
    - Meta-Classifier now compares results against "Max Prob" and "Suspicious Count" baselines.
    - **Rationale**: Prove that the Meta-Classifier provides "Added Value" over simple heuristic rules.
-5. **SLURM Environment Fix**:
+6. **SLURM Environment Fix**:
    - Added `source ../venv/bin/activate` to the dependent summary job in `submit_all_folds.sh`.
    - **Rationale**: Prevent "python: command not found" errors in the summary job by ensuring the virtual environment is active.
 
@@ -1248,7 +1248,7 @@ While recall was perfect, **Specificity dropped significantly**.
 
 ---
 
-## Run 112: Iteration 9.1 (Hyperparameter Sweep & Meta-Optimization)
+## Run 107-111: Iteration 9.1 (Hyperparameter Sweep & Meta-Optimization)
 **Context**: Reached 91.55% accuracy in Iteration 8.4. To break the 92% barrier, we are shifting from "Backbone Stabilization" to "Meta-Layer Optimization."
 
 ### 🛠️ Strategic Implementation: Auto-Tuning
@@ -1260,8 +1260,42 @@ While recall was perfect, **Specificity dropped significantly**.
 3. **Automated Deployment**:
    - The final summary job now automatically finds the best configuration before training the production model.
 
+### 📊 Actual Performance (Clinical Breakthrough)
+| Metric | Iteration 8.4 (Heuristic) | **Iteration 9.1 (Auto-Meta)** | Status |
+|--------|---------------------------|------------------------------|--------|
+| **Accuracy** | 91.55% | **92.07%** | ↑ 0.52% |
+| **Precision** | 91.00% | **93.57%** | ↑ 2.57% |
+| **Recall** | 92.00% | **90.34%** | ↓ 1.66% |
+| **F1-Score** | 0.915 | **0.919** | ↑ Stable |
+
+### 🔍 Meta-Optimization Analysis
+1. **Barrier Status**: **92% BARRIER BROKEN**. The transition from heuristic "gates" to a LOPO-optimized Random Forest provided the necessary precision boost.
+2. **Feature Dominance**: 
+   - **Max_Prob (19.5%)**: Still the strongest anchor for diagnosis.
+   - **High-Conf Counts (36.8% combined)**: `Count_P80`, `Count_P70`, and `Count_P90` drive the detection.
+3. **The "Spatial Paradox"**: `Spatial_Clustering` yielded only **0.29%** importance, confirming that sparse coordinate data was a liability.
+
+
+---
+
+## Run 113+: Iteration 9.2 (Feature Simplification & Spatial De-Noising)
+**Context**: Investigation into the "Spatial Clustering" feature revealed a critical data-integrity bottleneck. The coordinate metadata (X, Y) was successfully mapped for less than 2% of the total dataset (2,695 out of 130,195 patches). Maintaining this feature was introducing statistical noise and "fake" signals (e.g., all unmapped patches clumping at [0,0]).
+
+### 🛠️ Strategic Fix: Feature Pruning
+1. **Removed Spatial Clustering**:
+   - Completely stripped "Spatial_Clustering" from the Meta-Classifier's 18-variable signature.
+   - **Rationale**: Features with 98% missing data are "toxic" to Random Forest optimization, potentially causing overfitting to the tiny annotated subset.
+2. **Simplified Data Pipeline**:
+   - Removed all coordinate tracking from `dataset.py` and `train.py`.
+   - **Rationale**: Reduces memory overhead and simplifies the implementation of the "Patient-Level Consensus" logic.
+3. **Refined Statistical Signature (17 Features)**:
+   - The Meta-Classifier now focuses strictly on **Probabilistic Density** (Mean, Max, Std, Percentiles) and **Count-Based** features.
+   - **Rationale**: Since . Pylori$ colonies are best characterized by their "high-probability density" in the IHC stain, these remaining features already capture the core diagnostic signal without the noise of incomplete spatial mapping.
+4. **Synchronized Visualization**:
+   - Updated `generate_visuals.py` to match the new 3-item return format (`image, label, path`) from the dataset loader.
+
 ### 🎯 Expected Outcome
-- **Accuracy Breakthrough**: Cross-validation accuracy > 92%.
-- **Reliability Score**: Improved confidence estimation for borderline (low-density) cases.
-- **Robustness**: Better generalization by finding the optimal "Complexity vs Overfitting" balance.
+- **Accuracy Target**: Maintaining 91.55%+ accuracy while improving the "cleanliness" of the decision boundary.
+- **System Stability**: Faster dataset initialization (~1-2 seconds saved) and simplified clinical reporting.
+- **Model Integrity**: The automated `GridSearchCV` from Iteration 9.1 will now operate on a much more reliable feature set.
 

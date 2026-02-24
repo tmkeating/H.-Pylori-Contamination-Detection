@@ -36,8 +36,7 @@ class HPyMetaClassifier:
             "Count_P50", "Count_P60", "Count_P70", "Count_P80", "Count_P90",
             
             # Exposure & Spatial Context:
-            "Patch_Count",
-            "Spatial_Clustering" # New: Avg neighbors for high-conf patches
+            "Patch_Count"
         ]
         
         # RandomForest Ensemble: 

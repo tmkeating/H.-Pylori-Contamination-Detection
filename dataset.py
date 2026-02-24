@@ -47,22 +47,18 @@ class HPyloriDataset(Dataset):
         # --- Step 2: Load Patch-level data ---
         # Read the specialized file that looks at specific windows/spots within a sample
         self.patch_df = self._load_flexible_df(patch_csv)
-        # Create a dictionary for specific spots: { ("PatientID", "WindowID"): (presence, x, y) }
+        # Create a dictionary for specific spots: { ("PatientID", "WindowID"): presence }
         self.patch_meta = {}
         
-        has_coords = 'X' in self.patch_df.columns and 'Y' in self.patch_df.columns
-
         for _, row in self.patch_df.iterrows():
             pat_id = row['Pat_ID']
             win_id_str = str(row['Window_ID']) # Keep as text to handle "Aug" suffixes
             # Presence 1 is contaminated, everything else (usually -1) is negative
             presence = 1 if row['Presence'] == 1 else 0
-            x = row['X'] if has_coords else 0
-            y = row['Y'] if has_coords else 0
-            self.patch_meta[(pat_id, win_id_str)] = (presence, x, y)
+            self.patch_meta[(pat_id, win_id_str)] = presence
         
         # --- Step 3: Organize all file paths into a list ---
-        self.samples = [] # This will be our master list of (image_path, label, x, y)
+        self.samples = [] # This will be our master list of (image_path, label)
 
         # We will look in multiple potential locations to expand the dataset
         root_parent = os.path.dirname(root_dir)
@@ -104,15 +100,15 @@ class HPyloriDataset(Dataset):
                     # Priority 1: Use the specific spot annotation if we have it
                     if match_key in self.patch_meta:
                         if match_key not in added_keys:
-                            label, x, y = self.patch_meta[match_key]
-                            self.samples.append((os.path.join(patient_path, img_name), label, x, y))
+                            label = self.patch_meta[match_key]
+                            self.samples.append((os.path.join(patient_path, img_name), label))
                             added_keys.add(match_key)
                     
                     # Priority 2: Use overall Negative patient patches
                     elif patient_id in self.patient_densities and self.patient_densities[patient_id] == 'NEGATIVA':
                         file_key = (patient_id, img_name)
                         if file_key not in added_keys:
-                            self.samples.append((os.path.join(patient_path, img_name), 0, 0, 0))
+                            self.samples.append((os.path.join(patient_path, img_name), 0))
                             added_keys.add(file_key)
                     
                     # Priority 3: Use overall Positive patient patches (BAIXA/ALTA)
@@ -120,7 +116,7 @@ class HPyloriDataset(Dataset):
                     elif patient_id in self.patient_densities and self.patient_densities[patient_id] != 'NEGATIVA':
                         file_key = (patient_id, img_name)
                         if file_key not in added_keys:
-                            self.samples.append((os.path.join(patient_path, img_name), 1, 0, 0))
+                            self.samples.append((os.path.join(patient_path, img_name), 1))
                             added_keys.add(file_key)
                     
                     # Priority 4: Otherwise skip
@@ -135,16 +131,16 @@ class HPyloriDataset(Dataset):
         """
         This runs every time the computer "grabs" an image to study it.
         It opens the file, transforms it, and hands it to the model.
-        Returns: (image, label, image_path, coords)
+        Returns: (image, label, image_path)
         """
-        img_path, label, x, y = self.samples[idx] # Get path, label, and coords from our list
+        img_path, label = self.samples[idx] # Get path and label from our list
         image = Image.open(img_path).convert('RGB') # Open the image as a standard color picture
         
         # If we asked for changes (like resizing), apply them now
         if self.transform:
             image = self.transform(image)
             
-        return image, label, img_path, np.array([x, y], dtype=np.float32)
+        return image, label, img_path
 
 if __name__ == "__main__":
     # Test dataset
