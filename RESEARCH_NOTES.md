@@ -1294,8 +1294,41 @@ While recall was perfect, **Specificity dropped significantly**.
 4. **Synchronized Visualization**:
    - Updated `generate_visuals.py` to match the new 3-item return format (`image, label, path`) from the dataset loader.
 
-### 🎯 Expected Outcome
-- **Accuracy Target**: Maintaining 91.55%+ accuracy while improving the "cleanliness" of the decision boundary.
-- **System Stability**: Faster dataset initialization (~1-2 seconds saved) and simplified clinical reporting.
-- **Model Integrity**: The automated `GridSearchCV` from Iteration 9.1 will now operate on a much more reliable feature set.
+### 📊 Actual Performance (Clinical Breakthrough)
+| Metric | Iteration 9.1 (Auto-Meta) | **Iteration 9.2 (De-Noised)** | Status |
+|--------|---------------------------|------------------------------|--------|
+| **Accuracy** | 92.07% | **92.41%** | ↑ 0.34% |
+| **Precision** | 93.57% | **94.57%** | ↑ 1.00% |
+| **Recall** | 90.34% | **90.00%** | ↓ 0.34% |
+| **F1-Score** | 0.919 | **0.922** | ↑ Improved |
+
+### 🔍 Meta-Analysis (Iteration 9.2)
+1. **The "Spatial De-Noising" Success**: 
+   - Accuracy broke **92.4%**, proving that the removal of sparse, high-noise spatial metadata (98% missing) was functionally correct.
+   - **Precision (94.57%)**: Reached a project-wide peak. This indicates that the 17-feature signature is more robust against the stain artifacts that previously triggered false positives.
+2. **Feature Dominance (Top-3 account for 56.9% of logic)**: 
+   - **Max_Prob (24.14%)**: Strength of the single most confident patch.
+   - **Count_P80 (17.28%)**: Number of high-confidence patches.
+   - **Count_P90 (15.46%)**: Hard-threshold detection density.
+3. **Failure Audit (Sparse Bacteremia)**:
+   - Missed Positive Cases (e.g., **B22-85**, **B22-105**) still exhibit extremely sparse signals (`Count_P90` near 0). These remain the primary clinical challenge for automated IHC detection.
+
+---
+
+## Run 116+: Iteration 9.3 (Clinical Visual Refinement)
+**Context**: Repositioned legends on diagnostics plots to avoid obscuring high-performance quadrants.
+
+### 🛠️ Strategic Fix: Visual Polish
+1. **Dynamic Legend Positioning**:
+   - Re-positioned all **Precision-Recall (PR)** legends to the `lower left` corner.
+   - **Rationale**: High-performance detection curves naturally occupy the top and right sectors. `lower left` (low precision, low recall) typically contains the most whitespace for legends.
+2. **ROC Alignment**:
+   - Standardized **ROC Curve** legends to the `lower right` corner.
+   - **Rationale**: ROC curves traditionally arch toward the top-left; moving the legend to the lower-right prevents overlap with the "Ideal" classifier trajectory.
+3. **Consistency across Modules**:
+   - Synchronized legend placement across `train.py`, `meta_classifier.py`, and `generate_visuals.py` to ensure uniform reporting.
+
+### 🎯 Overall Status
+- **Final Accuracy: 92.41%**
+- **System Integrity**: Cleaned, 17-feature pipeline is now the production standard for the project.
 

@@ -160,8 +160,8 @@ if __name__ == "__main__":
     dataset = HPyloriDataset(train_dir, patient_csv, patch_csv, transform=transform)
     print(f"Total samples: {len(dataset)}")
     if len(dataset) > 0:
-        img, lbl, path, coords = dataset[0]
+        img, lbl, path = dataset[0]
         # We use a cautious approach to printing dimensions to satisfy the linter
         # as img could be a PIL Image (size) or a PyTorch Tensor (shape).
         dims = getattr(img, 'shape', getattr(img, 'size', 'Unknown'))
-        print(f"Sample 0 label: {lbl}, coords: {coords}, dimensions: {dims}")
+        print(f"Sample 0 label: {lbl}, dimensions: {dims}")

@@ -240,7 +240,7 @@ class HPyMetaClassifier:
         plt.xlabel('Recall')
         plt.ylabel('Precision')
         plt.title('Meta-Classifier: Precision-Recall (Artifact vs Signal)')
-        plt.legend(loc="upper right")
+        plt.legend(loc="lower left")
         plt.savefig("results/meta_pr.png")
         plt.close()
         

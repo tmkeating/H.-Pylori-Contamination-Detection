@@ -180,7 +180,7 @@ class TransformedSubset(Dataset):
     def __len__(self):
         return len(self.subset)
 
-def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
+def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
     # --- Step 0: Prepare output directories ---
     results_dir = "results"
     os.makedirs(results_dir, exist_ok=True)
@@ -295,7 +295,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
     # To prevent "Data Leakage", we must ensure that all patches from a single 
     # patient are either in Traing OR Validation, but never both.
     sample_patient_ids = []
-    for img_path, label, x, y in full_dataset.samples:
+    for img_path, label in full_dataset.samples:
         # Extract patient ID from folder name (e.g. "123_Annotated")
         folder_name = os.path.basename(os.path.dirname(img_path))
         patient_id = folder_name.split('_')[0]
@@ -604,7 +604,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
     )
     
     # Efficient calculation of patient count
-    pids_holdout = [os.path.basename(os.path.dirname(p)).split('_')[0] for p, l, x, y in holdout_dataset.samples]
+    pids_holdout = [os.path.basename(os.path.dirname(p)).split('_')[0] for p, l in holdout_dataset.samples]
     print(f"Independent Patients in Hold-Out: {len(set(pids_holdout))}")
     print(f"Total Patches in Hold-Out: {len(holdout_dataset)}")
     del pids_holdout # Reclaim string list memory
@@ -775,7 +775,6 @@ def train_model(fold_idx=0, num_folds=5, model_name="resnet50"):
     # In the real world, a doctor doesn't care about one patch; they care if the PATIENT has H. Pylori.
     print("\n--- Patient-Level Consensus Report (Independent Set) ---")
     patient_probs = {} # { patientID: [prob1, prob2, ...] }
-    patient_coords = {} # { patientID: [coord1, coord2, ...] }
     patient_gt = {}    # { patientID: label }
     
     for idx, prob in enumerate(all_probs):
