@@ -53,7 +53,7 @@ To break the 92% barrier, this model replaces manual heuristic "gates" with a **
    ```
 
 3. **Running the Meta-Analysis**:
-   After training all folds, rebuild the clinical meta-layer:
+   If the meta classifier did not run automatically after training all folds, it can be done manually:
    ```bash
    python3 meta_classifier.py
    ```
