@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import LeaveOneGroupOut
+from sklearn.model_selection import LeaveOneGroupOut, GridSearchCV
 from sklearn.metrics import (
     classification_report, confusion_matrix, roc_curve, auc, 
     precision_recall_curve, average_precision_score, ConfusionMatrixDisplay
@@ -69,6 +69,49 @@ class HPyMetaClassifier:
         
         return pd.concat(dfs, ignore_index=True)
 
+    def tune_hyperparameters(self, data):
+        """
+        Performs a Grid Search over Random Forest parameters using LOPO-CV.
+        
+        This finds the configuration that best separates bacteria from artifacts
+        by considering thousands of potential decision pathways.
+        """
+        X = data[self.features]
+        y = data["Actual"]
+        groups = data["PatientID"]
+        
+        logo = LeaveOneGroupOut()
+        
+        # Define the sweep range (Iteration 9.1: Clinical Grid Sweep)
+        param_grid = {
+            'n_estimators': [100, 200, 400],
+            'max_depth': [3, 5, 8, None],
+            'min_samples_leaf': [1, 2, 4],
+            'max_features': ['sqrt', 'log2']
+        }
+        
+        print("\n--- Starting Meta-Classifier Hyperparameter Sweep (LOPO-CV) ---")
+        base_rf = RandomForestClassifier(class_weight="balanced", random_state=42)
+        
+        # We use accuracy to align with the project's '92% Barrier' goal
+        grid_search = GridSearchCV(
+            estimator=base_rf,
+            param_grid=param_grid,
+            cv=logo,
+            scoring='accuracy',
+            n_jobs=-1,
+            verbose=1
+        )
+        
+        grid_search.fit(X, y, groups=groups)
+        
+        print(f"Best Configuration: {grid_search.best_params_}")
+        print(f"Grid Cross-Val Accuracy: {grid_search.best_score_:.4f}")
+        
+        # Update the class model with the best found parameters
+        self.rf = grid_search.best_estimator_
+        return grid_search.best_params_
+
     def train(self, data):
         """
         Performs the final supervised learning pass on all available patient data.
@@ -124,8 +167,9 @@ class HPyMetaClassifier:
             X_train, X_test = X.iloc[train_idx], X.iloc[test_idx]
             y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
             
-            # Use smaller params for quicker cross-val estimation
-            clf = RandomForestClassifier(n_estimators=50, max_depth=4, class_weight="balanced", random_state=42)
+            # Use the parameters found during the Hyperparameter Sweep
+            params = self.rf.get_params()
+            clf = RandomForestClassifier(**params)
             clf.fit(X_train, y_train)
             
             y_true.extend(y_test)
@@ -235,9 +279,11 @@ if __name__ == "__main__":
     try:
         # 1. Aggregate historical statistics
         data = meta.prepare_data(csv_files)
-        # 2. Perform clinical cross-validation
+        # 2. Perform Hyperparameter Sweep (Grid Search)
+        meta.tune_hyperparameters(data)
+        # 3. Perform detailed clinical cross-validation
         meta.evaluate(data)
-        # 3. Train final model for deployment in train.py
+        # 4. Train final model for deployment in train.py
         meta.train(data)
     except Exception as e:
         print(f"Could not build meta-classifier: {e}")

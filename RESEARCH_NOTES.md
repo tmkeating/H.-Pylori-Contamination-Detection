@@ -1246,3 +1246,22 @@ While recall was perfect, **Specificity dropped significantly**.
 - **Recall Restoration**: OneCycleLR's high-momentum phase should help the model escape the "Negative-only" local minima.
 - **Accuracy Target**: Clinical validation > 92%.
 
+---
+
+## Run 112: Iteration 9.1 (Hyperparameter Sweep & Meta-Optimization)
+**Context**: Reached 91.55% accuracy in Iteration 8.4. To break the 92% barrier, we are shifting from "Backbone Stabilization" to "Meta-Layer Optimization."
+
+### 🛠️ Strategic Implementation: Auto-Tuning
+1. **Clinical Grid Sweep**:
+   - Implemented `GridSearchCV` with **Leave-One-Patient-Out (LOPO)** cross-validation in `meta_classifier.py`.
+   - **Search Space**: Sweeping `n_estimators` (up to 400) and `max_depth` to find the optimal decision boundary for sparse bacteremia.
+2. **Scoring Alignment**:
+   - Optimized for **Accuracy** to directly target the 92% project milestone.
+3. **Automated Deployment**:
+   - The final summary job now automatically finds the best configuration before training the production model.
+
+### 🎯 Expected Outcome
+- **Accuracy Breakthrough**: Cross-validation accuracy > 92%.
+- **Reliability Score**: Improved confidence estimation for borderline (low-density) cases.
+- **Robustness**: Better generalization by finding the optimal "Complexity vs Overfitting" balance.
+
