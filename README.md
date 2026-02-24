@@ -63,5 +63,20 @@ To break the 92% barrier, this model replaces manual heuristic "gates" with a **
 - **Max_Prob Dominance**: The single most confident patch remains the strongest predictor (24.14% relative importance) in the ensemble logic.
 
 ## Future Research (Iteration 10)
-- **Sparse Bacteremia Optimization**: Targeting the remaining 7% accuracy gap by focusing on patients with extremely low bacterial density (B22-85, B22-105).
-- **Semi-Supervised Hard-Negative Mining**: Training specifically on the "Artifact vs. Signal" boundary to reach 99%+ precision.
+- **Attention-MIL (Bag-Level MIL)**: Instead of feeding the model one patch at a time, you feed it a "bag" of 500 patches from the same patient. The CNN extracts features from all 500. Then, the AttentionGate looks at all 500 simultaneously, figures out which 5 actually contain bacteria, assigns them a mathematical "weight," and outputs a single Patient-Level Diagnosis directly.
+
+    Why it's better: It completely removes the need for a Meta-Classifier and heuristic rules. The neural network itself learns how to aggregate the data. It learns, natively, that 495 patches are irrelevant background tissue, and optimizes its gradients solely based on the 5 suspicious patches.
+
+- **Test-Time Augmentation**: Augment the patches 8 different ways during verification then average the results to minimize artifacts.
+
+The Right Way (Feature-Level Averaging)
+
+    Step 1: Take Patch 1. Create the 8 TTA versions (rotations/flips).
+
+    Step 2: Pass those 8 images through the ConvNeXt backbone to get 8 feature vectors (shape: [8, 768]).
+
+    Step 3: Calculate the mean of those 8 vectors (shape becomes [1, 768]). This is now your TTA-smoothed feature vector for Patch 1.
+
+    Step 4: Repeat for all 500 patches.
+
+    Step 5: Feed the final bag of 500 smoothed feature vectors (shape: [500, 768]) into the Attention Gate.
