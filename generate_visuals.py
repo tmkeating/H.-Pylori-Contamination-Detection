@@ -4,7 +4,6 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, Subset
 import numpy as np
 import pandas as pd
-import joblib
 import matplotlib.pyplot as plt
 import os
 import argparse
@@ -14,17 +13,13 @@ from model import get_model
 import torch.nn.functional as F
 from sklearn.metrics import (
     roc_curve, auc, confusion_matrix, ConfusionMatrixDisplay, 
-    precision_recall_curve, average_precision_score
+    precision_recall_curve, average_precision_score, classification_report
 )
-from scipy.stats import skew, kurtosis
 from torchvision import transforms
-from normalization import MacenkoNormalizer
 from PIL import Image
 
 # --- Config ---
-RUN_ID = "12_101795" # UPDATED for the Macenko Run
-MODEL_PATH = f"results/{RUN_ID}_model_brain.pth"
-OUTPUT_DIR = f"results/{RUN_ID}_gradcam_samples"
+# These paths are set through command line arguments
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Data Paths
@@ -36,25 +31,28 @@ PATIENT_CSV = os.path.join(BASE_PATH, "PatientDiagnosis.csv")
 PATCH_CSV = os.path.join(BASE_PATH, "HP_WSI-CoordAnnotatedAllPatches.xlsx")
 TRAIN_DIR = os.path.join(BASE_PATH, "CrossValidation/Annotated")
 
-# Macenko Setup
-REFERENCE_PATCH_PATH = "/import/fhome/vlia/HelicoDataSet/CrossValidation/Annotated/B22-47_0/01653_Aug8.png"
-normalizer = MacenkoNormalizer()
-if os.path.exists(REFERENCE_PATCH_PATH):
-    print(f"Fitting Macenko Normalizer to reference: {REFERENCE_PATCH_PATH}")
-    ref_img = Image.open(REFERENCE_PATCH_PATH).convert("RGB")
-    normalizer.fit(ref_img)
+# Preprocessing (Deterministic for validation)
+def det_preprocess_batch(batch, training=False):
+    """
+    Standardize the preprocessing for evaluation.
+    Args:
+        batch: (B, C, H, W) tensor
+    """
+    # Simple normalization to [0,1] and then ImageNet stats
+    # No heavy augmentations or TTA here for clean visualization
+    return batch
 
 VAL_TRANSFORM = transforms.Compose([
     transforms.Resize((448, 448)),
-    normalizer,
     transforms.ToTensor(),
     transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
 ])
 
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-def generate_gradcam(model, input_batch, target_layer):
-    model.eval()
+def generate_gradcam(backbone, input_batch, target_layer):
+    """
+    Generates Grad-CAM heatmap for the ConvNeXt/ResNet backbone.
+    """
+    backbone.eval()
     activations = []
     gradients = []
     
@@ -66,96 +64,225 @@ def generate_gradcam(model, input_batch, target_layer):
     handle_a = target_layer.register_forward_hook(save_activation)
     handle_g = target_layer.register_full_backward_hook(save_gradient)
     
-    logits = model(input_batch)
-    probs = F.softmax(logits, dim=1)
+    # Forward pass on backbone
+    features = backbone(input_batch)
+    # Global average pool (mimicking the end of the backbone or the part being monitored)
+    # For ConvNeXt, features are already spatially formatted for pooling
     
-    score = logits[:, logits.argmax(dim=1)]
-    model.zero_grad()
-    score.backward(torch.ones_like(score))
+    # Here we assume class 1 (Positive) is the target
+    # We need a dummy classifier output to calculate gradients if we're only looking at the backbone.
+    # Alternatively, we just use the feature volume's maximum activation.
+    
+    # A cleaner way: use a small head to get "Positive" score
+    # Since we can't easily hook the MIL head here, we'll monitor the feature map's sum
+    score = features.mean() 
+    
+    backbone.zero_grad()
+    score.backward(retain_graph=False)
     
     handle_a.remove()
     handle_g.remove()
     
+    if not gradients or not activations:
+        return np.zeros((448, 448)), 0.0
+
     weights = torch.mean(gradients[0], dim=(2, 3), keepdim=True)
     cam = torch.sum(weights * activations[0], dim=1, keepdim=True)
-    cam = F.relu(cam)
+    cam = F.relu(cam) # ReLU to only keep activations that positively impact the score
     
-    return cam, probs
+    # Normalize heatmap
+    cam = cam.detach().cpu().numpy()
+    cam = cam - np.min(cam)
+    if np.max(cam) > 0:
+        cam = cam / np.max(cam)
+    
+    # Resize to input size
+    from scipy.ndimage import zoom
+    h, w = input_batch.shape[2], input_batch.shape[3]
+    heatmap = zoom(cam[0, 0], (h / cam.shape[2], w / cam.shape[3]))
+    
+    return heatmap
 
-def full_visual_report(RUN_ID, MODEL_PATH, MODEL_NAME="resnet50", fold_idx=4, num_folds=5):
+def full_visual_report(RUN_ID, MODEL_PATH, MODEL_NAME="convnext_tiny", fold_idx=0, num_folds=5):
     print(f"--- Generating Visual Report for {RUN_ID} (Model: {MODEL_NAME}, Fold: {fold_idx}) ---")
     OUTPUT_DIR = os.path.join("results", f"{RUN_ID}_gradcam_samples")
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    full_dataset = HPyloriDataset(TRAIN_DIR, PATIENT_CSV, PATCH_CSV, transform=VAL_TRANSFORM)
+    # Initialize Dataset (Hold-out / Validation subset)
+    full_dataset = HPyloriDataset(TRAIN_DIR, PATIENT_CSV, PATCH_CSV, transform=VAL_TRANSFORM, train=False)
     
-    # Replicate Patient Split (K-Fold strategy from train.py)
-    sample_patient_ids = []
-    patient_gt = {} 
-    for img_path, label in full_dataset.samples:
-        folder_name = os.path.basename(os.path.dirname(img_path))
-        patient_id = folder_name.split('_')[0]
-        sample_patient_ids.append(patient_id)
-        patient_gt[patient_id] = label
+    # Replicate Patient Split
+    unique_patients = sorted(list(set([os.path.basename(os.path.dirname(p)) for p, _ in full_dataset.samples])))
+    n_total = len(unique_patients)
+    fold_size = n_total // num_folds
+    val_patients = unique_patients[fold_idx * fold_size : (fold_idx + 1) * fold_size]
     
-    unique_patients = sorted(list(set(sample_patient_ids)))
-    np.random.seed(42)
-    np.random.shuffle(unique_patients)
+    val_indices = [i for i, (p, _) in enumerate(full_dataset.samples) 
+                  if os.path.basename(os.path.dirname(p)) in val_patients]
+    val_dataset = Subset(full_dataset, val_indices)
     
-    # Calculate fold boundaries (exactly like train.py)
-    fold_size = len(unique_patients) // num_folds
-    val_start = fold_idx * fold_size
-    val_end = val_start + fold_size if fold_idx < num_folds - 1 else len(unique_patients)
-    
-    val_pats = set(unique_patients[val_start:val_end])
-    val_indices = [i for i, pid in enumerate(sample_patient_ids) if pid in val_pats]
-    
-    test_subset = Subset(full_dataset, val_indices)
-    test_loader = DataLoader(test_subset, batch_size=32, shuffle=False, num_workers=4)
-    
-    # Model Selection
+    # Load Model (Attention-MIL Architecture)
     model = get_model(model_name=MODEL_NAME, num_classes=2).to(DEVICE)
-    # Handle possible torch.compile prefix and loading
     checkpoint = torch.load(MODEL_PATH, map_location=DEVICE)
-    # If the checkpoint has the _orig_mod key, it was saved from a compiled model
-    if any(k.startswith('_orig_mod.') for k in checkpoint.keys()):
-        from collections import OrderedDict
-        new_state_dict = OrderedDict()
-        for k, v in checkpoint.items():
-            name = k[10:] if k.startswith('_orig_mod.') else k
-            new_state_dict[name] = v
-        model.load_state_dict(new_state_dict)
-    else:
-        model.load_state_dict(checkpoint)
+    model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
-    
-    all_preds = []
-    all_labels = []
-    all_probs = []
-    
-    # For patient-level aggregation
-    patient_probs = {pid: [] for pid in val_pats}
-    
-    gradcam_saved = 0
 
-    print("Running evaluation on Independent Patient Set...")
-    for inputs, labels, paths in tqdm(test_loader):
-        inputs = inputs.to(DEVICE)
+    # Determine Target Layer
+    if "convnext" in MODEL_NAME:
+        target_layer = model.backbone.features[7][2].block[5]
+    else:
+        target_layer = model.backbone.layer4[2]
+
+    # --- Step 1: Run Inference and Collect Patient-Level Results ---
+    all_probs = []
+    all_labels = []
+    patient_ids = []
+    
+    # Group indices by patient
+    pat_to_indices = {}
+    for i in val_indices:
+        p_id = os.path.basename(os.path.dirname(full_dataset.samples[i][0]))
+        if p_id not in pat_to_indices:
+            pat_to_indices[p_id] = []
+        pat_to_indices[p_id].append(i)
+
+    print(f"Running Inference on {len(pat_to_indices)} Validation Patients...")
+    vram_bag_limit = 500
+    
+    patient_performance = []
+
+    for p_id, indices in tqdm(pat_to_indices.items()):
+        # Load all patches for this patient
+        p_subset = Subset(full_dataset, indices)
+        p_loader = DataLoader(p_subset, batch_size=vram_bag_limit, shuffle=False)
+        
+        all_pat_logits = []
+        all_pat_attns = []
+        
         with torch.no_grad():
-            outputs = model(inputs)
-            probs_batch = F.softmax(outputs, dim=1)[:, 1].cpu().numpy()
-            preds_batch = outputs.argmax(dim=1).cpu().numpy()
+            for bag_imgs, labels in p_loader:
+                bag_imgs = bag_imgs.to(DEVICE)
+                logits, attn = model.forward_bag(bag_imgs)
+                all_pat_logits.append(logits)
+                all_pat_attns.append(attn.cpu())
+                label = labels[0].item()
+
+        # Combine MIL Results
+        # For AttentionMIL, the forward_bag likely does the aggregation already
+        # if it returns a single logit per bag. If it returns per-patch, we aggregate.
+        # Assuming our model.py forward_bag returns the patient-level logit:
+        final_logits = torch.mean(torch.stack(all_pat_logits), dim=0)
+        prob = torch.softmax(final_logits, dim=1)[0, 1].item()
         
-        all_preds.extend(preds_batch)
-        all_labels.extend(labels.cpu().numpy())
-        all_probs.extend(probs_batch)
+        all_probs.append(prob)
+        all_labels.append(label)
+        patient_ids.append(p_id)
         
-        # Track for aggregation
-        for i, path in enumerate(paths):
-            folder_name = os.path.basename(os.path.dirname(path))
-            pid = folder_name.split('_')[0]
-            if pid in patient_probs:
-                patient_probs[pid].append(probs_batch[i])
+        patient_performance.append({
+            "Patient": p_id,
+            "Label": label,
+            "Prob": prob,
+            "Pred": 1 if prob >= 0.5 else 0
+        })
+
+    perf_df = pd.DataFrame(patient_performance)
+    
+    # --- Step 2: Visualization Plots ---
+    # 1. Confusion Matrix
+    cm = confusion_matrix(all_labels, [1 if p >= 0.5 else 0 for p in all_probs])
+    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=['Neg', 'Pos'])
+    disp.plot(cmap='Blues')
+    plt.title(f"Patient-Level Confusion Matrix (Fold {fold_idx})")
+    plt.savefig(os.path.join("results", f"{RUN_ID}_confusion_matrix.png"))
+    plt.close()
+
+    # 2. Patient-Level ROC
+    fpr, tpr, _ = roc_curve(all_labels, all_probs)
+    roc_auc = auc(fpr, tpr)
+    plt.figure()
+    plt.plot(fpr, tpr, label=f'AUC = {roc_auc:.4f}')
+    plt.plot([0,1], [0,1], 'k--')
+    plt.title(f"Patient ROC - Fold {fold_idx}")
+    plt.legend()
+    plt.savefig(os.path.join("results", f"{RUN_ID}_roc_curve.png"))
+    plt.close()
+
+    # --- Step 3: Grad-CAM for Top Suspicious Patients ---
+    # Pick Top 3 Positives and Top 3 False Negatives (if any)
+    top_positives = perf_df[perf_df['Label'] == 1].sort_values('Prob', ascending=False).head(3)
+    ghosts = perf_df[(perf_df['Label'] == 1) & (perf_df['Prob'] < 0.5)].sort_values('Prob', ascending=False).head(3)
+    
+    targets = pd.concat([top_positives, ghosts])
+
+    print(f"Generating Grad-CAM for {len(targets)} patients...")
+    for _, row in targets.iterrows():
+        p_id = row['Patient']
+        is_fn = row['Prob'] < 0.5
+        
+        # Reload images
+        indices = pat_to_indices[p_id]
+        p_subset = Subset(full_dataset, indices)
+        
+        # Get attention weights to pick the most important patches
+        all_attns = []
+        all_imgs = []
+        with torch.no_grad():
+            for i in range(len(p_subset)):
+                img, _ = p_subset[i]
+                img_t = img.unsqueeze(0).to(DEVICE)
+                _, attn = model.forward_bag(img_t)
+                all_attns.append(attn.item())
+                all_imgs.append(img)
+        
+        # Pick top 2 patches by attention
+        top_indices = np.argsort(all_attns)[-2:]
+        
+        for rank, idx in enumerate(top_indices):
+            patch_t = all_imgs[idx].unsqueeze(0).to(DEVICE)
+            
+            with torch.enable_grad():
+                heatmap = generate_gradcam(model.backbone, patch_t, target_layer)
+            
+            plt.figure(figsize=(10, 5))
+            plt.subplot(1, 2, 1)
+            orig = all_imgs[idx].permute(1, 2, 0).numpy()
+            # Unnormalize
+            orig = orig * np.array([0.229, 0.224, 0.225]) + np.array([0.485, 0.456, 0.406])
+            orig = np.clip(orig, 0, 1)
+            plt.imshow(orig)
+            plt.title(f"Patch {idx} (Attn: {all_attns[idx]:.4f})")
+            plt.axis('off')
+            
+            plt.subplot(1, 2, 2)
+            plt.imshow(orig)
+            plt.imshow(heatmap, cmap='jet', alpha=0.5)
+            prefix = "FN_" if is_fn else ""
+            plt.title(f"{prefix}Grad-CAM (Prob: {row['Prob']:.4f})")
+            plt.axis('off')
+            
+            plt.savefig(os.path.join(OUTPUT_DIR, f"{prefix}{p_id}_rank{rank}.png"), bbox_inches='tight')
+            plt.close()
+
+    print(f"Visual report finished. Results in results/{RUN_ID}_*")
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="H. Pylori Visual Generation")
+    parser.add_argument("--run_id", type=str, required=True, help="Run ID (e.g., 112_103186)")
+    parser.add_argument("--fold", type=int, default=0, help="Fold index")
+    parser.add_argument("--model_name", type=str, default="convnext_tiny", choices=["resnet50", "convnext_tiny"])
+    args = parser.parse_args()
+    
+    # Construct model path
+    model_path = f"results/{args.run_id}_f{args.fold}_{args.model_name}_model_brain.pth"
+    if not os.path.exists(model_path):
+        # Alternative naming convention
+        model_path = f"results/{args.run_id}_model_brain.pth"
+
+    if os.path.exists(model_path):
+        full_visual_report(args.run_id, model_path, args.model_name, args.fold)
+    else:
+        print(f"Error: Model not found at {model_path}")
+
         
         # Save a few Grad-CAMs while we are at it
         if gradcam_saved < 10:

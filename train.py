@@ -796,55 +796,111 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
     else:
         target_layer = model.backbone.layer4[2]
 
+    # Free up memory before visualization
+    torch.cuda.empty_cache()
+    
     # Context to enable gradients for Grad-CAM
-    with torch.enable_grad():
-        for bag_idx in top_indices:
-            p_id = patient_ids_list[bag_idx]
-            
-            # Load full bag for this patient
-            bag_imgs, label, _ = holdout_dataset[bag_idx]
-            bag_imgs = bag_imgs.to(device)
-            
-            # Get Attention weights to find the specific patches the model liked
-            # Use chunks for forward pass to avoid OOM
-            all_attns = []
+    for bag_idx in top_indices:
+        p_id = patient_ids_list[bag_idx]
+        
+        # Load full bag for this patient (keep on CPU initially)
+        bag_imgs, label, _ = holdout_dataset[bag_idx]
+        # Use chunks for forward pass - keep chunks on CPU, load only current chunk to GPU
+        
+        # Find Attention weights to choose the top patches (we don't need gradients for this part)
+        all_attns = []
+        with torch.no_grad():
             for start_idx in range(0, bag_imgs.size(0), vram_bag_limit):
-                chunk = bag_imgs[start_idx:start_idx + vram_bag_limit]
+                chunk = bag_imgs[start_idx:start_idx + vram_bag_limit].to(device)
                 chunk = det_preprocess_batch(chunk, training=False)
                 _, attn = model.forward_bag(chunk)
-                all_attns.append(attn)
+                all_attns.append(attn.cpu()) # Keep results on CPU to save VRAM
+        
+        attention = torch.cat(all_attns, dim=1).squeeze(0) # (Bag_Size,)
+        
+        # Take top 3 most "Attended" patches
+        top_patch_vals, top_patch_indices = torch.topk(attention, k=min(3, bag_imgs.size(0)))
+        
+        for rank, p_idx in enumerate(top_patch_indices):
+            # Only load the specific patch and its input tensor for Grad-CAM
+            patch_img = bag_imgs[p_idx:p_idx+1].to(device)
+            patch_input = det_preprocess_batch(patch_img, training=False)
             
-            attention = torch.cat(all_attns, dim=1).squeeze(0) # (Bag_Size,)
+            # Context to enable gradients for Grad-CAM on this specific patch
+            with torch.enable_grad():
+                heatmap, p_probs = generate_gradcam(model.backbone, patch_input, target_layer)
             
-            # Take top 3 most "Attended" patches
+            # Plotting logic
+            plt.figure(figsize=(10, 5))
+            # Original Patch
+            plt.subplot(1, 2, 1)
+            orig_img = patch_img[0].cpu().permute(1, 2, 0).numpy()
+            plt.imshow(orig_img)
+            plt.title(f"Patch {p_idx} (Attn: {top_patch_vals[rank]:.4f})")
+            plt.axis('off')
+            
+            # Heatmap
+            plt.subplot(1, 2, 2)
+            plt.imshow(orig_img)
+            plt.imshow(heatmap[0, 0], cmap='jet', alpha=0.5)
+            plt.title(f"Grad-CAM (Pos Prob: {p_probs[0, 1]:.4f})")
+            plt.axis('off')
+            
+            out_path = os.path.join(gradcam_dir, f"{p_id}_rank{rank}_patch{p_idx}.png")
+            plt.savefig(out_path, bbox_inches='tight')
+            plt.close()
+            
+            # Cleanup per patch
+            del patch_img, patch_input, heatmap
+            torch.cuda.empty_cache()
+
+    # Repeat for False Negatives (Ghost Patients)
+    fn_indices = [i for i, (prob, label) in enumerate(zip(all_probs_pat, all_labels_pat)) if label == 1 and prob < 0.5]
+    fn_indices = sorted(fn_indices, key=lambda i: all_probs_pat[i], reverse=True)[:5]
+    
+    if fn_indices:
+        print(f"Generating Grad-CAM for {len(fn_indices)} False Negative (Ghost) bags...")
+        for bag_idx in fn_indices:
+            p_id = patient_ids_list[bag_idx]
+            bag_imgs, label, _ = holdout_dataset[bag_idx]
+            
+            all_attns = []
+            with torch.no_grad():
+                for start_idx in range(0, bag_imgs.size(0), vram_bag_limit):
+                    chunk = bag_imgs[start_idx:start_idx + vram_bag_limit].to(device)
+                    chunk = det_preprocess_batch(chunk, training=False)
+                    _, attn = model.forward_bag(chunk)
+                    all_attns.append(attn.cpu())
+            
+            attention = torch.cat(all_attns, dim=1).squeeze(0)
             top_patch_vals, top_patch_indices = torch.topk(attention, k=min(3, bag_imgs.size(0)))
             
             for rank, p_idx in enumerate(top_patch_indices):
-                patch_img = bag_imgs[p_idx:p_idx+1]
+                patch_img = bag_imgs[p_idx:p_idx+1].to(device)
                 patch_input = det_preprocess_batch(patch_img, training=False)
                 
-                # Grad-CAM on the backbone (since it contains the features)
-                heatmap, p_probs = generate_gradcam(model.backbone, patch_input, target_layer)
+                with torch.enable_grad():
+                    heatmap, p_probs = generate_gradcam(model.backbone, patch_input, target_layer)
                 
-                # Plotting logic
                 plt.figure(figsize=(10, 5))
-                # Original Patch
                 plt.subplot(1, 2, 1)
                 orig_img = patch_img[0].cpu().permute(1, 2, 0).numpy()
                 plt.imshow(orig_img)
-                plt.title(f"Patch {p_idx} (Attn: {top_patch_vals[rank]:.4f})")
+                plt.title(f"FN Patch {p_idx} (Attn: {top_patch_vals[rank]:.4f})")
                 plt.axis('off')
                 
-                # Heatmap
                 plt.subplot(1, 2, 2)
                 plt.imshow(orig_img)
                 plt.imshow(heatmap[0, 0], cmap='jet', alpha=0.5)
-                plt.title(f"Grad-CAM (Pos Prob: {p_probs[0, 1]:.4f})")
+                plt.title(f"FN Grad-CAM (Pos Prob: {p_probs[0, 1]:.4f})")
                 plt.axis('off')
                 
-                out_path = os.path.join(gradcam_dir, f"{p_id}_rank{rank}_patch{p_idx}.png")
+                out_path = os.path.join(gradcam_dir, f"FN_{p_id}_rank{rank}_patch{p_idx}.png")
                 plt.savefig(out_path, bbox_inches='tight')
                 plt.close()
+                
+                del patch_img, patch_input, heatmap
+                torch.cuda.empty_cache()
                 
     # Save evaluation report
     report = classification_report(all_labels_pat, all_preds_pat, target_names=['Negative', 'Positive'], output_dict=True, zero_division=0)
