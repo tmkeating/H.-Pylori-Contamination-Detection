@@ -4,24 +4,38 @@ from torchvision import models # Access to famous, pre-trained AI architectures
 
 class AttentionGate(nn.Module):
     """
-    Attention mechanism for Multiple Instance Learning (MIL).
-    Learns to weigh patches based on their diagnostic relevance.
-    Iteration 11: Added temperature scaling to sharpen/soften attention.
+    Gated Attention mechanism for Multiple Instance Learning (MIL).
+    - tanh(Vx): Captures non-linear feature interactions.
+    - sigmoid(Ux): Acts as a filter/gate to suppress noise.
+    Iteration 12: Switched to Gated attention for H. Pylori mimic suppression.
     """
     def __init__(self, feature_dim=2048, hidden_dim=256):
         super(AttentionGate, self).__init__()
-        self.attention = nn.Sequential(
+        # V: Non-linear projection
+        self.v_proj = nn.Sequential(
             nn.Linear(feature_dim, hidden_dim),
-            nn.Tanh(),
-            nn.Linear(hidden_dim, 1)
+            nn.Tanh()
         )
+        # U: Noise Filtering Gate
+        self.u_gate = nn.Sequential(
+            nn.Linear(feature_dim, hidden_dim),
+            nn.Sigmoid()
+        )
+        # Final Attention Score
+        self.w_score = nn.Linear(hidden_dim, 1)
+        
         # Learnable temperature parameter (initialized to 1.0)
-        # Lower T makes attention sharper (focuses on fewer patches)
         self.temperature = nn.Parameter(torch.ones(1))
 
     def forward(self, x):
         # x shape: (N, feature_dim)
-        A = self.attention(x) # (N, 1)
+        v = self.v_proj(x) # (N, hidden_dim)
+        u = self.u_gate(x) # (N, hidden_dim)
+        
+        # Gated interaction: Element-wise multiplication
+        gated = v * u # (N, hidden_dim)
+        
+        A = self.w_score(gated) # (N, 1)
         A = A / self.temperature # Apply temperature scaling
         A = torch.transpose(A, 1, 0) # (1, N)
         A = nn.functional.softmax(A, dim=1) # softmax over patches

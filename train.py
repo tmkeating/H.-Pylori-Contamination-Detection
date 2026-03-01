@@ -422,10 +422,10 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
     # --- Step 6: Define the Learning Rules ---
     # strategy B: Focal Loss for Sparse Bacteremia Detection
     # Optimized to ignore common histological background and focus on sparse bacteria.
-    # Iteration 11: Calibration for Sensitivity Hardening
-    # Previous weight [1.5, 1.0] achieved 100% Precision but missed sparse cases.
-    # New weight [1.0, 2.5] aggressively weights Positives to recover "Ghost Patients".
-    loss_weights = torch.FloatTensor([1.0, 2.5]).to(device) 
+    # Iteration 12: Noise Filtering Calibration
+    # Dialing back positive weights to [1.0, 1.8] to reclaim Precision 
+    # without sacrificing the Recall gains found in Iteration 11.
+    loss_weights = torch.FloatTensor([1.0, 1.8]).to(device) 
     criterion = FocalLoss(gamma=2, weight=loss_weights, smoothing=0.0)
 
     # --- Optimization 5D: Preprocessing & Model Compilation (Kernel Fusion) ---
@@ -453,7 +453,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
         optimizer = Adam(model.parameters(), lr=2e-5, weight_decay=5e-3)
     
     # --- Step 6.2: OneCycle Learning Rate Scheduler ---
-    num_epochs = 20
+    num_epochs = 15
     steps_per_epoch = len(train_loader) // accumulation_steps
     scheduler = optim.lr_scheduler.OneCycleLR(
         optimizer, 
@@ -508,7 +508,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
         torch.cuda.empty_cache()
     
     for epoch in range(num_epochs):
-        print(f"Epoch {epoch+1}/{num_epochs}")
+        print(f"Epoch {epoch+1}/{num_epochs} (Fold {fold_idx + 1}/{num_folds})")
         
         # --- Study Mode (Train) ---
         model.train() 
@@ -517,7 +517,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
         running_corrects = 0
         optimizer.zero_grad()
         
-        for i, (bags, labels, patient_ids, _) in enumerate(tqdm(train_loader, desc="Training (MIL Bag)")):
+        for i, (bags, labels, patient_ids, _) in enumerate(tqdm(train_loader, desc=f"Training (Fold {fold_idx + 1}/{num_folds})")):
             # bags shape: (1, Bag_Size, C, H, W) -> (Bag_Size, C, H, W)
             bags = bags.squeeze(0).to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)
@@ -561,7 +561,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
         val_corrects = 0
         
         with torch.no_grad():
-            for i, (bags, labels, patient_ids, _) in enumerate(tqdm(val_loader, desc="Validation (MIL Bag)")):
+            for i, (bags, labels, patient_ids, _) in enumerate(tqdm(val_loader, desc=f"Validation (Fold {fold_idx + 1}/{num_folds})")):
                 bags = bags.squeeze(0).to(device, non_blocking=True)
                 labels = labels.to(device, non_blocking=True)
                 
@@ -664,7 +664,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
     vram_bag_limit = 500
 
     with torch.no_grad():
-        for i, (bags, labels, patient_ids) in enumerate(tqdm(holdout_loader, desc="Patient-Independent TTA Test")):
+        for i, (bags, labels, patient_ids) in enumerate(tqdm(holdout_loader, desc=f"Patient-Independent TTA Test (Fold {fold_idx + 1}/{num_folds})")):
             # bags shape: (1, Bag_Size, C, H, W) -> (Bag_Size, C, H, W)
             bags = bags.squeeze(0).to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)

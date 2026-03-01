@@ -40,7 +40,10 @@ sbatch --dependency=afterok:$DEPENDENCIES <<EOF
 # Activate virtual environment
 source ../venv/bin/activate
 
-echo "All folds finished. Iteration 10: Attention-MIL execution complete."
+echo "All folds finished. Iteration 12: Gated Attention Noise Filtering Summary..."
+# Fix naming conflict: Explicitly specify results dir
+python summarize_results.py --dir results
+
 echo "Clinical analysis and visualization generated."
 EOF
 

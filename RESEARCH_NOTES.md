@@ -1369,4 +1369,32 @@ While recall was perfect, **Specificity dropped significantly**.
 -   **Attention**: Integrated `self.temperature` into `AttentionGate.forward`.
 -   **Evaluation**: Maintained Multi-Pass "Total Coverage" for exhaustive slide analysis.
 
+### Performance Analysis (Iteration 11: Calibration Results)
+| Metric | Iteration 10.0 (Baseline) | **Iteration 11.0 (Sensitivity)** | Status |
+|--------|---------------------------|----------------------------------|--------|
+| **Mean Accuracy** | 84.66% | **86.55%** | ↑ **+1.89%** |
+| **Recall (Positive)** | 69.31% | **83.10%** | ↑ **+13.79%** |
+| **Precision (Positive)** | 100.00% | 91.14% | ↓ 8.86% |
+| **Peak Fold Acc** | 89.65% | **92.24%** | **92% Broken** |
+
+### Findings & Observations
+1. **Ghost Conversion**: Successfully converted patients like `B22-17_1` (0.39 → 0.58) from False Negative to True Positive.
+2. **Mimic Vulnerability**: Introduced 21 high-confidence False Positives (e.g., `B22-231_0` at 0.975 prob).
+3. **Conclusion**: Sensitivity Hardening worked to recover sparse signals, but at the cost of diagnostic specificity. Isolated morphology mimics are now dominating bag-level predictions.
+
+---
+
+## Iteration 12: Gated Attention & Noise Filtering (Active)
+
+### Objectives
+1.  **Reclaim Precision**: Fix the 21 False Positives introduced by Iteration 11's aggressive sensitivity.
+2.  **Filter Mimics**: Implement a gating mechanism to suppress non-Pylori activations (debris, edge cases).
+3.  **Find the "Gold Standard" Balance**: Target >92% Accuracy with >95% Precision.
+
+### Strategy (Gated Architecture)
+-   **Gated Attention**: Upgraded to $A = \text{softmax}(w^T (\tanh(Vx) \odot \sigma(Ux)))$.
+    -   The $\sigma(Ux)$ (Sigmoid) gate acts as a morphological filter, suppressing noise before it can reach the softmax.
+-   **Weight Recalibration**: Dialed back Positive weight to `1.8` (from 2.5), aiming for a more stable trade-off between sensitivity and specificity.
+-   **Results Pending**: Currently running on SLURM Jobs 104490-104495.
+
 
