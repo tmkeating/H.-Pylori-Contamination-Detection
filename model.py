@@ -85,13 +85,40 @@ class HPyNet(nn.Module):
             return logits, features
         return logits
 
-    def forward_bag(self, batch_features):
+    def forward_bag(self, x, chunk_size=8):
         """
-        Learned slide-level aggregation (MIL).
+        Memory-efficient feature extraction for large MIL bags.
+        x: Input tensor (Bag_Size, C, H, W)
         """
-        # batch_features: (N_patches, feature_dim)
-        A = self.attention_gate(batch_features) # (1, N_patches)
-        M = torch.mm(A, batch_features)         # (1, feature_dim)
+        # 1. Chunked Feature Extraction to prevent CUDA OOM
+        bag_size = x.size(0)
+        all_features = []
+        
+        # Use Gradient Checkpointing to save memory during backbone forward pass
+        from torch.utils.checkpoint import checkpoint
+        
+        for i in range(0, bag_size, chunk_size):
+            chunk = x[i:i + chunk_size]
+            
+            # checkpointing the backbone call
+            # This trades compute for memory by re-calculating activations during backward
+            if self.training:
+                feat = checkpoint(self.backbone, chunk, use_reentrant=False)
+            else:
+                feat = self.backbone(chunk)
+            
+            if len(feat.shape) > 2:
+                feat = torch.flatten(feat, 1)
+            all_features.append(feat)
+            
+        features = torch.cat(all_features, dim=0)
+
+        # 2. Attention aggregation
+        # features shape: (Bag_Size, feature_dim)
+        A = self.attention_gate(features) # (1, Bag_Size)
+        M = torch.mm(A, features)         # (1, feature_dim)
+        
+        # 3. Final classification on the aggregated feature
         logits = self.patch_head(M)             # (1, num_classes)
         return logits, A
 

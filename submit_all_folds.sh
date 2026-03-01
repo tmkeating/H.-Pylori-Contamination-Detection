@@ -10,7 +10,7 @@ do
     echo "-------------------------------------------"
     echo "Submitting SLURM job for Fold $FOLD using $MODEL_NAME..."
     # Capture the job ID
-    JOB_OUT=$(sbatch --export=ALL,FOLD=$FOLD,MODEL_NAME=$MODEL_NAME run_h_pylori.sh)
+    JOB_OUT=$(sbatch -p dcca40 --export=ALL,FOLD=$FOLD,MODEL_NAME=$MODEL_NAME run_h_pylori.sh)
     echo "$JOB_OUT"
     JOB_ID=$(echo $JOB_OUT | awk '{print $4}')
     
@@ -40,8 +40,7 @@ sbatch --dependency=afterok:$DEPENDENCIES <<EOF
 # Activate virtual environment
 source ../venv/bin/activate
 
-echo "All folds finished. Executing Global Meta-Classifier training..."
-python meta_classifier.py
+echo "All folds finished. Execution complete."
 echo "Clinical analysis complete."
 EOF
 

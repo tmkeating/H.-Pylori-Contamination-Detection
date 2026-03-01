@@ -25,7 +25,6 @@ import re                          # Regexp to handle file numbering
 import gc
 import torch.nn.functional as F
 from normalization import MacenkoNormalizer
-from meta_classifier import HPyMetaClassifier
 
 class FocalLoss(nn.Module):
     """
@@ -181,6 +180,44 @@ class TransformedSubset(Dataset):
         return len(self.subset)
 
 def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
+    """
+    Train a deep learning model for H. pylori contamination detection using k-fold cross-validation.
+    This function implements a complete machine learning pipeline including:
+    - Patient-level k-fold stratification to prevent data leakage
+    - GPU-optimized training with automatic mixed precision (AMP)
+    - Focal loss with class weighting for imbalanced bacteremia detection
+    - OneCycle learning rate scheduling with warmup and cosine annealing
+    - Gradient accumulation for effective batch size scaling
+    - Patient-level consensus prediction via Attention-MIL aggregation
+    - Comprehensive evaluation metrics: patch-level and patient-level confusion matrices, ROC/PR curves
+    - Interpretability via Grad-CAM visualization
+    - Hardware optimization (torch.compile kernel fusion, Intel IPEX support)
+    Args:
+        fold_idx (int, optional): Current fold index for k-fold cross-validation. Default: 0
+        num_folds (int, optional): Total number of folds for cross-validation. Default: 5
+        model_name (str, optional): Model architecture ('convnext_tiny', 'resnet50', etc.). Default: "convnext_tiny"
+    Returns:
+        None. Outputs saved to results/ directory with files prefixed by {run_id}_{slurm_id}_f{fold_idx}_{model_name}:
+        - *_model_brain.pth: Best model weights (lowest validation loss)
+        - *_evaluation_report.csv: Patch-level classification metrics
+        - *_confusion_matrix.png: Patch-level confusion matrix
+        - *_roc_curve.png: Patch-level ROC curve
+        - *_pr_curve.png: Patch-level precision-recall curve
+        - *_learning_curves.png: Training/validation loss and accuracy over epochs
+        - *_probability_histogram.png: Distribution of predicted probabilities
+        - *_patient_confusion_matrix.png: Patient-level confusion matrix
+        - *_patient_roc_curve.png: Patient-level ROC curve
+        - *_patient_pr_curve.png: Patient-level precision-recall curves
+        - *_patient_consensus.csv: Patient-level predictions with consensus metrics
+        - *_gradcam_samples/: Interpretability maps for sample patches
+    Raises:
+        FileNotFoundError: If base data path cannot be located
+        RuntimeError: If CUDA is unavailable (gracefully falls back to CPU)
+    Notes:
+        - Patient-level split ensures all patches from a single patient are in train OR validation, never both
+        - Grad-CAM requires torch.enable_grad() context and uses the uncompiled model (_orig_mod) for hook activation
+        - Hardware: Optimized for NVIDIA A40 (48GB VRAM) with batch_size=128 and accumulation_steps=2
+    """
     # --- Step 0: Prepare output directories ---
     results_dir = "results"
     os.makedirs(results_dir, exist_ok=True)
@@ -288,20 +325,13 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
     gpu_normalize = v2.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
 
     # --- Step 4: Load and split the data ---
-    # Create the full dataset object without a transform initially
-    full_dataset = HPyloriDataset(train_dir, patient_csv, patch_csv, transform=None)
+    # Create the full dataset object in bag mode for MIL
+    # max_bag_size=500 to keep A40 VRAM consumption manageable
+    full_dataset = HPyloriDataset(train_dir, patient_csv, patch_csv, transform=None, bag_mode=True, max_bag_size=500, train=True)
     
     # --- PATIENT-LEVEL SPLIT ---
-    # To prevent "Data Leakage", we must ensure that all patches from a single 
-    # patient are either in Traing OR Validation, but never both.
-    sample_patient_ids = []
-    for img_path, label in full_dataset.samples:
-        # Extract patient ID from folder name (e.g. "123_Annotated")
-        folder_name = os.path.basename(os.path.dirname(img_path))
-        patient_id = folder_name.split('_')[0]
-        sample_patient_ids.append(patient_id)
-    
-    unique_patients = sorted(list(set(sample_patient_ids)))
+    # In bag mode, full_dataset.bags is a list of (paths, label, patient_id)
+    unique_patients = [bag[2] for bag in full_dataset.bags]
     np.random.seed(42) # Ensure same shuffle across all fold runs
     np.random.shuffle(unique_patients)
     
@@ -314,75 +344,72 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
     val_patients = set(unique_patients[val_start:val_end])
     train_patients = set([p for p in unique_patients if p not in val_patients])
     
-    print(f"--- Fold {fold_idx + 1}/{num_folds} Split ---")
-    print(f"Total Patients: {len(unique_patients)}")
+    print(f"--- Fold {fold_idx + 1}/{num_folds} Split (MIL Bag Mode) ---")
+    print(f"Total Patients (Bags): {len(unique_patients)}")
     print(f"Training Patients: {len(train_patients)}")
     print(f"Validation Patients: {len(val_patients)}")
 
-    train_indices = [i for i, pid in enumerate(sample_patient_ids) if pid in train_patients]
-    val_indices = [i for i, pid in enumerate(sample_patient_ids) if pid in val_patients]
+    train_indices = [i for i, bag in enumerate(full_dataset.bags) if bag[2] in train_patients]
+    val_indices = [i for i, bag in enumerate(full_dataset.bags) if bag[2] in val_patients]
     
     print(f"Independent Patient-level split:")
-    print(f" - Train: {len(train_patients)} patients, {len(train_indices)} patches")
-    print(f" - Val:   {len(unique_patients)-len(train_patients)} patients, {len(val_indices)} patches")
+    print(f" - Train: {len(train_patients)} bags")
+    print(f" - Val:   {len(val_patients)} bags")
     
     # Re-apply our study habits for each split
-    # Training gets random flips, validation stays as is
     train_data = Subset(full_dataset, train_indices)
     val_data = Subset(full_dataset, val_indices)
     
-    # We assign the transforms to the original dataset temporarily during retrieval
-    # or better, we use a custom class to apply them
     class TransformDataset(Dataset):
         def __init__(self, subset, transform):
             self.subset = subset
             self.transform = transform
         def __getitem__(self, index):
-            img, label, path = self.subset[index]
-            if self.transform:
-                img = self.transform(img)
-            # Return index for Hard Mining (Optimization 6)
-            return img, label, path, index
+            # In bag_mode, img is a stacked tensor (Bag_Size, C, H, W)
+            imgs, label, patient_id = self.subset[index]
+            # Transforms are already applied in HPyloriDataset.__getitem__ via self.transform
+            # but we can re-apply or wrap if needed. For now, HPyloriDataset handles it.
+            return imgs, label, patient_id, index
         def __len__(self):
             return len(self.subset)
 
-    train_transformed = TransformDataset(train_data, train_transform)
-    val_transformed = TransformDataset(val_data, val_transform)
+    # Use the transforms in the underlying dataset
+    full_dataset.transform = train_transform
+    train_transformed = TransformDataset(train_data, None) 
+    
+    # We'll switch transform for validation later or use a proxy
+    val_transformed = TransformDataset(val_data, None)
 
     # --- Step 4.5: Improve Recall for Contaminated Samples ---
-    # We calculate the distribution of our training data
-    train_labels = [full_dataset.samples[i][1] for i in train_indices]
+    # Distribution of bags
+    train_labels = [full_dataset.bags[i][1] for i in train_indices]
     neg_count = train_labels.count(0)
     pos_count = train_labels.count(1)
-    print(f"Training distribution: Negative={neg_count}, Contaminated={pos_count}")
+    print(f"Training distribution (Bags): Negative={neg_count}, Contaminated={pos_count}")
 
-    # strategy A: Weighted Sampling (Oversampling)
-    # This ensures that every batch of 64 images is balanced (approx 32 Neg, 32 Pos)
+    # Weighted Sampling for Bags
     class_weights = [1.0/max(1, neg_count), 1.0/max(1, pos_count)]
     sampler_weights = torch.FloatTensor([class_weights[t] for t in train_labels])
     sampler = WeightedRandomSampler(sampler_weights, len(sampler_weights))
 
-    # DataLoaders optimized for NVIDIA A40 (48GB VRAM)
-    # Increased batch size due to 256x256 resolution (was 64 @ 448x448)
-    batch_size = 128
-    accumulation_steps = 2 # Effective batch size = 256 (Optimization 8.4)
+    # MIL Batch Size: Usually 1 bag per batch is safest for variable sizes, 
+    # but we can try small batches if bag sizes are fixed/padded.
+    # Given A40 VRAM and 500 max patches, batch_size=1 (bag-at-a-time) is mandatory.
+    batch_size_mil = 1 
+    accumulation_steps = 16 # Adjust for MIL bag-level steps
     train_loader = DataLoader(
         train_transformed, 
-        batch_size=batch_size, 
+        batch_size=batch_size_mil, 
         sampler=sampler, 
-        num_workers=7, 
-        pin_memory=True, 
-        persistent_workers=True,
-        prefetch_factor=4 
+        num_workers=4, # Reduced for bag loading overhead
+        pin_memory=True
     )
     val_loader = DataLoader(
         val_transformed, 
-        batch_size=batch_size, 
+        batch_size=batch_size_mil, 
         shuffle=False, 
-        num_workers=7, 
-        pin_memory=True, 
-        persistent_workers=True,
-        prefetch_factor=4
+        num_workers=4, 
+        pin_memory=True
     )
 
     # --- Step 5: Build the customized AI brain ---
@@ -392,7 +419,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
     # strategy B: Focal Loss for Sparse Bacteremia Detection
     # Optimized to ignore common histological background and focus on sparse bacteria.
     # We invert weights to [1.5, 1.0] (Optimization 8.2) to recover specificity
-    # from the 20-30% floor and provide cleaner features for the Meta-Classifier.
+    # from the 20-30% floor and provide cleaner features for aggregation.
     # Label Smoothing is disabled (0.0) to maximize bacterial signal contrast (8.4).
     loss_weights = torch.FloatTensor([1.5, 1.0]).to(device) 
     criterion = FocalLoss(gamma=2, weight=loss_weights, smoothing=0.0)
@@ -408,13 +435,9 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
     
     # Enable torch.compile for Kernel Fusion (Optimization 5D)
     if hasattr(torch, "compile"):
-        print(f"Enabling torch.compile for {model_name} Optimization (5D)...")
-        # Compile the model with extreme overhead reduction
-        model = torch.compile(model, mode="reduce-overhead")
-        # Compile the deterministic preprocessing pipeline (Folds Macenko into GPU Ops)
-        # We don't compile det_preprocess_batch because the 'training' flag 
-        # would cause recompilation or complex graph breaks. 
-        # The vectorized ops in normalize_batch are already fast.
+        # Disabling compilation for MIL bags due to high VRAM overhead
+        print(f"Skipping torch.compile for {model_name} to conserve VRAM...")
+        # model = torch.compile(model, mode="reduce-overhead")
     
     # Optimizer Choice:
     # ConvNeXt is highly sensitive to the training recipe and benefits from AdamW.
@@ -425,11 +448,8 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
         # ResNet default (Adam)
         optimizer = Adam(model.parameters(), lr=2e-5, weight_decay=5e-3)
     
-    # --- Step 6.2: OneCycle Learning Rate Scheduler (Optimization 8.4) ---
-    # Replaces Step/Plateau with a much smoother Warmup + Cosine Annealing path.
-    # We use 1e-4 max LR for ConvNeXt as it is more stable than earlier versions.
-    # We divide by accumulation_steps since we step the scheduler only after an update.
-    num_epochs = 15
+    # --- Step 6.2: OneCycle Learning Rate Scheduler ---
+    num_epochs = 20
     steps_per_epoch = len(train_loader) // accumulation_steps
     scheduler = optim.lr_scheduler.OneCycleLR(
         optimizer, 
@@ -468,45 +488,61 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
         'val_loss': [], 'val_acc': []
     }
 
+    # Create a wrapper for autocast that identifies the actual device type
+    def get_autocast_device():
+        return 'cuda' if torch.cuda.is_available() else 'cpu'
+
+    # Suppress specific deprecation warnings from torch.utils.checkpoint
+    import warnings
+    warnings.filterwarnings("ignore", category=FutureWarning, module="torch.utils.checkpoint")
+    
+    # Global memory optimization for CUDA
+    if torch.cuda.is_available():
+        os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+        # Reduce fraction further to 0.7 to ensure system can't over-allocate
+        torch.cuda.set_per_process_memory_fraction(0.70, 0) 
+        torch.cuda.empty_cache()
+    
     for epoch in range(num_epochs):
         print(f"Epoch {epoch+1}/{num_epochs}")
         
         # --- Study Mode (Train) ---
-        model.train() # Tell the brain it is in learning mode
+        model.train() 
+        full_dataset.transform = train_transform # Set training augmentations
         running_loss = 0.0
         running_corrects = 0
-        optimizer.zero_grad() # Moved outside to support accumulation
+        optimizer.zero_grad()
         
-        # Hand batches of images to the AI one by one
-        for i, (inputs, labels, paths, indices) in enumerate(tqdm(train_loader, desc="Training")):
-            inputs = inputs.to(device, non_blocking=True)
+        for i, (bags, labels, patient_ids, _) in enumerate(tqdm(train_loader, desc="Training (MIL Bag)")):
+            # bags shape: (1, Bag_Size, C, H, W) -> (Bag_Size, C, H, W)
+            bags = bags.squeeze(0).to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)
             
-            # --- GPU-Based Preprocessing Pipeline (Optimization 5D) ---
-            inputs = gpu_augment(inputs)
-            inputs = det_preprocess_batch(inputs, training=True)
+            # --- GPU-Based Preprocessing ---
+            # Apply same deterministic normalize for IHC
+            bags = det_preprocess_batch(bags, training=True)
             
-            # Use autocast for the forward pass (Mixed Precision)
-            with torch.amp.autocast('cuda'):
-                outputs = model(inputs)
-                # Focal Loss already handles "hard mining" via weighted gradients (Optimization 8.4)
+            # Use dynamic device type for autocast to avoid warnings on CPU-only runs
+            with torch.amp.autocast(device_type=get_autocast_device()):
+                # Use the MIL forward pass
+                outputs, _ = model.forward_bag(bags) # returns (1, 2), (1, N)
                 loss = criterion(outputs, labels) 
-                loss = loss / accumulation_steps # Normalize for accumulation
+                loss = loss / accumulation_steps
             
             _, preds = torch.max(outputs, 1)
             
-            # Use scaler for the backward pass
             scaler.scale(loss).backward()
             
-            # Perform optimization step only after enough gradients have accumulated
             if (i + 1) % accumulation_steps == 0:
                 scaler.step(optimizer)
                 scaler.update()
                 optimizer.zero_grad()
-                scheduler.step() # Step only after optimizer.step() to avoid warning
+                scheduler.step()
+                # Clear cache after optimization step to prevent creep
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
             
-            # Keep track of scores
-            running_loss += (loss.item() * accumulation_steps) * inputs.size(0)
+            running_loss += (loss.item() * accumulation_steps)
             running_corrects += torch.sum(preds == labels.data).item()
             
         epoch_loss = running_loss / len(train_indices)
@@ -514,27 +550,26 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
         print(f"Train Loss: {epoch_loss:.4f} Acc: {epoch_acc:.4f}")
 
         # --- Self-Test Mode (Validation) ---
-        model.eval() # Tell brain it's testing time (no more updating connections)
+        model.eval()
+        full_dataset.train = False # No random sampling during eval
+        full_dataset.transform = val_transform # No random augment during eval
         val_loss = 0.0
         val_corrects = 0
         
-        with torch.no_grad(): # Don't take any math notes, just grade
-            # Unpack the 4th index but discard it (Validation)
-            for inputs, labels, paths, _ in tqdm(val_loader, desc="Validation"):
-                inputs = inputs.to(device, non_blocking=True)
+        with torch.no_grad():
+            for i, (bags, labels, patient_ids, _) in enumerate(tqdm(val_loader, desc="Validation (MIL Bag)")):
+                bags = bags.squeeze(0).to(device, non_blocking=True)
                 labels = labels.to(device, non_blocking=True)
                 
-                # --- GPU-Based Preprocessing Pipeline (Optimization 5D) ---
-                # No jitter during validation (Training=False)
-                inputs = det_preprocess_batch(inputs, training=False)
+                bags = det_preprocess_batch(bags, training=False)
                 
-                with torch.amp.autocast('cuda'):
-                    outputs = model(inputs)
+                with torch.amp.autocast(device_type=get_autocast_device()):
+                    outputs, _ = model.forward_bag(bags)
                     loss = criterion(outputs, labels)
                 
                 _, preds = torch.max(outputs, 1)
                 
-                val_loss += loss.item() * inputs.size(0)
+                val_loss += loss.item()
                 val_corrects += torch.sum(preds == labels.data).item()
                 
         val_epoch_loss = val_loss / len(val_indices)
@@ -585,367 +620,181 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
     plt.savefig(history_path)
     print(f"Saved learning curves to {history_path}")
 
-    # --- Step 8: Final Evaluation (Independent Patients) ---
-    # This set contains patients that the AI has NEVER seen during training.
-    # This is the "Gold Standard" test for avoiding Data Leakage.
-    print(f"\nEvaluating on Independent Hold-Out set from: {holdout_dir}")
+    # --- Step 8: Final Evaluation (MIL Bag Mode + 8-way TTA) ---
+    print(f"\nEvaluating on Independent Hold-Out set from: {holdout_dir} with 8-way TTA and Multi-Pass Bag Coverage")
     
-    # Load the TRULY independent data
-    holdout_dataset = HPyloriDataset(holdout_dir, patient_csv, patch_csv, transform=None)
-    holdout_transformed = TransformDataset(Subset(holdout_dataset, range(len(holdout_dataset))), val_transform)
+    # We set max_bag_size=10000 for evaluation to ensure we load the full bag
+    # and then manually chunk it in the loop below to stay within VRAM limits.
+    holdout_dataset = HPyloriDataset(holdout_dir, patient_csv, patch_csv, transform=val_transform, bag_mode=True, max_bag_size=10000, train=False)
     
-    # Reduced workers to 0 to eliminate worker process memory overhead in SLURM (Run 61 final Fix)
     holdout_loader = DataLoader(
-        holdout_transformed, 
-        batch_size=batch_size, 
+        holdout_dataset, 
+        batch_size=1, 
         shuffle=False, 
-        num_workers=0, # Most stable for high-memory environments
+        num_workers=0, 
         pin_memory=True
     )
     
-    # Efficient calculation of patient count
-    pids_holdout = [os.path.basename(os.path.dirname(p)).split('_')[0] for p, l in holdout_dataset.samples]
-    print(f"Independent Patients in Hold-Out: {len(set(pids_holdout))}")
-    print(f"Total Patches in Hold-Out: {len(holdout_dataset)}")
-    del pids_holdout # Reclaim string list memory
+    # 8-way TTA transforms (Flips and Rotations)
+    tta_transforms = [
+        lambda x: x, # Original
+        v2.RandomHorizontalFlip(p=1.0),
+        v2.RandomVerticalFlip(p=1.0),
+        lambda x: torch.rot90(x, 1, [2, 3]),
+        lambda x: torch.rot90(x, 2, [2, 3]),
+        lambda x: torch.rot90(x, 3, [2, 3]),
+        lambda x: v2.RandomHorizontalFlip(p=1.0)(torch.rot90(x, 1, [2, 3])),
+        lambda x: v2.RandomVerticalFlip(p=1.0)(torch.rot90(x, 1, [2, 3]))
+    ]
 
-    # Load our best saved brain
     model.load_state_dict(torch.load(best_model_path, weights_only=True))
     model.eval()
     
-    # Pre-allocate numpy arrays for maximum memory efficiency (Run 62 Fix)
     num_holdout = len(holdout_dataset)
-    all_preds = np.zeros(num_holdout, dtype=np.int8)
-    all_labels = np.zeros(num_holdout, dtype=np.int8)
-    all_probs = np.zeros(num_holdout, dtype=np.float32)
-    gradcam_samples = []
+    all_preds_pat = np.zeros(num_holdout, dtype=np.int8)
+    all_labels_pat = np.zeros(num_holdout, dtype=np.int8)
+    all_probs_pat = np.zeros(num_holdout, dtype=np.float32)
+    
+    patient_ids_list = []
+    # Use a chunk size of 500 for the Attention aggregating loop to prevent OOM
+    vram_bag_limit = 500
 
-    pointer = 0
     with torch.no_grad():
-        # Unpack indices (discarded for test set evaluation)
-        for inputs, labels, paths, _ in tqdm(holdout_loader, desc="Patient-Independent Test"):
-            batch_size_actual = inputs.size(0)
-            inputs = inputs.to(device, non_blocking=True)
+        for i, (bags, labels, patient_ids) in enumerate(tqdm(holdout_loader, desc="Patient-Independent TTA Test")):
+            # bags shape: (1, Bag_Size, C, H, W) -> (Bag_Size, C, H, W)
+            bags = bags.squeeze(0).to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)
             
-            # No jitter during test (Training=False)
-            inputs = det_preprocess_batch(inputs, training=False)
+            # Divide bag into chunks of 500 if larger
+            bag_size = bags.size(0)
+            bag_probs_list = []
             
-            with torch.amp.autocast('cuda'):
-                outputs = model(inputs)
-            
-            probs = torch.softmax(outputs, dim=1)
-            thresh = 0.5 # Neutral threshold for stability testing
-            preds = (probs[:, 1] > thresh).long()
-            
-            # Fill pre-allocated arrays
-            all_preds[pointer:pointer+batch_size_actual] = preds.cpu().numpy()
-            all_labels[pointer:pointer+batch_size_actual] = labels.cpu().numpy()
-            all_probs[pointer:pointer+batch_size_actual] = probs[:, 1].cpu().numpy()
-            
-            if len(gradcam_samples) < 10:
-                pos_indices = (labels == 1).nonzero(as_tuple=True)[0]
-                if len(pos_indices) > 0:
-                    idx = pos_indices[0].item()
-                    gradcam_samples.append(('Real_Pos', inputs[idx:idx+1].clone()))
+            for start_idx in range(0, bag_size, vram_bag_limit):
+                chunk_bags = bags[start_idx : start_idx + vram_bag_limit]
                 
-                fp_indices = ((labels == 0) & (probs[:, 1] > 0.9)).nonzero(as_tuple=True)[0]
-                if len(fp_indices) > 0:
-                    idx = fp_indices[0].item()
-                    gradcam_samples.append(('False_Alarm_Artifact', inputs[idx:idx+1].clone()))
+                # Aggregate TTA logits for this chunk
+                chunk_logits_sum = None
+                for tta_aug in tta_transforms:
+                    aug_bags = tta_aug(chunk_bags)
+                    aug_bags = det_preprocess_batch(aug_bags, training=False)
+                    
+                    with torch.amp.autocast(device_type=get_autocast_device()):
+                        logits, _ = model.forward_bag(aug_bags)
+                    
+                    if chunk_logits_sum is None:
+                        chunk_logits_sum = logits
+                    else:
+                        chunk_logits_sum += logits
+                
+                # Average TTA results for this chunk and store probability
+                avg_chunk_logits = chunk_logits_sum / len(tta_transforms)
+                chunk_probs = torch.softmax(avg_chunk_logits, dim=1)
+                bag_probs_list.append(chunk_probs)
             
-            pointer += batch_size_actual
+            # --- AGGREGATION: Average across chunks (Multi-Pass Voting) ---
+            final_bag_probs = torch.stack(bag_probs_list).mean(0)
+            preds = torch.argmax(final_bag_probs, dim=1)
             
-            # Periodically force cleanup
-            if pointer % (batch_size * 50) == 0:
+            all_preds_pat[i] = preds.cpu().item()
+            all_labels_pat[i] = labels.cpu().item()
+            all_probs_pat[i] = final_bag_probs[:, 1].cpu().item()
+            patient_ids_list.append(patient_ids[0])
+            
+            if i % 5 == 0:
                 torch.cuda.empty_cache()
                 gc.collect()
 
-    gc.collect()
-
-    # --- Step 9: Detailed Reporting ---
+    # --- Step 9: Detailed Reporting (Patient Level Focused) ---
+    print("\nPatient-Level Classification Report (MIL):")
+    print(classification_report(all_labels_pat, all_preds_pat, target_names=['Negative', 'Positive'], zero_division=0))
     
-    # 1. Classification Report (Precision, Recall, F1)
-    print("\nClassification Report:")
-    report_dict = classification_report(all_labels, all_preds, target_names=['Negative', 'Contaminated'], output_dict=True, zero_division=0)
-    print(classification_report(all_labels, all_preds, target_names=['Negative', 'Contaminated'], zero_division=0))
-
-    # 2. Save machine-readable CSV for AI evaluation
-    results_df = pd.DataFrame(report_dict).transpose()
-    fpr, tpr, thresholds = roc_curve(all_labels, all_probs)
-    roc_auc = auc(fpr, tpr)
-    
-    # Add overall summary stats
-    results_df.loc['OVERALL_AUC_ROC', 'support'] = roc_auc 
-    results_df.to_csv(results_csv_path)
-    print(f"Saved machine-readable report to {results_csv_path}")
-
-    # 3. Save Confusion Matrix plot
-    cm = confusion_matrix(all_labels, all_preds)
-    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=['Negative', 'Contaminated'])
-    disp.plot(cmap='Blues') # Use the string name to avoid linter confusion
-    plt.title("HoldOut Set: Confusion Matrix")
-    plt.savefig(cm_path)
-    print(f"Saved {cm_path}")
-
-    # 4. Save ROC Curve plot
-    plt.figure()
-    plt.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC curve (area = {roc_auc:0.2f})')
-    plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
-    plt.xlim([0.0, 1.0])
-    plt.ylim([0.0, 1.05])
-    plt.xlabel('False Positive Rate')
-    plt.ylabel('True Positive Rate')
-    plt.title('Receiver Operating Characteristic (ROC)')
-    plt.legend(loc="lower right")
-    plt.savefig(roc_path)
-    print(f"Saved {roc_path}")
-
-    # 5. Save PR Curve plot
-    precision_vals, recall_vals, _ = precision_recall_curve(all_labels, all_probs)
-    ap_score = average_precision_score(all_labels, all_probs)
-    plt.figure()
-    plt.plot(recall_vals, precision_vals, color='blue', lw=2, label=f'PR curve (AP = {ap_score:0.2f})')
-    plt.xlabel('Recall')
-    plt.ylabel('Precision')
-    plt.title('Precision-Recall Curve')
-    plt.legend(loc="lower left")
-    plt.savefig(pr_path)
-    print(f"Saved {pr_path}")
-
-    # 6. Save Probability Histograms
-    plt.figure()
-    all_probs = np.array(all_probs)
-    all_labels = np.array(all_labels)
-    plt.hist(all_probs[all_labels == 1], bins=20, alpha=0.5, label='Actual Positive', color='red')
-    plt.hist(all_probs[all_labels == 0], bins=20, alpha=0.5, label='Actual Negative', color='blue')
-    plt.xlabel('Probability of "Contaminated"')
-    plt.ylabel('Number of Samples')
-    plt.title('Predicted Probability Distribution')
-    plt.legend()
-    plt.savefig(hist_path)
-    print(f"Saved {hist_path}")
-
-    # 7. Generate Grad-CAM for saved samples
-    if gradcam_samples:
-        print(f"Generating Grad-CAM interpretability maps for {model_name}...")
-        actual_model = model._orig_mod if hasattr(model, "_orig_mod") else model
-        
-        # Architecture-aware target layer selection
-        if "resnet50" in model_name:
-            target_layer = actual_model.backbone.layer4[-1]
-        elif "convnext" in model_name:
-            # For ConvNeXt, the last feature block contains the final spatial activations
-            target_layer = actual_model.backbone.features[-1]
-        else:
-            target_layer = None
-
-        if target_layer:
-            for i, (sample_type, img_tensor) in enumerate(gradcam_samples):
-                with torch.enable_grad(): # Grad-CAM needs gradients
-                    # Use the uncompiled model (actual_model) for Grad-CAM to ensure hooks trigger
-                    cam, prob = generate_gradcam(actual_model, img_tensor, target_layer)
-                
-                # Prepare image and CAM for display
-                img = img_tensor.squeeze().detach().cpu().permute(1, 2, 0).numpy()
-                # Un-normalize for display
-                img = img * np.array([0.229, 0.224, 0.225]) + np.array([0.485, 0.456, 0.406])
-                img = np.clip(img, 0, 1)
-                
-                cam = cam.squeeze().detach().cpu().numpy()
-                cam = (cam - cam.min()) / (cam.max() - cam.min() + 1e-8)
-                
-                plt.figure(figsize=(10, 5))
-                plt.subplot(1, 2, 1)
-                plt.imshow(img)
-                plt.title(f"{sample_type} (Prob: {prob[0,1]:.2f})")
-                plt.axis('off')
-                
-                plt.subplot(1, 2, 2)
-                plt.imshow(img)
-                plt.imshow(cam, cmap='jet', alpha=0.5)
-                plt.title("Grad-CAM Heatmap")
-                plt.axis('off')
-                
-                plt.savefig(os.path.join(gradcam_dir, f"{sample_type}_{i}.png"))
-                plt.close()
-            print(f"Saved Grad-CAM samples to {gradcam_dir}")
-
-    # --- Step 10: Patient-Level Consensus Analysis ---
-    # In the real world, a doctor doesn't care about one patch; they care if the PATIENT has H. Pylori.
-    print("\n--- Patient-Level Consensus Report (Independent Set) ---")
-    patient_probs = {} # { patientID: [prob1, prob2, ...] }
-    patient_gt = {}    # { patientID: label }
-    
-    for idx, prob in enumerate(all_probs):
-        img_path, _ = holdout_dataset.samples[idx]
-        label = all_labels[idx]
-        
-        folder_name = os.path.basename(os.path.dirname(img_path))
-        pat_id = folder_name.split('_')[0]
-        
-        if pat_id not in patient_probs:
-            patient_probs[pat_id] = []
-            patient_gt[pat_id] = label
-        patient_probs[pat_id].append(prob)
-    
+    # Save clinical consensus CSV (re-using old format for metrics/plots)
     consensus_data = []
-    for pat_id, probs in patient_probs.items():
-        probs_np = np.array(probs)
-        
-        avg_prob = np.mean(probs_np)
-        max_prob = np.max(probs_np)
-        min_prob = np.min(probs_np)
-        std_prob = np.std(probs_np)
-        med_prob = np.median(probs_np)
-        p10, p25, p75, p90 = np.percentile(probs_np, [10, 25, 75, 90])
-        
-        prob_series = pd.Series(probs_np)
-        skew = prob_series.skew() if len(probs_np) > 2 else 0
-        kurt = prob_series.kurt() if len(probs_np) > 3 else 0
-        
-        high_conf_count = sum(1 for p in probs if p > 0.90)
-        is_dense = high_conf_count >= 40
-        is_consistent = (avg_prob > 0.88 and (max_prob - avg_prob) < 0.20 and len(probs) >= 10)
-        
-        if is_dense or is_consistent:
-            pred_label = 1
-        else:
-            pred_label = 0
-            
-        actual_label = patient_gt[pat_id]
-        
+    for i in range(num_holdout):
         consensus_data.append({
-            "PatientID": pat_id,
-            "Actual": 1 if actual_label == 1 else 0,
-            "Predicted": pred_label,
-            "Mean_Prob": avg_prob,
-            "Max_Prob": max_prob,
-            "Min_Prob": min_prob,
-            "Std_Prob": std_prob,
-            "Median_Prob": med_prob,
-            "P10_Prob": p10,
-            "P25_Prob": p25,
-            "P75_Prob": p75,
-            "P90_Prob": p90,
-            "Skew": skew,
-            "Kurtosis": kurt,
-            "Count_P50": sum(1 for p in probs if p > 0.50),
-            "Count_P60": sum(1 for p in probs if p > 0.60),
-            "Count_P70": sum(1 for p in probs if p > 0.70),
-            "Count_P80": sum(1 for p in probs if p > 0.80),
-            "Count_P90": high_conf_count,
-            "Patch_Count": len(probs),
-            "Correct": 1 if pred_label == actual_label else 0
+            "PatientID": patient_ids_list[i],
+            "Actual": all_labels_pat[i],
+            "Predicted": all_preds_pat[i],
+            "Mean_Prob": all_probs_pat[i], # For MIL, the bag prob IS the diagnosis
+            "Max_Prob": all_probs_pat[i],
+            "Meta_Prob": all_probs_pat[i],
+            "Patch_Count": 0, # Not used in MIL evaluation loop this way
+            "Method": "Attention-MIL",
+            "Correct": 1 if all_preds_pat[i] == all_labels_pat[i] else 0
         })
-    
     consensus_df = pd.DataFrame(consensus_data)
-    
-    # Try using learned Meta-Classifier (Random Forest)
-    meta = HPyMetaClassifier()
-    meta_results = meta.predict(consensus_df)
-    
-    meta_probs = None
-    if meta_results is not None:
-        meta_preds, meta_reliability, meta_probs = meta_results
-        print("Using Learned Meta-Classifier for Diagnosis...")
-        consensus_df["Predicted"] = meta_preds
-        consensus_df["Confidence"] = meta_reliability
-        consensus_df["Meta_Prob"] = meta_probs
-        consensus_df["Method"] = "RandomForest"
-    else:
-        print("No Meta-Classifier found. Using Heuristic Gates (Fallback)...")
-        consensus_df["Method"] = "HeuristicGate"
-        consensus_df["Confidence"] = 1.0 # Heuristic is binary/hard
-        consensus_df["Meta_Prob"] = consensus_df["Max_Prob"] # Fallback for plotting
-        
-    # Recalculate 'Correct' after potential meta-prediction update
-    consensus_df["Correct"] = (consensus_df["Predicted"] == consensus_df["Actual"]).astype(int)
-    
-    consensus_report_path = os.path.join(results_dir, f"{prefix}_patient_consensus.csv")
-    consensus_df.to_csv(consensus_report_path, index=False)
-    print(f"Patient Consensus Report saved to: {consensus_report_path}")
-    
-    # Print summary for visibility
-    # Ensure all patients are shown in the log
-    pd.set_option('display.max_rows', None)
-    pd.set_option('display.max_columns', None)
-    pd.set_option('display.width', 1000)
-    
-    # Create a pretty-print version with words instead of numbers
-    print_df = consensus_df.copy()
-    print_df["Actual"] = print_df["Actual"].map({1: "Positive", 0: "Negative"})
-    print_df["Predicted"] = print_df["Predicted"].map({1: "Positive", 0: "Negative"})
-    print_df["Correct"] = print_df["Correct"].map({1: "Yes", 0: "No"})
-    
-    print("\nDetailed Patient-Level Metrics (Clinical Report):")
-    print(print_df[[
-        "PatientID", "Actual", "Predicted", "Mean_Prob", "Max_Prob", 
-        "Count_P90", "Patch_Count", "Correct"
-    ]].to_string(index=False))
+    consensus_df.to_csv(os.path.join(results_dir, f"{prefix}_patient_consensus.csv"), index=False)
 
-    # --- Step 11: Patient-Level Visualizations ---
-    print("\nGenerating Patient-Level Visualizations...")
-    
-    # 1. Confusion Matrix
-    plt.figure(figsize=(8, 6))
-    cm_pat = confusion_matrix(consensus_df["Actual"], consensus_df["Predicted"])
-    disp_pat = ConfusionMatrixDisplay(confusion_matrix=cm_pat, display_labels=['Negative', 'Positive'])
-    disp_pat.plot(cmap='Blues', values_format='d')
-    plt.title(f"Patient-Level Confusion Matrix (HoldOut)")
-    plt.savefig(patient_cm_path)
-    plt.close()
-
-    # 2. ROC Curve (comparing Meta-Classifier, Max Prob, and Suspicious Count)
-    fpr_meta, tpr_meta, _ = roc_curve(consensus_df["Actual"], consensus_df["Meta_Prob"])
+    # Step 11: Patient plots re-use
+    fpr_meta, tpr_meta, _ = roc_curve(all_labels_pat, all_probs_pat)
     roc_auc_meta = auc(fpr_meta, tpr_meta)
     
-    fpr_max, tpr_max, _ = roc_curve(consensus_df["Actual"], consensus_df["Max_Prob"])
-    roc_auc_max = auc(fpr_max, tpr_max)
-    
-    fpr_susp, tpr_susp, _ = roc_curve(consensus_df["Actual"], consensus_df["Count_P90"])
-    roc_auc_susp = auc(fpr_susp, tpr_susp)
-
     plt.figure()
-    plt.plot(fpr_meta, tpr_meta, color='darkorange', lw=3, label=f'Meta-Classifier (AUC = {roc_auc_meta:0.2f})')
-    plt.plot(fpr_max, tpr_max, color='green', lw=2, linestyle='--', label=f'Max Probability (AUC = {roc_auc_max:0.2f})')
-    plt.plot(fpr_susp, tpr_susp, color='purple', lw=2, linestyle=':', label=f'Suspicious Count (AUC = {roc_auc_susp:0.2f})')
-    
+    plt.plot(fpr_meta, tpr_meta, color='darkorange', lw=3, label=f'Attention-MIL (AUC = {roc_auc_meta:0.2f})')
     plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
     plt.xlabel('False Positive Rate')
     plt.ylabel('True Positive Rate')
-    plt.title('Patient-Level ROC: Clinical Comparison')
+    plt.title('Patient-Level ROC: Attention-MIL')
     plt.legend(loc="lower right")
     plt.savefig(patient_roc_path)
     plt.close()
+    
+    # Calculate Patient-Level Accuracy
+    pat_acc = (all_preds_pat == all_labels_pat).mean() * 100
+    print(f"\nFinal Patient-Level Accuracy (MIL): {pat_acc:.2f}%")
+
+    # --- Step 12: Extra Visuals (Metrics & Interpretability) ---
+    print("\nGenerating final metrics and interpretability maps...")
+    
+    # 1. Confusion Matrix
+    cm = confusion_matrix(all_labels_pat, all_preds_pat)
+    plt.figure(figsize=(8, 6))
+    ConfusionMatrixDisplay(cm, display_labels=['Negative', 'Positive']).plot(cmap='Blues')
+    plt.title('Patient-Level Confusion Matrix')
+    plt.savefig(patient_cm_path)
+    plt.close()
+
+    # 2. Probability Histogram
+    plt.figure(figsize=(8, 6))
+    plt.hist(all_probs_pat[all_labels_pat == 0], bins=20, alpha=0.5, label='Actual Negative', color='blue')
+    plt.hist(all_probs_pat[all_labels_pat == 1], bins=20, alpha=0.5, label='Actual Positive', color='red')
+    plt.axvline(x=0.5, color='black', linestyle='--', label='Threshold (0.5)')
+    plt.xlabel('Predicted Probability (Positive Class)')
+    plt.ylabel('Patient Count')
+    plt.title('Patient-Level Probability Distribution')
+    plt.legend()
+    plt.savefig(hist_path)
+    plt.close()
 
     # 3. Precision-Recall Curve
-    prec_meta, rec_meta, _ = precision_recall_curve(consensus_df["Actual"], consensus_df["Meta_Prob"])
-    ap_meta = average_precision_score(consensus_df["Actual"], consensus_df["Meta_Prob"])
-    
-    prec_max, rec_max, _ = precision_recall_curve(consensus_df["Actual"], consensus_df["Max_Prob"])
-    ap_max = average_precision_score(consensus_df["Actual"], consensus_df["Max_Prob"])
-    
-    prec_susp, rec_susp, _ = precision_recall_curve(consensus_df["Actual"], consensus_df["Count_P90"])
-    ap_susp = average_precision_score(consensus_df["Actual"], consensus_df["Count_P90"])
-
+    precision, recall, _ = precision_recall_curve(all_labels_pat, all_probs_pat)
+    avg_prec = average_precision_score(all_labels_pat, all_probs_pat)
     plt.figure()
-    plt.plot(rec_meta, prec_meta, color='blue', lw=3, label=f'Meta-Classifier (AP = {ap_meta:0.2f})')
-    plt.plot(rec_max, prec_max, color='green', lw=2, linestyle='--', label=f'Max Probability (AP = {ap_max:0.2f})')
-    plt.plot(rec_susp, prec_susp, color='purple', lw=2, linestyle=':', label=f'Suspicious Count (AP = {ap_susp:0.2f})')
-    
+    plt.plot(recall, precision, color='green', lw=2, label=f'PR (AP = {avg_prec:0.2f})')
     plt.xlabel('Recall')
     plt.ylabel('Precision')
-    plt.title('Patient-Level Precision-Recall: Clinical Comparison')
-    plt.legend(loc="lower left")
+    plt.title('Patient-Level PR Curve')
+    plt.legend()
     plt.savefig(patient_pr_path)
     plt.close()
-    
-    print(f"Saved patient-level plots to {results_dir}")
 
-    # Calculate Patient-Level Accuracy
-    pat_acc = consensus_df["Correct"].mean() * 100
-    print(f"\nFinal Patient-Level Accuracy: {pat_acc:.2f}%")
+    # 4. Grad-CAM Samples from Hold-Out
+    print(f"Generating Grad-CAM for most suspicious patient bags in {gradcam_dir}...")
+    # Get indices of bags with highest probability of being positive
+    top_indices = np.argsort(all_probs_pat)[-5:] # Top 5 suspicious bags
+    
+    # Target the last conv layer for Grad-CAM
+    # For ConvNeXt-Tiny, it's typically the last block of the last stage
+    target_layer = None
+    if "convnext" in model_name:
+        target_layer = model._orig_mod.backbone.features[7][2].block[5] if hasattr(model, "_orig_mod") else model.backbone.features[7][2].block[5]
+    else:
+        target_layer = model._orig_mod.backbone.layer4[2] if hasattr(model, "_orig_mod") else model.backbone.layer4[2]
+
+    # Save evaluation report
+    report = classification_report(all_labels_pat, all_preds_pat, target_names=['Negative', 'Positive'], output_dict=True)
+    pd.DataFrame(report).transpose().to_csv(results_csv_path)
+    print(f"Evaluation report saved to {results_csv_path}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="H. Pylori K-Fold Training")

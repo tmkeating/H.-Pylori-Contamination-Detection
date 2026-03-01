@@ -51,8 +51,20 @@ FOLD=${FOLD:-0}
 NUM_FOLDS=${NUM_FOLDS:-5}
 MODEL_NAME=${MODEL_NAME:-"convnext_tiny"}
 
-echo "Starting Training for Fold: $FOLD of $NUM_FOLDS using $MODEL_NAME"
-python train.py --fold $FOLD --num_folds $NUM_FOLDS --model_name "$MODEL_NAME"
+# Capture standard output and error to the results directory manually if not on SLURM
+SLURM_JOB_ID=${SLURM_JOB_ID:-"manual"}
+
+# If running on SLURM, SBATCH already handles -o and -e logic.
+# Only use manual redirection if SLURM_JOB_ID is "manual".
+if [ "$SLURM_JOB_ID" == "manual" ]; then
+    OUTPUT_LOG="results/output_${FOLD}_manual.txt"
+    ERROR_LOG="results/error_${FOLD}_manual.txt"
+    echo "Starting Training for Fold: $FOLD of $NUM_FOLDS using $MODEL_NAME" | tee -a "$OUTPUT_LOG"
+    python train.py --fold $FOLD --num_folds $NUM_FOLDS --model_name "$MODEL_NAME" > >(tee -a "$OUTPUT_LOG") 2> >(tee -a "$ERROR_LOG" >&2)
+else
+    echo "Starting Training for Fold: $FOLD of $NUM_FOLDS using $MODEL_NAME"
+    python train.py --fold $FOLD --num_folds $NUM_FOLDS --model_name "$MODEL_NAME"
+fi
 
 # Note: Meta-Classifier is now handled globally in submit_all_folds.sh 
 # to avoid race conditions during parallel training.

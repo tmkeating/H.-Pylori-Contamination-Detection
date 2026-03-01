@@ -1,4 +1,5 @@
 import os                       # Library to interact with the operating system (files and folders)
+import torch                    # Added for MIL stacking
 import numpy as np               # Library for numerical operations
 import pandas as pd             # Library to handle data tables (CSV files)
 from PIL import Image           # Library to open and process images
@@ -26,13 +27,16 @@ class HPyloriDataset(Dataset):
                 return pd.read_excel(file_path)
             return pd.read_csv(file_path)
 
-    def __init__(self, root_dir, patient_csv, patch_csv, transform=None):
+    def __init__(self, root_dir, patient_csv, patch_csv, transform=None, bag_mode=False, max_bag_size=500, train=False):
         """
         Initialization: This runs once when you create the dataset.
         It links the data files with the image folders.
         """
         self.root_dir = root_dir   # The folder where images are stored
         self.transform = transform # Any changes we want to make to images (resizing, etc.)
+        self.bag_mode = bag_mode
+        self.max_bag_size = max_bag_size
+        self.train = train
         
         # --- Step 1: Load Patient-level data ---
         # Read the file that tells us if a patient's overall sample is negative or positive
@@ -40,9 +44,11 @@ class HPyloriDataset(Dataset):
         # Convert text labels into numbers: NEGATIVA becomes 0, others become 1 (contaminated)
         self.label_map = {'NEGATIVA': 0, 'BAIXA': 1, 'ALTA': 1}
         # Create a dictionary for quick lookup: { "PatientID": 0 or 1 }
-        self.patient_labels = {row['CODI']: self.label_map[row['DENSITAT']] for _, row in self.patient_df.iterrows()}
+        # Clean IDs by removing decimals if they were read as floats (e.g. 101.0 -> 101)
+        clean_id = lambda x: str(int(float(x))) if str(x).replace('.','',1).isdigit() else str(x)
+        self.patient_labels = {clean_id(row['CODI']): self.label_map[row['DENSITAT']] for _, row in self.patient_df.iterrows()}
         # Keep track of the actual density for logic filtering
-        self.patient_densities = {row['CODI']: row['DENSITAT'] for _, row in self.patient_df.iterrows()}
+        self.patient_densities = {clean_id(row['CODI']): row['DENSITAT'] for _, row in self.patient_df.iterrows()}
         
         # --- Step 2: Load Patch-level data ---
         # Read the specialized file that looks at specific windows/spots within a sample
@@ -123,16 +129,66 @@ class HPyloriDataset(Dataset):
                     else:
                         continue
 
+        # --- Step 4: MIL Bag-Mode Organization ---
+        if self.bag_mode:
+            # Reorganize samples into bags by patient ID
+            patient_bags = {}
+            for img_path, label in self.samples:
+                # Use the full folder name as the bag ID to keep them granular
+                # (e.g. 'B22-47_0', 'B22-47_1' are separate bags)
+                folder_name = os.path.basename(os.path.dirname(img_path))
+                p_id_full = folder_name
+                
+                # Extract the base ID to look up clinical labels in Excel
+                # (e.g. 'B22-47' or '101')
+                base_id = p_id_full.split('_')[0]
+                
+                if p_id_full not in patient_bags:
+                    # Get clinical label from the base ID (root patient status)
+                    patient_label = self.patient_labels.get(base_id, 0)
+                    patient_bags[p_id_full] = {'samples': [], 'label': patient_label}
+                
+                patient_bags[p_id_full]['samples'].append(img_path)
+            
+            # List of (list_of_paths, patient_label, bag_id)
+            self.bags = []
+            for bag_id, data in patient_bags.items():
+                paths = data['samples']
+                # No longer truncating at init; __getitem__ handles sampling
+                self.bags.append((paths, data['label'], bag_id))
+
     def __len__(self):
+        if self.bag_mode:
+            return len(self.bags)
         # This tells the computer how many total images we have found
         return len(self.samples)
 
     def __getitem__(self, idx):
         """
-        This runs every time the computer "grabs" an image to study it.
-        It opens the file, transforms it, and hands it to the model.
-        Returns: (image, label, image_path)
+        This runs every time the computer "grabs" an image (or bag) to study it.
         """
+        if self.bag_mode:
+            img_paths, label, patient_id = self.bags[idx]
+            
+            # --- Dynamic Bag Sampling (TOTAL COVERAGE) ---
+            if self.train and len(img_paths) > self.max_bag_size:
+                # Randomly sample patches to ensure eventually seeing everything
+                selected_paths = np.random.choice(img_paths, self.max_bag_size, replace=False)
+            elif len(img_paths) > self.max_bag_size:
+                # Deterministic for validation/testing
+                selected_paths = sorted(img_paths)[:self.max_bag_size]
+            else:
+                selected_paths = img_paths
+
+            images = []
+            for path in selected_paths:
+                img = Image.open(path).convert('RGB')
+                if self.transform:
+                    img = self.transform(img)
+                images.append(img)
+            # Stack all images in the bag into a single tensor (Bag_Size, C, H, W)
+            return torch.stack(images), label, patient_id
+
         img_path, label = self.samples[idx] # Get path and label from our list
         image = Image.open(img_path).convert('RGB') # Open the image as a standard color picture
         

@@ -1,3 +1,5 @@
+Outdated:
+
 # Clinical Diagnostic Report: *H. pylori* Contamination Detection
 **Iteration 9.3: Spatial De-Noising & Meta-Optimization**
 **Date**: February 24, 2026

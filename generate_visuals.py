@@ -19,7 +19,6 @@ from sklearn.metrics import (
 from scipy.stats import skew, kurtosis
 from torchvision import transforms
 from normalization import MacenkoNormalizer
-from meta_classifier import HPyMetaClassifier
 from PIL import Image
 
 # --- Config ---
@@ -268,16 +267,8 @@ def full_visual_report(RUN_ID, MODEL_PATH, MODEL_NAME="resnet50", fold_idx=4, nu
 
     consensus_df = pd.DataFrame(consensus_data)
     
-    # Use learned meta-model for patient-level aggregation
-    meta = HPyMetaClassifier()
-    meta_results = meta.predict(consensus_df)
-    
-    if meta_results is not None:
-        meta_preds, _, meta_probs = meta_results
-        pat_probs_final = meta_probs
-    else:
-        # Fallback to Max probability aggregation
-        pat_probs_final = pat_probs_max
+    # Fallback to Max probability aggregation (Meta-classifier deprecated in Iteration 10)
+    pat_probs_final = pat_probs_max
 
     # --- Step 3: Patient-Level Plots ---
     # 1. Patient ROC (Comparing Meta-Classifier, Patch-Level, Max Prob, and Suspicious Count)
