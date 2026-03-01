@@ -6,6 +6,7 @@ class AttentionGate(nn.Module):
     """
     Attention mechanism for Multiple Instance Learning (MIL).
     Learns to weigh patches based on their diagnostic relevance.
+    Iteration 11: Added temperature scaling to sharpen/soften attention.
     """
     def __init__(self, feature_dim=2048, hidden_dim=256):
         super(AttentionGate, self).__init__()
@@ -14,10 +15,14 @@ class AttentionGate(nn.Module):
             nn.Tanh(),
             nn.Linear(hidden_dim, 1)
         )
+        # Learnable temperature parameter (initialized to 1.0)
+        # Lower T makes attention sharper (focuses on fewer patches)
+        self.temperature = nn.Parameter(torch.ones(1))
 
     def forward(self, x):
         # x shape: (N, feature_dim)
         A = self.attention(x) # (N, 1)
+        A = A / self.temperature # Apply temperature scaling
         A = torch.transpose(A, 1, 0) # (1, N)
         A = nn.functional.softmax(A, dim=1) # softmax over patches
         return A

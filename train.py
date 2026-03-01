@@ -422,10 +422,10 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
     # --- Step 6: Define the Learning Rules ---
     # strategy B: Focal Loss for Sparse Bacteremia Detection
     # Optimized to ignore common histological background and focus on sparse bacteria.
-    # We invert weights to [1.5, 1.0] (Optimization 8.2) to recover specificity
-    # from the 20-30% floor and provide cleaner features for aggregation.
-    # Label Smoothing is disabled (0.0) to maximize bacterial signal contrast (8.4).
-    loss_weights = torch.FloatTensor([1.5, 1.0]).to(device) 
+    # Iteration 11: Calibration for Sensitivity Hardening
+    # Previous weight [1.5, 1.0] achieved 100% Precision but missed sparse cases.
+    # New weight [1.0, 2.5] aggressively weights Positives to recover "Ghost Patients".
+    loss_weights = torch.FloatTensor([1.0, 2.5]).to(device) 
     criterion = FocalLoss(gamma=2, weight=loss_weights, smoothing=0.0)
 
     # --- Optimization 5D: Preprocessing & Model Compilation (Kernel Fusion) ---
@@ -453,7 +453,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
         optimizer = Adam(model.parameters(), lr=2e-5, weight_decay=5e-3)
     
     # --- Step 6.2: OneCycle Learning Rate Scheduler ---
-    num_epochs = 1
+    num_epochs = 20
     steps_per_epoch = len(train_loader) // accumulation_steps
     scheduler = optim.lr_scheduler.OneCycleLR(
         optimizer, 

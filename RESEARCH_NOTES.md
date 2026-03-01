@@ -1351,7 +1351,22 @@ While recall was perfect, **Specificity dropped significantly**.
 3. **Ghost Patients Found**:
    - Identified 3 patients (`B22-01_1`, `B22-224_1`, `B22-69_1`) that are consistently missed by all folds. These represent the "Final Frontier" of the project—cases where the bacteria are so sparse they defy standard MIL aggregation.
 
-### 🎯 Next Steps
-- **Loss Re-Balancing**: Implementation of higher positive weights `[1.0, 2.0]` to recover the 13% recall loss now that perfect precision is locked in.
-- **Attention Sharpening**: Experimenting with "Gated Attention" or Max-Pooling variants for the most sparse cases.
+### 🎯 Next Steps (Iteration 11)
+- **Loss Re-Balancing**: Implementation of higher positive weights `[1.0, 2.5]` to recover the 13% recall loss now that perfect precision is locked in.
+- **Attention Sharpening**: Experimented with **Temperature Scaling** in the `AttentionGate`. Lower temperatures $T < 1.0$ can sharpen the focus on sparse bacteria, preventing signal dilution in huge 2,000+ patch bags.
+
+---
+
+## Iteration 11: Sensitivity Hardening (In-Progress)
+
+### Objectives
+1.  **Break the 92% Acc Barrier**: Convert "Ghost Patients" to True Positives.
+2.  **Preserve Perfect Precision**: Maintain 0 False Positives while increasing sensitivity.
+3.  **Calibrate Attention**: Deploy a learnable temperature parameter to prevent sparse signal dilution.
+
+### Strategy
+-   **Class Weights**: Inverted to `[1.0, 2.5]` (Positives are now 2.5x more impactful than negatives).
+-   **Attention**: Integrated `self.temperature` into `AttentionGate.forward`.
+-   **Evaluation**: Maintained Multi-Pass "Total Coverage" for exhaustive slide analysis.
+
 
