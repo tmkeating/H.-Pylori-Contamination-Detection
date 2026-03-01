@@ -85,7 +85,11 @@ def generate_gradcam(model, input_batch, target_layer):
     # ReLU to keep only positive influence
     cam = F.relu(cam)
     
-    return cam, probs
+    # Normalize
+    cam_min, cam_max = cam.min(), cam.max()
+    cam = (cam - cam_min) / (cam_max - cam_min + 1e-7)
+    
+    return cam.detach().cpu().numpy(), probs.detach().cpu().numpy()
 
 def get_next_run_number(results_dir="results", current_slurm_id=None):
     """
@@ -449,7 +453,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
         optimizer = Adam(model.parameters(), lr=2e-5, weight_decay=5e-3)
     
     # --- Step 6.2: OneCycle Learning Rate Scheduler ---
-    num_epochs = 20
+    num_epochs = 1
     steps_per_epoch = len(train_loader) // accumulation_steps
     scheduler = optim.lr_scheduler.OneCycleLR(
         optimizer, 
@@ -780,19 +784,70 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
 
     # 4. Grad-CAM Samples from Hold-Out
     print(f"Generating Grad-CAM for most suspicious patient bags in {gradcam_dir}...")
-    # Get indices of bags with highest probability of being positive
-    top_indices = np.argsort(all_probs_pat)[-5:] # Top 5 suspicious bags
+    # Get top 5 most positive and top 5 most ghostly (FN)
+    # top_indices: highest probability, fn_indices: highest prob among actual positive that were pred 0
+    top_indices = np.argsort(all_probs_pat)[-5:] 
     
     # Target the last conv layer for Grad-CAM
     # For ConvNeXt-Tiny, it's typically the last block of the last stage
-    target_layer = None
     if "convnext" in model_name:
-        target_layer = model._orig_mod.backbone.features[7][2].block[5] if hasattr(model, "_orig_mod") else model.backbone.features[7][2].block[5]
+        # ConvNeXt Features Stage 4 Block 3
+        target_layer = model.backbone.features[7][2].block[5]
     else:
-        target_layer = model._orig_mod.backbone.layer4[2] if hasattr(model, "_orig_mod") else model.backbone.layer4[2]
+        target_layer = model.backbone.layer4[2]
 
+    # Context to enable gradients for Grad-CAM
+    with torch.enable_grad():
+        for bag_idx in top_indices:
+            p_id = patient_ids_list[bag_idx]
+            
+            # Load full bag for this patient
+            bag_imgs, label, _ = holdout_dataset[bag_idx]
+            bag_imgs = bag_imgs.to(device)
+            
+            # Get Attention weights to find the specific patches the model liked
+            # Use chunks for forward pass to avoid OOM
+            all_attns = []
+            for start_idx in range(0, bag_imgs.size(0), vram_bag_limit):
+                chunk = bag_imgs[start_idx:start_idx + vram_bag_limit]
+                chunk = det_preprocess_batch(chunk, training=False)
+                _, attn = model.forward_bag(chunk)
+                all_attns.append(attn)
+            
+            attention = torch.cat(all_attns, dim=1).squeeze(0) # (Bag_Size,)
+            
+            # Take top 3 most "Attended" patches
+            top_patch_vals, top_patch_indices = torch.topk(attention, k=min(3, bag_imgs.size(0)))
+            
+            for rank, p_idx in enumerate(top_patch_indices):
+                patch_img = bag_imgs[p_idx:p_idx+1]
+                patch_input = det_preprocess_batch(patch_img, training=False)
+                
+                # Grad-CAM on the backbone (since it contains the features)
+                heatmap, p_probs = generate_gradcam(model.backbone, patch_input, target_layer)
+                
+                # Plotting logic
+                plt.figure(figsize=(10, 5))
+                # Original Patch
+                plt.subplot(1, 2, 1)
+                orig_img = patch_img[0].cpu().permute(1, 2, 0).numpy()
+                plt.imshow(orig_img)
+                plt.title(f"Patch {p_idx} (Attn: {top_patch_vals[rank]:.4f})")
+                plt.axis('off')
+                
+                # Heatmap
+                plt.subplot(1, 2, 2)
+                plt.imshow(orig_img)
+                plt.imshow(heatmap[0, 0], cmap='jet', alpha=0.5)
+                plt.title(f"Grad-CAM (Pos Prob: {p_probs[0, 1]:.4f})")
+                plt.axis('off')
+                
+                out_path = os.path.join(gradcam_dir, f"{p_id}_rank{rank}_patch{p_idx}.png")
+                plt.savefig(out_path, bbox_inches='tight')
+                plt.close()
+                
     # Save evaluation report
-    report = classification_report(all_labels_pat, all_preds_pat, target_names=['Negative', 'Positive'], output_dict=True)
+    report = classification_report(all_labels_pat, all_preds_pat, target_names=['Negative', 'Positive'], output_dict=True, zero_division=0)
     pd.DataFrame(report).transpose().to_csv(results_csv_path)
     print(f"Evaluation report saved to {results_csv_path}")
 
