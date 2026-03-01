@@ -26,7 +26,7 @@ do
 done
 
 echo "-------------------------------------------"
-echo "Submitting Global Meta-Classifier training as dependent job..."
+echo "Submitting Global Attention-MIL final summary as dependent job..."
 # This job will only start once all 5 folds have successfully completed
 sbatch --dependency=afterok:$DEPENDENCIES <<EOF
 #!/bin/bash
@@ -35,13 +35,13 @@ sbatch --dependency=afterok:$DEPENDENCIES <<EOF
 #SBATCH --mem=16G
 #SBATCH -c 4
 #SBATCH -J HPy_FinalSummary
-#SBATCH -o slurm-%j.out
+#SBATCH -o results/slurm_summary_%j.txt
 
 # Activate virtual environment
 source ../venv/bin/activate
 
-echo "All folds finished. Execution complete."
-echo "Clinical analysis complete."
+echo "All folds finished. Iteration 10: Attention-MIL execution complete."
+echo "Clinical analysis and visualization generated."
 EOF
 
 echo "-------------------------------------------"
