@@ -46,8 +46,10 @@ def generate_grand_summary(results_dir="results"):
 
     # 2. Calculate Averages
     summary_df = pd.DataFrame(all_metrics)
-    averages = summary_df[['Accuracy', 'Precision(+)', 'Recall(+)', 'Recall(-)', 'F1_Macro']].mean()
-    stds = summary_df[['Accuracy', 'Precision(+)', 'Recall(+)', 'Recall(-)', 'F1_Macro']].std()
+    # Ensure only numeric columns are selected for mean/std
+    numeric_cols = ['Accuracy', 'Precision(+)', 'Recall(+)', 'Recall(-)', 'F1_Macro']
+    averages = summary_df[numeric_cols].mean()
+    stds = summary_df[numeric_cols].std()
 
     print(f"\n{'-'*60}")
     print(f"{'MEAN CROSS-VALIDATION RESULTS':^60}")
@@ -55,7 +57,7 @@ def generate_grand_summary(results_dir="results"):
     print(f"Accuracy:     {averages['Accuracy']:.4f} ± {stds['Accuracy']:.4f}")
     print(f"Precision(+): {averages['Precision(+)']:.4f} ± {stds['Precision(+)']:.4f}")
     print(f"Recall(+):    {averages['Recall(+)']:.4f} ± {stds['Recall(+)']:.4f}")
-    print(f"Recall(-):    {averages['Recall(-']:.4f} ± {stds['Recall(-']:.4f}")
+    print(f"Recall(-):    {averages['Recall(-)']:.4f} ± {stds['Recall(-)']:.4f}")
     print(f"F1 Macro:     {averages['F1_Macro']:.4f} ± {stds['F1_Macro']:.4f}")
     print(f"{'='*60}\n")
 

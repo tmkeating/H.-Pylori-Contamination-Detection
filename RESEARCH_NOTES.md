@@ -1398,3 +1398,34 @@ While recall was perfect, **Specificity dropped significantly**.
 -   **Results Pending**: Currently running on SLURM Jobs 104490-104495.
 
 
+
+### Initial Results (Iteration 12)
+-   **Peak Performance (Fold 132/F1)**: **93.1% Accuracy** (Precision: 100%, Recall(+): 85.7%, Recall(-): 100%).
+-   **Average (4-Fold)**: 87.3% Accuracy. Improved precision over Iteration 11 by filtering "morphology mimics."
+-   **Critical Failure (Fold 135/F4)**: **69.0% Accuracy** (Extreme Sensitivity Bias: Recall(+) 100%, Recall(-) 35%).
+-   **Conclusion**: Gated Attention effectively suppressed noise in 4/5 folds reaching new SOTA heights (93.1%), but the architecture remains vulnerable to catastrophic overfitting in high-variance folds.
+
+---
+
+## Iteration 13: Clinical Hardening (SWA & Regularization)
+
+### Objectives
+1.  **Stabilize Variance**: Fix the 69% outlier in Fold 4. Reduce inter-fold Standard Deviation (Target SD < 5%).
+2.  **Suppress Mimics**: Penalize memorization of tissue debris using aggressive Weight Decay.
+3.  **Gold Standard Calibration**: Find a flatter, more generalizable optimum for diagnostic use.
+
+### Strategy (Hardened Training)
+-   **Stochastic Weight Averaging (SWA)**:
+    -   Starts at **75% of training** (Epoch 15/20).
+    -   Averages weights across the final trajectory to find wider, more robust minima.
+    -   Uses `update_bn` to recalibrate Batch Normalization statistics for the averaged model.
+-   **Aggressive Regularization**:
+    -   **Weight Decay**: Increased to **0.1** (AdamW) to suppress weak feature activations.
+    -   **No Label Smoothing**: Disabled (`smoothing=0.0`) to maximize signal contrast for sparse bacteria.
+-   **Optimization**:
+    -   Retained **Gated Attention MIL** (Iteration 12 architecture).
+    -   Retained **Focal Loss** with [1.0, 1.8] weighting.
+
+### Status
+-   **Jobs**: 104528 - 104533.
+-   **Goal**: Surpass the 93.1% peak while bringing the 69% floor up significantly.

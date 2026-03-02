@@ -425,8 +425,26 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
     # Iteration 12: Noise Filtering Calibration
     # Dialing back positive weights to [1.0, 1.8] to reclaim Precision 
     # without sacrificing the Recall gains found in Iteration 11.
+    # Iteration 13: Hardening - smoothing set to 0.0 as requested.
     loss_weights = torch.FloatTensor([1.0, 1.8]).to(device) 
     criterion = FocalLoss(gamma=2, weight=loss_weights, smoothing=0.0)
+
+    # Optimizer Choice:
+    # ConvNeXt is highly sensitive to the training recipe and benefits from AdamW.
+    # Iteration 13: Weight decay set to 0.1 for maximum mimic suppression.
+    if "convnext" in model_name:
+        print(f"Using AdamW Optimizer for {model_name} stability (WD=0.1)...")
+        optimizer = AdamW(model.parameters(), lr=1e-5, weight_decay=0.1)
+    else:
+        # ResNet default (Adam)
+        optimizer = Adam(model.parameters(), lr=2e-5, weight_decay=1e-2)
+
+    # --- Step 6.2: SWA Initialization (Iteration 13) ---
+    from torch.optim.swa_utils import AveragedModel, SWALR
+    num_epochs = 15
+    swa_model = AveragedModel(model)
+    swa_start = int(num_epochs * 0.75) # Start SWA at 75% of training
+    swa_scheduler = SWALR(optimizer, swa_lr=0.05)
 
     # --- Optimization 5D: Preprocessing & Model Compilation (Kernel Fusion) ---
     # We define a fused preprocessing function for deterministic operations.
@@ -443,17 +461,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
         print(f"Skipping torch.compile for {model_name} to conserve VRAM...")
         # model = torch.compile(model, mode="reduce-overhead")
     
-    # Optimizer Choice:
-    # ConvNeXt is highly sensitive to the training recipe and benefits from AdamW.
-    if "convnext" in model_name:
-        print(f"Using AdamW Optimizer for {model_name} stability...")
-        optimizer = AdamW(model.parameters(), lr=1e-5, weight_decay=0.05)
-    else:
-        # ResNet default (Adam)
-        optimizer = Adam(model.parameters(), lr=2e-5, weight_decay=5e-3)
-    
     # --- Step 6.2: OneCycle Learning Rate Scheduler ---
-    num_epochs = 15
     steps_per_epoch = len(train_loader) // accumulation_steps
     scheduler = optim.lr_scheduler.OneCycleLR(
         optimizer, 
@@ -553,6 +561,11 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
         epoch_acc = float(running_corrects) / len(train_indices)
         print(f"Train Loss: {epoch_loss:.4f} Acc: {epoch_acc:.4f}")
 
+        # --- SWA Update (Iteration 13) ---
+        if epoch >= swa_start:
+            swa_model.update_parameters(model)
+            swa_scheduler.step()
+
         # --- Self-Test Mode (Validation) ---
         model.eval()
         full_dataset.train = False # No random sampling during eval
@@ -623,6 +636,21 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
     plt.legend()
     plt.savefig(history_path)
     print(f"Saved learning curves to {history_path}")
+
+    # --- Step 7.8: Final SWA Update (Iteration 13) ---
+    # Final SWA normalization (after training is fully complete)
+    # This prepares the averaged model's batchnorm layers for inference
+    torch.optim.swa_utils.update_bn(train_loader, swa_model, device=device)
+    
+    # Save the Final SWA model instead of just the last model
+    swa_model_path = os.path.join(results_dir, f"{prefix}_model_brain.pth")
+    torch.save(swa_model.state_dict(), swa_model_path)
+    print(f"Final SWA Clinical Model saved to {swa_model_path}")
+    
+    # Use the SWA model for the final independent performance evaluation
+    model = swa_model
+    model.to(device)
+    model.eval()
 
     # --- Step 8: Final Evaluation (MIL Bag Mode + 8-way TTA) ---
     print(f"\nEvaluating on Independent Hold-Out set from: {holdout_dir} with 8-way TTA and Multi-Pass Bag Coverage")
