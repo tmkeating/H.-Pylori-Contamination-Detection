@@ -1429,3 +1429,30 @@ While recall was perfect, **Specificity dropped significantly**.
 ### Status
 -   **Jobs**: 104528 - 104533.
 -   **Goal**: Surpass the 93.1% peak while bringing the 69% floor up significantly.
+
+---
+
+## Iteration 13.1: Stability Patch & SWA Calibration (ACTIVE)
+
+### Incident Report (Iteration 13 Failure)
+- **Observation**: Losses exploded (/usr/bin/bash.01 \rightarrow 2.4$) and accuracy dropped to exactly **50% (random chance)** at Epoch 14 across all folds.
+- **Root Cause**:
+    1. **LR Conflict**: `SWALR` was set to `0.05` (500x higher than training `max_lr`).
+    2. **Oscillation**: `OneCycleLR` and `SWALR` were competing every step, causing weight divergence.
+
+### Objectives (13.1)
+1. **Divergence Prevention**: Synchronize schedulers to ensure only one "captain" controls the LR.
+2. **Stable Averaging**: Extend the training window to allow SWA to settle into the "Gold Standard" minima.
+3. **Clinical Precision**: Maintain `WD=0.1` to penalize morphology mimics without destroying the feature extractor.
+
+### Strategy (Stability Patch)
+- **LR Calibration**: Reduced `swa_lr` to **`1e-5`** (aligned with training baseline).
+- **Scheduler Sync**: Modified training loop to **stop** `OneCycleLR` once SWA begins (`if epoch < swa_start: scheduler.step()`).
+- **Phase Shift**:
+    - **Total Epochs**: Increased to **20**.
+    - **SWA Start**: **Epoch 15** (provides 25% averaging trajectory).
+- **Architecture**: Retained **Gated Attention MIL** + **Focal Loss [1.0, 1.8]**.
+
+### Status
+- **Jobs**: 104685 - 104690.
+- **Goal**: Recover the 93.1% peak while lifting the 69% floor through statistical averaged stability.

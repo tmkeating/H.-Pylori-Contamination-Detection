@@ -442,10 +442,10 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
 
     # --- Step 6.2: SWA Initialization (Iteration 13) ---
     from torch.optim.swa_utils import AveragedModel, SWALR
-    num_epochs = 15
+    num_epochs = 20 # Increased for better SWA averaging
     swa_model = AveragedModel(model)
-    swa_start = int(num_epochs * 0.75) # Start SWA at 75% of training
-    swa_scheduler = SWALR(optimizer, swa_lr=0.05)
+    swa_start = 15 # Start SWA in the final phase
+    swa_scheduler = SWALR(optimizer, swa_lr=1e-5) # Calibration: drastically reduced for stability
 
     # --- Optimization 5D: Preprocessing & Model Compilation (Kernel Fusion) ---
     # We define a fused preprocessing function for deterministic operations.
@@ -550,7 +550,12 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
                 scaler.step(optimizer)
                 scaler.update()
                 optimizer.zero_grad()
-                scheduler.step()
+                
+                # Calibration (Iteration 13.1): Only step OneCycle 
+                # before SWA takes over to prevent destructive oscillation
+                if epoch < swa_start:
+                    scheduler.step()
+                    
                 # Clear cache after optimization step to prevent creep
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
