@@ -380,6 +380,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
     # Use the transforms in the underlying dataset
     full_dataset.transform = train_transform
     train_transformed = TransformDataset(train_data, None) 
+    train_transformed_copy = train_transformed # Kept for SWA BN update later
     
     # We'll switch transform for validation later or use a proxy
     val_transformed = TransformDataset(val_data, None)
@@ -608,10 +609,34 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
 
     print(f"Training complete. Best Val Loss: {best_loss:.4f}")
 
-    # --- Step 7.4: Memory Cleanup ---
-    # Delete training loaders and clear cache to free up RAM for the Hold-Out test
-    print(f"Fold {fold_idx} finished.")
-    del train_loader
+    # --- Step 7.8: Final SWA Update (Iteration 13) ---
+    # Final SWA normalization (after training is fully complete)
+    # This prepares the averaged model's batchnorm layers for inference
+    # We must recreate the train_loader because it was deleted in Step 7.4
+    temp_train_loader = DataLoader(
+        train_transformed_copy, 
+        batch_size=batch_size_mil, 
+        sampler=sampler, 
+        num_workers=4, 
+        pin_memory=True
+    )
+    torch.optim.swa_utils.update_bn(temp_train_loader, swa_model, device=device)
+    del temp_train_loader
+    
+    # Save the Final SWA model instead of just the last model
+    swa_model_path = os.path.join(results_dir, f"{prefix}_model_brain.pth")
+    torch.save(swa_model.state_dict(), swa_model_path)
+    print(f"Final SWA Clinical Model saved to {swa_model_path}")
+
+    # Use the SWA model for the final independent performance evaluation
+    # We use .module because AveragedModel (swa_model) is a wrapper that 
+    # doesn't expose the 'forward_bag' method directly.
+    model = swa_model.module
+    model.to(device)
+    model.eval()
+
+    # Step 7.4: Memory Cleanup (REMAINING)
+    del train_transformed_copy
     del val_loader
     del train_transformed
     del val_transformed
@@ -620,37 +645,6 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
     del val_data
     gc.collect()
     torch.cuda.empty_cache()
-
-    # --- Step 7.5: Save Learning Curves ---
-    plt.figure(figsize=(12, 5))
-    plt.subplot(1, 2, 1)
-    plt.plot(history['train_loss'], label='Train Loss')
-    plt.plot(history['val_loss'], label='Val Loss')
-    plt.title('Loss over Epochs')
-    plt.legend()
-    
-    plt.subplot(1, 2, 2)
-    plt.plot(history['train_acc'], label='Train Acc')
-    plt.plot(history['val_acc'], label='Val Acc')
-    plt.title('Accuracy over Epochs')
-    plt.legend()
-    plt.savefig(history_path)
-    print(f"Saved learning curves to {history_path}")
-
-    # --- Step 7.8: Final SWA Update (Iteration 13) ---
-    # Final SWA normalization (after training is fully complete)
-    # This prepares the averaged model's batchnorm layers for inference
-    torch.optim.swa_utils.update_bn(train_loader, swa_model, device=device)
-    
-    # Save the Final SWA model instead of just the last model
-    swa_model_path = os.path.join(results_dir, f"{prefix}_model_brain.pth")
-    torch.save(swa_model.state_dict(), swa_model_path)
-    print(f"Final SWA Clinical Model saved to {swa_model_path}")
-    
-    # Use the SWA model for the final independent performance evaluation
-    model = swa_model
-    model.to(device)
-    model.eval()
 
     # --- Step 8: Final Evaluation (MIL Bag Mode + 8-way TTA) ---
     print(f"\nEvaluating on Independent Hold-Out set from: {holdout_dir} with 8-way TTA and Multi-Pass Bag Coverage")
@@ -679,8 +673,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
         lambda x: v2.RandomVerticalFlip(p=1.0)(torch.rot90(x, 1, [2, 3]))
     ]
 
-    model.load_state_dict(torch.load(best_model_path, weights_only=True))
-    model.eval()
+
     
     num_holdout = len(holdout_dataset)
     all_preds_pat = np.zeros(num_holdout, dtype=np.int8)
