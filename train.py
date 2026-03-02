@@ -424,10 +424,9 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
     # strategy B: Focal Loss for Sparse Bacteremia Detection
     # Optimized to ignore common histological background and focus on sparse bacteria.
     # Iteration 12: Noise Filtering Calibration
-    # Dialing back positive weights to [1.0, 1.8] to reclaim Precision 
-    # without sacrificing the Recall gains found in Iteration 11.
-    # Iteration 13: Hardening - smoothing set to 0.0 as requested.
-    loss_weights = torch.FloatTensor([1.0, 1.8]).to(device) 
+    # Iteration 14: Sensitivity Refinement (PosWeight=2.2) to expand Recall 
+    # while relying on SWA + WD=0.1 to prevent Precision loss.
+    loss_weights = torch.FloatTensor([1.0, 2.2]).to(device) 
     criterion = FocalLoss(gamma=2, weight=loss_weights, smoothing=0.0)
 
     # Optimizer Choice:
@@ -632,6 +631,23 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
     swa_model_path = os.path.join(results_dir, f"{prefix}_model_brain.pth")
     torch.save(swa_model.state_dict(), swa_model_path)
     print(f"Final SWA Clinical Model saved to {swa_model_path}")
+
+    # --- Step 7.9: Save Learning Curves (Iteration 14 Fix) ---
+    plt.figure(figsize=(12, 5))
+    plt.subplot(1, 2, 1)
+    plt.plot(history['train_loss'], label='Train Loss')
+    plt.plot(history['val_loss'], label='Val Loss')
+    plt.title('Loss over Epochs')
+    plt.legend()
+    
+    plt.subplot(1, 2, 2)
+    plt.plot(history['train_acc'], label='Train Acc')
+    plt.plot(history['val_acc'], label='Val Acc')
+    plt.title('Accuracy over Epochs')
+    plt.legend()
+    plt.savefig(history_path)
+    plt.close() # Prevent memory build-up
+    print(f"Saved learning curves to {history_path}")
 
     # Use the SWA model for the final independent performance evaluation
     # We use .module because AveragedModel (swa_model) is a wrapper that 

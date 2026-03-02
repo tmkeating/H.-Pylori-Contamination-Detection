@@ -8,42 +8,42 @@
 **Objective:** Detect *H. pylori* bacteria in histology slides.
 **Constraint:** Achieve clinical-grade throughput (>500 img/s) and break the 92% patient accuracy bottleneck.
 
-### 🛠️ Current Technical Stack (Iteration 10.0: Total Coverage Attention-MIL)
-- **Architecture**: **ConvNeXt-Tiny** Backbone + **Attention-MIL Gate** (Replaces meta-classifier).
-- **Bag Strategy**: **Dynamic 500-Patch Sampling** during training (Regularization); **Multi-Pass Evaluation** (100% Tissue Coverage) during verification.
-- **Optimization Strategy**: **Gradient Checkpointing** + **Chunked Feature Extraction** (chunk_size=8) fit 500-patch bags into 48GB VRAM.
-- **Scheduler**: **OneCycleLR** (Max LR: 1e-4) with **15-20 epochs** to handle sparse-signal convergence.
-- **Preprocessing**: **ImageNet Normalization** (IHC-mode) + **Test-Time Augmentation (8-way TTA)** for diagnostic stability.
-- **TTA Implementation**: **Rotations & Flips averaged** at the logit level across every slide segment.
-- **Validation**: **5-Fold LOPO-CV** on the independent 116-patient Hold-Out set.
+### 🛠️ Technical Stack (Iteration 14.1: SWA Sensitivity Push)
+- **Architecture**: **ConvNeXt-Tiny** Backbone + **Gated Attention MIL** (Sigmoid-gate morphological filtering).
+- **Bag Strategy**: **Dynamic 500-Patch Sampling** (Training) + **Multi-Pass Coverage** (Evaluation).
+- **Optimization Strategy**: **Stochastic Weight Averaging (SWA)** at `swa_lr=1e-5` (Epoch 15+) for a flatter, generalizable optimum.
+- **Regularization**: **AdamW** with aggressive **Weight Decay (0.1)** to suppress morphology mimics (debris).
+- **Loss Function**: **Asymmetric Focal Loss** with `pos_weight=2.2` to reclaim sparse bacterial signals.
+- **Hardware Optimization**: **Gradient Checkpointing** + **A40-Native FP32 Matmul ('high')** optimization.
+- **Validation**: **5-Fold Cross-Validation** (Independent Patient Splitting).
 
 ---
 
 ## 📈 Current Performance & Milestones
-1. **The 95% Barrier Search**: Iteration 10.0 reached **92.24% Accuracy** in its best fold.
-2. **Clinical Perfection Milestone**: Achieved **100.00% Precision (ZERO False Positives)** across the entire 116-patient hold-out set. If the model says positive, it is 100% positive.
-3. **Ghost Patient Discovery**: Identified 3 "Ghost Cases" (`B22-01_1`, `B22-224_1`, `B22-69_1`) that consistently defy detection even with multi-pass coverage—the "Final Frontier" of the study.
-4. **Interpretability**: Automated **Grad-CAM** mapped to the Attention-MIL peak weights provides pathologist-level explainability.
+1. **Accuray Floor Lift**: Iteration 13.1 successfully lifted the "Fold 4" outlier from **69% to 86.2%** via SWA calibration.
+2. **Stability Milestone**: Achieved **89.3% Average Accuracy** across all 5 folds with **100% Global Precision** (Zero False Positives).
+3. **Clinical Safety**: The model has never triggered a False Positive in a healthy patient across 116 hold-out cases when using `WD=0.1`.
+4. **Interpretability**: Integrated **Grad-CAM Samples** paired with **Attention Weights** for clinical transparency.
 
 ---
 
-## 🚀 Iteration 10.0 Recap & Insights
-**Vision:** "Total Transparency" and "Unbiased Coverage."
+## 🚀 Iteration 13.1 Recap: The "Stability Patch"
+**Vision:** "Generalization via Statistical Averaging."
 
-1. **The Sparse Signal Dilution**: Proved that while Attention-MIL is highly specific, the bacterial signal (1-5 bacteria) is often diluted by the presence of 2,000 background patches during aggregation.
-2. **Sampling Paradox**: Confirmed that **Random Bag Sampling** during training is required to prevent the model from memorizing patient-specific background "noise."
+1. **SWA Success**: Proved that `swa_lr=1e-5` (10x lower than max LR) and `update_bn` are critical to preventing the weight explosion seen in early MIL-SWA attempts.
+2. **Precision Guardrails**: Confirmed that `Weight Decay=0.1` acts as a "Morphological Filter," preventing the model from over-indexing on non-bacterial tissue artifacts.
 
 ---
 
-## 🧪 Future Research: Iteration 11 (Accuracy Hardening)
-**Projected Vision:** Recovering systemic recall while maintaining perfect precision.
+## 🧪 Current Research: Iteration 14 (Sensitivity Frontier)
+**Objective:** Target **94%+ Peak Accuracy** and **85%+ Recall**.
 
-- **Weight Inversion**: Rebalancing Focal Loss to `[1.0, 2.0]` (Negative, Positive) to force the model to bridge the 13% recall gap.
-- **Gated Attention**: Upgrading the simple attention gate to a **Gated Attention Mechanism** to sharpen the focus on sparse colonies.
-- **Consensus Voting**: Implementing a multi-model 5-fold ensemble to catch the "Ghost Patients" that individual folds miss.
+- **Sensitivity Calibration**: Shifting `pos_weight` to $2.2$ to reclaim "Ghost Bacteria" (low-density cases).
+- **Visual Persistence**: Restored learning curve generation (`_learning_curves.png`) to track optimization trajectory.
+- **Goal**: Maintain the 100% Precision record while aggressively expanding the sensitivity radius.
 
 **File reference:**
-- [dataset.py](dataset.py): Dynamic Bag Sampling and Multi-Pass loading.
-- [model.py](model.py): Attention-MIL architecture with Gradient Checkpointing.
-- [train.py](train.py): 8-way TTA and 15-epoch convergence cycle.
-- [RESEARCH_NOTES.md](RESEARCH_NOTES.md): Logs on the "Perfect Precision" milestone and bag-level dilution analysis.
+- [dataset.py](dataset.py): Multi-Pass loading & Standard ImageNet Normalization.
+- [model.py](model.py): **Gated Attention MIL** architecture with Gradient Checkpointing.
+- [train.py](train.py): **SWA Lifecycle** & **Asymmetric Focal Loss** implementation.
+- [RESEARCH_NOTES.md](RESEARCH_NOTES.md): Comprehensive logs of SWA calibration and Sensitivity Push 14.1.

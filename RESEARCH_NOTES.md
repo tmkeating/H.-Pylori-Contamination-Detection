@@ -1456,3 +1456,35 @@ While recall was perfect, **Specificity dropped significantly**.
 ### Status
 - **Jobs**: 104685 - 104690.
 - **Goal**: Recover the 93.1% peak while lifting the 69% floor through statistical averaged stability.
+
+### Status (Iteration 13.1)
+- **Stability Proof**: **89.3% Average Accuracy** across all 5 folds.
+- **Precision Record**: **100% Precision** maintained globally (0 False Positives).
+- **Floor Lift**: The 69% outlier in Fold 4 was successfully lifted to **86.2%**.
+- **Conclusion**: SWA with `swa_lr=1e-5` is official the "Stability Patch" required for MIL.
+
+---
+
+## Iteration 14: Sensitivity Push (Calibration: PosWeight=2.2)
+
+### Objectives
+1.  **Reclaim Sparse Detections**: Convert the remaining 10% (False Negatives) by increasing the focal loss penalty for missing positives.
+2.  **Maintain 100% Precision**: Ensure the increased sensitivity doesn't trigger "debris artifacts" (the morphology mimics).
+3.  **Visual Reporting**: Fix the missing `_learning_curves.png` from Iteration 13.1.
+
+### Strategy (Sensitivity Expansion)
+-   **Asymmetric Focal Loss**:
+    -   **PosWeight**: Increased to **2.2** (from 1.8).
+    -   **Rationale**: 13.1 proved we have "infinite" precision room; shifting the weight allows for a more aggressive search for sparse bacteria.
+-   **Architecture Lifecycle**:
+    -   **Gated Attention MIL**: Serves as the morphological filter.
+    -   **SWA (Calibrated)**: `swa_lr=1e-5`, `start=15`, total epochs=20.
+    -   **Weight Decay**: `0.1` (AdamW) to keep the "Precision Guardrails" active.
+
+### Expected Outcome
+-   Target **94%+ Peak Accuracy**.
+-   Target **85%+ Average Recall** (up from 78%).
+
+### Status
+-   **Jobs**: 104766 - 104771.
+-   **Initial Check**: Jobs synchronized to local A40 storage; Epoch 1 started.
