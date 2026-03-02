@@ -1,0 +1,108 @@
+Synchronizing dataset to local scratch: /tmp/ricse03_h_pylori_data
+Data synchronization complete.
+Starting Training for Fold: 4 of 5 using convnext_tiny
+--- Starting Run ID: 151 (Fold: 5/5, Model: convnext_tiny, SLURM Job: 104770) ---
+Using device: cuda
+Set float32 matmul precision to 'high' for A40 hardware optimization.
+Using Data Path: /tmp/ricse03_h_pylori_data
+Pre-processing: Using Standard ImageNet Normalization (IHC-mode).
+--- Fold 5/5 Split (MIL Bag Mode) ---
+Total Patients (Bags): 226
+Training Patients: 180
+Validation Patients: 46
+Independent Patient-level split:
+ - Train: 180 bags
+ - Val:   46 bags
+Training distribution (Bags): Negative=83, Contaminated=97
+Using AdamW Optimizer for convnext_tiny stability (WD=0.1)...
+Skipping torch.compile for convnext_tiny to conserve VRAM...
+Running on standard PyTorch (IPEX disabled).
+Epoch 1/20 (Fold 5/5)
+Train Loss: 0.4988 Acc: 0.5500
+Val Loss: 0.3852 Acc: 0.4783
+Best model saved to results/151_104770_f4_convnext_tiny_model_brain.pth (Val Loss: 0.3852)
+Epoch 2/20 (Fold 5/5)
+Train Loss: 0.3879 Acc: 0.5056
+Val Loss: 0.3657 Acc: 0.4783
+Best model saved to results/151_104770_f4_convnext_tiny_model_brain.pth (Val Loss: 0.3657)
+Epoch 3/20 (Fold 5/5)
+Train Loss: 0.3153 Acc: 0.5333
+Val Loss: 0.2092 Acc: 0.5870
+Best model saved to results/151_104770_f4_convnext_tiny_model_brain.pth (Val Loss: 0.2092)
+Epoch 4/20 (Fold 5/5)
+Train Loss: 0.1771 Acc: 0.8111
+Val Loss: 0.1254 Acc: 0.9130
+Best model saved to results/151_104770_f4_convnext_tiny_model_brain.pth (Val Loss: 0.1254)
+Epoch 5/20 (Fold 5/5)
+Train Loss: 0.0942 Acc: 0.9333
+Val Loss: 0.1114 Acc: 0.9348
+Best model saved to results/151_104770_f4_convnext_tiny_model_brain.pth (Val Loss: 0.1114)
+Epoch 6/20 (Fold 5/5)
+Train Loss: 0.0454 Acc: 0.9722
+Val Loss: 0.1365 Acc: 0.8478
+Epoch 7/20 (Fold 5/5)
+Train Loss: 0.0197 Acc: 0.9889
+Val Loss: 0.1073 Acc: 0.9565
+Best model saved to results/151_104770_f4_convnext_tiny_model_brain.pth (Val Loss: 0.1073)
+Epoch 8/20 (Fold 5/5)
+Train Loss: 0.0428 Acc: 0.9833
+Val Loss: 0.1407 Acc: 0.9348
+Epoch 9/20 (Fold 5/5)
+Train Loss: 0.0103 Acc: 1.0000
+Val Loss: 0.1439 Acc: 0.9565
+Epoch 10/20 (Fold 5/5)
+Train Loss: 0.0090 Acc: 0.9944
+Val Loss: 0.2163 Acc: 0.9348
+Epoch 11/20 (Fold 5/5)
+Train Loss: 0.0113 Acc: 1.0000
+Val Loss: 0.1574 Acc: 0.9565
+Epoch 12/20 (Fold 5/5)
+Train Loss: 0.0029 Acc: 1.0000
+Val Loss: 0.2487 Acc: 0.9348
+Epoch 13/20 (Fold 5/5)
+Train Loss: 0.0014 Acc: 1.0000
+Val Loss: 0.1747 Acc: 0.9565
+Epoch 14/20 (Fold 5/5)
+Train Loss: 0.0067 Acc: 0.9944
+Val Loss: 0.1596 Acc: 0.9565
+Epoch 15/20 (Fold 5/5)
+Train Loss: 0.0020 Acc: 1.0000
+Val Loss: 0.1522 Acc: 0.9565
+Epoch 16/20 (Fold 5/5)
+Train Loss: 0.0018 Acc: 1.0000
+Val Loss: 0.1591 Acc: 0.9565
+Epoch 17/20 (Fold 5/5)
+Train Loss: 0.0016 Acc: 1.0000
+Val Loss: 0.1686 Acc: 0.9565
+Epoch 18/20 (Fold 5/5)
+Train Loss: 0.0007 Acc: 1.0000
+Val Loss: 0.1765 Acc: 0.9565
+Epoch 19/20 (Fold 5/5)
+Train Loss: 0.0009 Acc: 1.0000
+Val Loss: 0.1826 Acc: 0.9565
+Epoch 20/20 (Fold 5/5)
+Train Loss: 0.0011 Acc: 1.0000
+Val Loss: 0.1901 Acc: 0.9565
+Training complete. Best Val Loss: 0.1073
+Final SWA Clinical Model saved to results/151_104770_f4_convnext_tiny_model_brain.pth
+Saved learning curves to results/151_104770_f4_convnext_tiny_learning_curves.png
+
+Evaluating on Independent Hold-Out set from: /tmp/ricse03_h_pylori_data/HoldOut with 8-way TTA and Multi-Pass Bag Coverage
+
+Patient-Level Classification Report (MIL):
+              precision    recall  f1-score   support
+
+    Negative       0.84      1.00      0.91        58
+    Positive       1.00      0.81      0.90        58
+
+    accuracy                           0.91       116
+   macro avg       0.92      0.91      0.90       116
+weighted avg       0.92      0.91      0.90       116
+
+
+Final Patient-Level Accuracy (MIL): 90.52%
+
+Generating final metrics and interpretability maps...
+Generating Grad-CAM for most suspicious patient bags in results/151_104770_f4_convnext_tiny_gradcam_samples...
+Generating Grad-CAM for 5 False Negative (Ghost) bags...
+Evaluation report saved to results/151_104770_f4_convnext_tiny_evaluation_report.csv

@@ -28,4 +28,5 @@ nosetests.xml
 pip-delete-this-directory.txt
 pip-log.txt
 results/
+finalResults/*.pth
 venv/

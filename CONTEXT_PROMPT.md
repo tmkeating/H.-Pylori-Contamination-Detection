@@ -20,27 +20,19 @@
 ---
 
 ## 📈 Current Performance & Milestones
-1. **Accuray Floor Lift**: Iteration 13.1 successfully lifted the "Fold 4" outlier from **69% to 86.2%** via SWA calibration.
-2. **Stability Milestone**: Achieved **89.3% Average Accuracy** across all 5 folds with **100% Global Precision** (Zero False Positives).
-3. **Clinical Safety**: The model has never triggered a False Positive in a healthy patient across 116 hold-out cases when using `WD=0.1`.
-4. **Interpretability**: Integrated **Grad-CAM Samples** paired with **Attention Weights** for clinical transparency.
+1. **The 90% Recall Challenge**: Iteration 14 achieved **89.31% Average Accuracy** with a stable **100% Precision record**, but recall plateaued at 78.6%. 
+2. **Clinical Safety Milestone**: Confirmed **Zero False Positives** across 116 hold-out cases over multiple SWA-calibrated runs (13.1, 14).
+3. **Ghost Case Analysis**: Verified that simply increasing loss weights ($\\\\to 2.2$) does not catch sparse bacterial colonies, indicating the need for a multi-stage search strategy.
+4. **Reproducibility**: Standardized learning curve and probability histogram generation for all cross-validation folds.
 
 ---
 
-## 🚀 Iteration 13.1 Recap: The "Stability Patch"
-**Vision:** "Generalization via Statistical Averaging."
+## 🧪 Future Research: Iteration 15 (The Searcher Ensemble)
+**Projected Vision:** Breaking the accuracy bottleneck through a specialized two-stage inference pipeline.
 
-1. **SWA Success**: Proved that `swa_lr=1e-5` (10x lower than max LR) and `update_bn` are critical to preventing the weight explosion seen in early MIL-SWA attempts.
-2. **Precision Guardrails**: Confirmed that `Weight Decay=0.1` acts as a "Morphological Filter," preventing the model from over-indexing on non-bacterial tissue artifacts.
-
----
-
-## 🧪 Current Research: Iteration 14 (Sensitivity Frontier)
-**Objective:** Target **94%+ Peak Accuracy** and **85%+ Recall**.
-
-- **Sensitivity Calibration**: Shifting `pos_weight` to $2.2$ to reclaim "Ghost Bacteria" (low-density cases).
-- **Visual Persistence**: Restored learning curve generation (`_learning_curves.png`) to track optimization trajectory.
-- **Goal**: Maintain the 100% Precision record while aggressively expanding the sensitivity radius.
+- **Stage-1 (The Searcher)**: A hypersensitive model optimized for **100% Recall**. Configured with low Focal Loss $\gamma=1.0$, extreme `pos_weight=5.0`, and zero dropout to detect the faintest bacterial signatures.
+- **Stage-2 (The Auditor)**: Our current Iteration 14 SWA-stable model. It acts as a "veto" to filter out false alarms from the Searcher, ensuring the 100% precision baseline is maintained.
+- **System Objective**: Target **94%+ Total Accuracy** by converting the "Ghost Patients" into true detections.
 
 **File reference:**
 - [dataset.py](dataset.py): Multi-Pass loading & Standard ImageNet Normalization.

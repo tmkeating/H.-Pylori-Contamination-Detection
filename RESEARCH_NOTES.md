@@ -1488,3 +1488,30 @@ While recall was perfect, **Specificity dropped significantly**.
 ### Status
 -   **Jobs**: 104766 - 104771.
 -   **Initial Check**: Jobs synchronized to local A40 storage; Epoch 1 started.
+
+### Status (Iteration 14)
+- **Performance Plateau**: **89.31% Average Accuracy** and **100% Precision** maintained.
+- **Recall Ceiling**: Increasing `pos_weight` to 2.2 did not improve recall (stuck at 78.6%). This confirms that "Ghost Cases" are likely invisible to the current single-model feature space.
+- **Stability**: Standard Deviation across folds reduced to <1%, showing excellent convergence consistency with SWA.
+- **Conclusion**: Single-model weight calibration has reached diminishing returns. Moving to Multi-Stage Ensembling.
+
+---
+
+## Iteration 15: Multi-Stage Ensemble (The "Searcher" Strategy)
+
+### Objectives
+1.  **Break 90% Recall**: Transform "Ghost Cases" into True Positives by relaxing the precision constraint in a Stage-1 model.
+2.  **Maintain 100% Precision (System-Level)**: Use the high-precision Iteration 14 model as a Stage-2 "Auditor" to veto false alarms from Stage-1.
+
+### Strategy (Stage-1: The Searcher)
+-   **Architecture Modifications**:
+    -   **Zero Dropout**: Set `Dropout(0.0)` in the classification head to maximize signal capture.
+    -   **Sharpened Attention**: Reduce Attention Gate initialization temperature to focus on solitary bacterial colonies.
+-   **Loss Calibration**:
+    -   **Focal Loss**: Reduce `gamma` to 1.0 (flatter loss surface for edge cases).
+    -   **Extreme PosWeight**: Set `pos_weight=5.0` to penalize False Negatives aggressively.
+-   **Training Logic**: Disable SWA to allow the weights to settle on the most sensitive (non-averaged) optima.
+
+### Expected Outcome
+-   Stage-1 Recall $\to$ 100% (even if precision drops to 50%).
+-   System-wide (Stage 1 + Stage 2) Accuracy $\to$ **94%+**.
