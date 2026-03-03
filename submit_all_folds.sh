@@ -6,27 +6,36 @@
 MODEL_NAME=${MODEL_NAME:-"convnext_tiny"}
 PROFILE=${PROFILE:-"AUDITOR"}
 
-# Define profile-specific parameters
-if [ "$PROFILE" == "SEARCHER" ]; then
-    # Iteration 19: Searcher Calibration
-    POS_WEIGHT=3.5
-    GAMMA=2.0
-    SAVER_METRIC="f1"
-    echo "Using SEARCHER profile (Iteration 19 Calibration)..."
+# 1. Source the Model Profiles (Central Source of Truth)
+if [ -f "profiles.sh" ]; then
+    source profiles.sh
+    # Dynamically call the setter for the requested profile
+    if declare -f "set_profile_$PROFILE" > /dev/null; then
+        "set_profile_$PROFILE"
+        echo "Using $PROFILE profile from profiles.sh..."
+    else
+        echo "ERROR: Profile '$PROFILE' not found in profiles.sh. Using defaults."
+        NEG_WEIGHT=1.0
+        POS_WEIGHT=2.2
+        GAMMA=2.0
+        SAVER_METRIC="loss"
+    fi
 else
-    # Default AUDITOR / Legacy mode
-    POS_WEIGHT=7.5
-    GAMMA=1.0
-    SAVER_METRIC="recall"
-    echo "Using AUDITOR profile (Legacy Recall Priority)..."
+    echo "ERROR: profiles.sh not found. Using defaults."
+    NEG_WEIGHT=1.0
+    POS_WEIGHT=2.2
+    GAMMA=2.0
+    SAVER_METRIC="loss"
 fi
+
+echo "Parameters: NegWeight=$NEG_WEIGHT, PosWeight=$POS_WEIGHT, Gamma=$GAMMA, Saver=$SAVER_METRIC"
 
 for FOLD in {0..4}
 do
     echo "-------------------------------------------"
     echo "Submitting SLURM job for Fold $FOLD using $MODEL_NAME ($PROFILE Profile)..."
     # Capture the job ID
-    JOB_OUT=$(sbatch -p dcca40 --export=ALL,FOLD=$FOLD,MODEL_NAME=$MODEL_NAME,POS_WEIGHT=$POS_WEIGHT,GAMMA=$GAMMA,SAVER_METRIC=$SAVER_METRIC run_h_pylori.sh)
+    JOB_OUT=$(sbatch -p dcca40 --export=ALL,FOLD=$FOLD,MODEL_NAME=$MODEL_NAME,NEG_WEIGHT=$NEG_WEIGHT,POS_WEIGHT=$POS_WEIGHT,GAMMA=$GAMMA,SAVER_METRIC=$SAVER_METRIC run_h_pylori.sh)
     echo "$JOB_OUT"
     JOB_ID=$(echo $JOB_OUT | awk '{print $4}')
     

@@ -1632,8 +1632,35 @@ While recall was perfect, **Specificity dropped significantly**.
 -   Stable training with Recall $> 90\%$ and Precision $> 30\%$, providing a significant triage improvement over the single-model ConvNeXt $81\%$.
 
 ### Jobs
-- **ResNet50 SEARCHER**: 105036 - 105041
-- **Status**: Training initialized with calibrated profiles.
+- **ResNet50 SEARCHER**: 105036 - 105041 (Iteration 19)
+- **Status (Collapse)**: Strategy failed. ResNet50 predicted 100% positive, likely due to "Double-Weighting" (Weighted Sampler + Class Weight).
+
+---
+
+## Iteration 20: Balanced Profile Searcher (Inductive Bias Pivot)
+
+### Objectives
+1.  **Stop Collapse**: Disable redundant sampling when class weights are high ($PosWeight > 1.0$).
+2.  **Regularization Push**: Switch ResNet to AdamW with higher weight decay ($0.05$).
+3.  **Searcher Logic**: Target a healthy F1-score to ensure some morphological specificity.
+
+### Strategy (Iteration 20 Calibration)
+-   **Profiles implemented**:
+    -   `AUDITOR`: $PosWeight=2.2$, $Gamma=2.0$, $Saver=loss$.
+    -   `SEARCHER`: $PosWeight=4.0$, $Gamma=2.0$, $Saver=f1$.
+-   **Logic Fixes (train.py)**:
+    -   **Conditional Sampling**: `WeightedRandomSampler` is now DISABLED if `pos_weight > 1.0` to prevent "Double-Weighting."
+    -   **Optimizer Upgrade**: ResNet50 now uses `AdamW` ($LR=2e-5$, $WD=0.05$).
+-   **Execution**:
+    -   Submitted ResNet50 SEARCHER sweep (Iteration 20).
+
+### Expected Outcome
+-   Stable training avoiding $1.0$ recall in Epoch 1.
+
+### Jobs
+- **ResNet50 SEARCHER**: 105043 - 105048
+- **Status**: Training active.
+
 
 
 

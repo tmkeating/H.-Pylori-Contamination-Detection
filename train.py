@@ -183,7 +183,7 @@ class TransformedSubset(Dataset):
     def __len__(self):
         return len(self.subset)
 
-def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=7.5, gamma=1.0, saver_metric="recall"):
+def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=7.5, neg_weight=1.0, gamma=1.0, saver_metric="recall"):
     """
     Train a deep learning model for H. pylori contamination detection using k-fold cross-validation.
     This function implements a complete machine learning pipeline including:
@@ -201,6 +201,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
         num_folds (int, optional): Total number of folds for cross-validation. Default: 5
         model_name (str, optional): Model architecture ('convnext_tiny', 'resnet50', etc.). Default: "convnext_tiny"
         pos_weight (float, optional): Weight for the positive class in Focal Loss. Default: 7.5
+        neg_weight (float, optional): Weight for the negative class in Focal Loss. Default: 1.0
         gamma (float, optional): Gamma parameter for Focal Loss. Default: 1.0
         saver_metric (str, optional): Metric to use for saving the best model ('loss', 'recall', 'f1'). Default: "recall"
     Returns:
@@ -395,10 +396,18 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
     pos_count = train_labels.count(1)
     print(f"Training distribution (Bags): Negative={neg_count}, Contaminated={pos_count}")
 
-    # Weighted Sampling for Bags
-    class_weights = [1.0/max(1, neg_count), 1.0/max(1, pos_count)]
-    sampler_weights = torch.FloatTensor([class_weights[t] for t in train_labels])
-    sampler = WeightedRandomSampler(sampler_weights, len(sampler_weights))
+    # Step 4.5 logic fix: Disable sampler if pos_weight > 1.0 (Iteration 20)
+    # This prevents double-weighting class imbalance (Sampler + Loss Weight)
+    if pos_weight > 1.0:
+        print(f"Pos Weight {pos_weight} > 1.0: Disabling Sampler, using Shuffle=True.")
+        sampler = None
+        shuffle_train = True
+    else:
+        print("Using WeightedRandomSampler for baseline balancing (PosWeight=1.0).")
+        class_weights = [1.0/max(1, neg_count), 1.0/max(1, pos_count)]
+        sampler_weights = torch.FloatTensor([class_weights[t] for t in train_labels])
+        sampler = WeightedRandomSampler(sampler_weights, len(sampler_weights))
+        shuffle_train = False
 
     # MIL Batch Size: Usually 1 bag per batch is safest for variable sizes, 
     # but we can try small batches if bag sizes are fixed/padded.
@@ -409,6 +418,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
         train_transformed, 
         batch_size=batch_size_mil, 
         sampler=sampler, 
+        shuffle=shuffle_train,
         num_workers=4, # Reduced for bag loading overhead
         pin_memory=True
     )
@@ -426,7 +436,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
     # --- Step 6: Define the Learning Rules ---
     # Strategy C: Profile-based Loss (Iteration 19 Support)
     # Optimized to catch ALL potential infections or focus on balanced precision.
-    loss_weights = torch.FloatTensor([1.0, pos_weight]).to(device) 
+    loss_weights = torch.FloatTensor([neg_weight, pos_weight]).to(device) 
     # Gamma for Focal Loss to control focus on hard examples.
     criterion = FocalLoss(gamma=gamma, weight=loss_weights, smoothing=0.0)
 
@@ -437,8 +447,9 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
         print(f"Using AdamW Optimizer for {model_name} stability (WD=0.1)...")
         optimizer = AdamW(model.parameters(), lr=1e-5, weight_decay=0.1)
     else:
-        # ResNet default (Adam)
-        optimizer = Adam(model.parameters(), lr=2e-5, weight_decay=1e-2)
+        # ResNet updated (AdamW) - Iteration 20 Calibration
+        print(f"Using AdamW Optimizer for {model_name} stability (LR=2e-5, WD=0.05)...")
+        optimizer = AdamW(model.parameters(), lr=2e-5, weight_decay=0.05)
 
     # --- Step 6.2: SWA Initialization (Iteration 13) ---
     from torch.optim.swa_utils import AveragedModel, SWALR
@@ -1017,6 +1028,7 @@ if __name__ == "__main__":
     parser.add_argument("--model_name", type=str, default="convnext_tiny", choices=["resnet50", "convnext_tiny"], 
                         help="Backbone architecture to use (resnet50/convnext_tiny)")
     parser.add_argument("--pos_weight", type=float, default=7.5, help="Weight for positive class in Focal Loss")
+    parser.add_argument("--neg_weight", type=float, default=1.0, help="Weight for negative class in Focal Loss")
     parser.add_argument("--gamma", type=float, default=1.0, help="Gamma factor for Focal Loss")
     parser.add_argument("--saver_metric", type=str, default="recall", choices=["loss", "recall", "f1"], 
                         help="Metric used to save the best model (loss/recall/f1)")
@@ -1028,6 +1040,7 @@ if __name__ == "__main__":
         num_folds=args.num_folds, 
         model_name=args.model_name,
         pos_weight=args.pos_weight,
+        neg_weight=args.neg_weight,
         gamma=args.gamma,
         saver_metric=args.saver_metric
     )

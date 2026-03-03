@@ -1,12 +1,27 @@
 # Model Profiles for H. Pylori Detection
-# Format: PROFILE_NAME=(POS_WEIGHT GAMMA SAVER_METRIC DROPOUT SWA_LR)
+# This is the CENTRAL SOURCE of TRUTH for all experiment hyperparameters.
 
-# 1. Auditor: Focuses on 100% Precision (Clinical Grade)
-AUDITOR=(2.2 2.0 "loss" 0.5 1e-5)
+# Profile: AUDITOR (Clinical Grade - 100% Precision)
+# Restored to the "Golden" Iteration 17 configuration
+function set_profile_AUDITOR() {
+    export NEG_WEIGHT=1.0
+    export POS_WEIGHT=7.5
+    export GAMMA=2.0
+    export SAVER_METRIC="recall"
+}
 
-# 2. Searcher: Focuses on 100% Recall (Triage Stage)
-# Note: Iteration 19 calibration for ResNet stability
-SEARCHER=(3.5 2.0 "f1" 0.5 1e-5)
+# Profile: SEARCHER (Iteration 20 Calibration - Balanced Recall/Precision)
+function set_profile_SEARCHER() {
+    export NEG_WEIGHT=1.0
+    export POS_WEIGHT=4.0
+    export GAMMA=2.0
+    export SAVER_METRIC="f1"
+}
 
-# 3. Extreme (Original Iteration 17): High-penalty recall
-EXTREME=(7.5 1.0 "recall" 0.5 1e-5)
+# Profile: EXTREME (Legacy Iteration 17)
+function set_profile_EXTREME() {
+    export POS_WEIGHT=7.5
+    export GAMMA=1.0
+    export SAVER_METRIC="recall"
+}
+
