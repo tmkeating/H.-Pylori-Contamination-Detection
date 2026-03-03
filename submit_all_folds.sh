@@ -41,8 +41,8 @@ sbatch --dependency=afterok:$DEPENDENCIES <<EOF
 source ../venv/bin/activate
 
 echo "All folds finished. Iteration 12: Gated Attention Noise Filtering Summary..."
-# Fix naming conflict: Explicitly specify results dir
-python summarize_results.py --dir results
+# Fix naming conflict: Explicitly specify results dir and limit to last 5 runs
+python summarize_results.py --dir results --last 5
 
 echo "Clinical analysis and visualization generated."
 EOF

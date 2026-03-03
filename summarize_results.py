@@ -3,23 +3,30 @@ import glob
 import os
 import argparse
 
-def generate_grand_summary(results_dir="results"):
+def generate_grand_summary(results_dir="results", last_n=None):
     # 1. Find all evaluation report CSVs
-    # Pattern: *_f[0-4]_convnext_tiny_evaluation_report.csv
-    report_files = glob.glob(os.path.join(results_dir, "*_f[0-4]_*_evaluation_report.csv"))
+    # Pattern: *_f[0-4]_*_evaluation_report.csv
+    report_files = sorted(glob.glob(os.path.join(results_dir, "*_f[0-4]_*_evaluation_report.csv")))
     
     if not report_files:
         print(f"No evaluation reports found in {results_dir}")
         return
 
+    # Filter to only the most recent N files if requested
+    if last_n:
+        print(f"Filtering to the last {last_n} reports...")
+        report_files = report_files[-last_n:]
+
     all_metrics = []
     
     print(f"\n{'='*60}")
-    print(f"{'H. Pylori Iteration 11: Cross-Validation Grand Summary':^60}")
+    print(f"{'H. Pylori Iteration Summary':^60}")
+    if last_n:
+        print(f"{f'(Showing Last {last_n} Runs)':^60}")
     print(f"{'='*60}\n")
 
-    for file in sorted(report_files):
-        fold_name = os.path.basename(file).split('_')[2] # Extracts 'f0', 'f1', etc.
+    for file in report_files:
+        fold_name = os.path.basename(file).split('_')[2] 
         run_id = os.path.basename(file).split('_')[0]
         
         df = pd.read_csv(file, index_col=0)
@@ -62,11 +69,39 @@ def generate_grand_summary(results_dir="results"):
     print(f"{'='*60}\n")
 
     # 3. Save to CSV for long-term tracking
-    summary_df.to_csv(os.path.join(results_dir, "grand_cv_summary.csv"), index=False)
-    print(f"Grand summary saved to {results_dir}/grand_cv_summary.csv")
+    # Detect run range for filename
+    if all_metrics:
+        run_ids = sorted([int(m['RunID']) for m in all_metrics])
+        min_run, max_run = run_ids[0], run_ids[-1]
+        run_suffix = f"_{min_run}-{max_run}"
+    else:
+        run_suffix = ""
+
+    # Save individual fold records
+    summary_filename = f"grand_cv_summary{run_suffix}.csv"
+    summary_df.to_csv(os.path.join(results_dir, summary_filename), index=False)
+    
+    # Also save a 'grand_averages.csv' with the ± scores
+    avg_stds_df = pd.DataFrame({
+        'Metric': numeric_cols,
+        'Mean': averages.values,
+        'Std': stds.values,
+        'Formatted': [f"{m:.4f} \u00b1 {s:.4f}" for m, s in zip(averages, stds)]
+    })
+    
+    # Add Run Range metadata as a column or row
+    if all_metrics:
+        avg_stds_df['Run_Range'] = f"{min_run}-{max_run}"
+
+    averages_filename = f"grand_cv_averages{run_suffix}.csv"
+    avg_stds_df.to_csv(os.path.join(results_dir, averages_filename), index=False)
+    
+    print(f"Grand summary saved to {results_dir}/{summary_filename}")
+    print(f"Grand averages with \u00b1 saved to {results_dir}/{averages_filename}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--dir", type=str, default="results")
+    parser.add_argument("--last", type=int, default=None, help="Only summarize the last N reports")
     args = parser.parse_args()
-    generate_grand_summary(args.dir)
+    generate_grand_summary(args.dir, args.last)
