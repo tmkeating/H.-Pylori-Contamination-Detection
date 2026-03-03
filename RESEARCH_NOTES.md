@@ -1515,3 +1515,33 @@ While recall was perfect, **Specificity dropped significantly**.
 ### Expected Outcome
 -   Stage-1 Recall $\to$ 100% (even if precision drops to 50%).
 -   System-wide (Stage 1 + Stage 2) Accuracy $\to$ **94%+**.
+
+### Status (Iteration 15)
+- **Strategy Collapse**: Training a hyper-sensitive Stage-1 'Searcher' with extreme pos_weight (5.0) and zero dropout failed. 
+- **The Paradox**: Reaching 100% recall in many folds resulted in 100% False Positives (predicting every patient as infected). 
+- **The SWA Verdict**: Disabling SWA led to erratic convergence. SWA is confirmed essential for MIL stability.
+- **Reporting Fix**: Successfully implemented `Patch_Count` reporting in the consensus CSVs (Jobs 157-161).
+
+---
+
+## Iteration 16: Hybrid Stable-Searcher (Threshold Pivot)
+
+### Objectives
+1.  **Recover Precision**: Restore the 100% precision baseline by re-enabling Auditor guardrails (Dropout=0.5, SWA=On).
+2.  **Threshold-Based Recall**: Instead of training a biased model, we are using the stable model's confidence scores. 
+3.  **The 0.1 Frontier**: Evaluate if Ghost Patients can be identified by a low probability threshold ( > 0.1$) without polluting the  > 0.5$ clinical diagnosis.
+
+### Strategy (The Hybrid Auditor)
+-   **Model Settings**: Restored ConvNeXt configuration (Dropout=0.5, Temp=1.0).
+-   **Optimization**: Re-enabled SWA (`swa_start=15`) and standard Focal Loss (Gamma=2.0, PosWeight=2.2).
+-   **Inference Upgrades**:
+    -   Integrated `Searcher_Flag` into [patient_consensus.csv](results).
+    -   Stage 1:  > 0.1$ (Candidate search).
+    -   Stage 2:  > 0.5$ (Diagnostic confirmation).
+
+### Expected Outcome
+-   Confirm if Ghost Patients cluster in the 0.1 - 0.5 probability range.
+-   Maintain the Stage-2 **100% Precision** record.
+
+### Jobs
+- **Jobs**: 104919 - 104924 (Folds 0-4 + Summary)

@@ -24,9 +24,9 @@ class AttentionGate(nn.Module):
         # Final Attention Score
         self.w_score = nn.Linear(hidden_dim, 1)
         
-        # Searcher Initialization: Low Temperature for "Sharp" Attention spikes
-        # Set to 0.25 to force single colonies to dominate the bag prediction.
-        self.temperature = nn.Parameter(torch.ones(1) * 0.25)
+        # Auditor Initialization: Standard Temperature for Stable Aggregation
+        # Initialized to 1.0; SWA will handle the flattening logic during training.
+        self.temperature = nn.Parameter(torch.ones(1))
 
     def forward(self, x):
         # x shape: (N, feature_dim)
@@ -78,11 +78,11 @@ class HPyNet(nn.Module):
             raise ValueError(f"Unsupported backbone: {model_name}. Use 'resnet50' or 'convnext_tiny'.")
 
         # 2. Universal Deep Classification Head
-        # Searcher Configuration: Zero Dropout for 100% Signal Capture
+        # Restored Auditor Configuration: Standard Dropout for Generalization
         self.patch_head = nn.Sequential(
             nn.Linear(self.feature_dim, 512),
             nn.ReLU(),
-            nn.Dropout(0.0), # Set to 0.0 for Stage-1 Searcher hypersensitivity
+            nn.Dropout(0.5), # Standard 0.5 for robust feature selection
             nn.Linear(512, num_classes)
         )
         

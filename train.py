@@ -426,10 +426,11 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
     # Iteration 12: Noise Filtering Calibration
     # Iteration 14: Sensitivity Refinement (PosWeight=2.2) to expand Recall 
     # while relying on SWA + WD=0.1 to prevent Precision loss.
-    # Iteration 15: Searcher Extreme Weights (Targeting 100% Recall)
-    loss_weights = torch.FloatTensor([1.0, 5.0]).to(device) 
-    # Gamma=1.0 for a flatter loss, forcing model to keep focusing on edge-case bacteria.
-    criterion = FocalLoss(gamma=1, weight=loss_weights, smoothing=0.0)
+    # Iteration 16: Return to Auditor Sensitivity (Balanced Loss)
+    # Using pos_weight=2.2 for consistent signal recovery without FP explosion.
+    loss_weights = torch.FloatTensor([1.0, 2.2]).to(device) 
+    # Gamma=2.0 for standard Focal Loss focus on difficult bacterial features.
+    criterion = FocalLoss(gamma=2, weight=loss_weights, smoothing=0.0)
 
     # Optimizer Choice:
     # ConvNeXt is highly sensitive to the training recipe and benefits from AdamW.
@@ -445,8 +446,8 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
     from torch.optim.swa_utils import AveragedModel, SWALR
     num_epochs = 20 # Increased for better SWA averaging
     swa_model = AveragedModel(model)
-    # Iteration 15: Disabling SWA for Searcher to allow aggressive convergence
-    swa_start = 100 # Effectively disable SWA for this run
+    # Iteration 16: Re-Enable SWA for Auditor Stability (Clinical Gold Standard)
+    swa_start = 15 # Provides enough averaging trajectory for the classifier
     swa_scheduler = SWALR(optimizer, swa_lr=1e-5) # Calibration: drastically reduced for stability
 
     # --- Optimization 5D: Preprocessing & Model Compilation (Kernel Fusion) ---
@@ -743,6 +744,11 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
             
             # --- AGGREGATION: Average across chunks (Multi-Pass Voting) ---
             final_bag_probs = torch.stack(bag_probs_list).mean(0)
+            
+            # --- Stage 1 Searcher: Low Threshold (P > 0.1) ---
+            # If any significant positive probability exists, we mark as 'Searcher+'
+            # (Note: This is logged but the main Predicted class still uses 0.5 threshold)
+            positive_prob = final_bag_probs[:, 1].cpu().item()
             preds = torch.argmax(final_bag_probs, dim=1)
             
             all_preds_pat[i] = preds.cpu().item()
@@ -766,6 +772,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
             "PatientID": patient_ids_list[i],
             "Actual": all_labels_pat[i],
             "Predicted": all_preds_pat[i],
+            "Searcher_Flag": 1 if all_probs_pat[i] > 0.1 else 0, # Low-threshold Searcher logic
             "Mean_Prob": all_probs_pat[i], # For MIL, the bag prob IS the diagnosis
             "Max_Prob": all_probs_pat[i],
             "Meta_Prob": all_probs_pat[i],
