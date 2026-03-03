@@ -703,6 +703,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
     all_preds_pat = np.zeros(num_holdout, dtype=np.int8)
     all_labels_pat = np.zeros(num_holdout, dtype=np.int8)
     all_probs_pat = np.zeros(num_holdout, dtype=np.float32)
+    all_patch_counts = np.zeros(num_holdout, dtype=np.int32)
     
     patient_ids_list = []
     # Use a chunk size of 500 for the Attention aggregating loop to prevent OOM
@@ -747,6 +748,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
             all_preds_pat[i] = preds.cpu().item()
             all_labels_pat[i] = labels.cpu().item()
             all_probs_pat[i] = final_bag_probs[:, 1].cpu().item()
+            all_patch_counts[i] = bag_size # Record original patch count before TTA/chunking
             patient_ids_list.append(patient_ids[0])
             
             if i % 5 == 0:
@@ -767,7 +769,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
             "Mean_Prob": all_probs_pat[i], # For MIL, the bag prob IS the diagnosis
             "Max_Prob": all_probs_pat[i],
             "Meta_Prob": all_probs_pat[i],
-            "Patch_Count": 0, # Not used in MIL evaluation loop this way
+            "Patch_Count": all_patch_counts[i], # Now reporting original patient patch count
             "Method": "Attention-MIL",
             "Correct": 1 if all_preds_pat[i] == all_labels_pat[i] else 0
         })
