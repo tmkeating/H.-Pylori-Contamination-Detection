@@ -7,6 +7,7 @@ function set_profile_AUDITOR() {
     export NEG_WEIGHT=1.0
     export POS_WEIGHT=7.5
     export GAMMA=2.0
+    export NUM_EPOCHS=20
     export SAVER_METRIC="recall"
 }
 
@@ -16,6 +17,7 @@ function set_profile_SEARCHER() {
     export NEG_WEIGHT=1.0
     export POS_WEIGHT=2.2
     export GAMMA=2.0
+    export NUM_EPOCHS=15
     export SAVER_METRIC="f1"
 }
 

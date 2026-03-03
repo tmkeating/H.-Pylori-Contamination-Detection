@@ -28,14 +28,14 @@ else
     SAVER_METRIC="loss"
 fi
 
-echo "Parameters: NegWeight=$NEG_WEIGHT, PosWeight=$POS_WEIGHT, Gamma=$GAMMA, Saver=$SAVER_METRIC"
+echo "Parameters: NegWeight=$NEG_WEIGHT, PosWeight=$POS_WEIGHT, Gamma=$GAMMA, Epochs=$NUM_EPOCHS, Saver=$SAVER_METRIC"
 
 for FOLD in {0..4}
 do
     echo "-------------------------------------------"
     echo "Submitting SLURM job for Fold $FOLD using $MODEL_NAME ($PROFILE Profile)..."
     # Capture the job ID
-    JOB_OUT=$(sbatch -p dcca40 --export=ALL,FOLD=$FOLD,MODEL_NAME=$MODEL_NAME,NEG_WEIGHT=$NEG_WEIGHT,POS_WEIGHT=$POS_WEIGHT,GAMMA=$GAMMA,SAVER_METRIC=$SAVER_METRIC run_h_pylori.sh)
+    JOB_OUT=$(sbatch -p dcca40 --export=ALL,FOLD=$FOLD,MODEL_NAME=$MODEL_NAME,NEG_WEIGHT=$NEG_WEIGHT,POS_WEIGHT=$POS_WEIGHT,GAMMA=$GAMMA,NUM_EPOCHS=$NUM_EPOCHS,SAVER_METRIC=$SAVER_METRIC run_h_pylori.sh)
     echo "$JOB_OUT"
     JOB_ID=$(echo $JOB_OUT | awk '{print $4}')
     

@@ -183,7 +183,7 @@ class TransformedSubset(Dataset):
     def __len__(self):
         return len(self.subset)
 
-def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=7.5, neg_weight=1.0, gamma=1.0, saver_metric="recall"):
+def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=7.5, neg_weight=1.0, gamma=1.0, num_epochs=15, saver_metric="recall"):
     """
     Train a deep learning model for H. pylori contamination detection using k-fold cross-validation.
     This function implements a complete machine learning pipeline including:
@@ -463,7 +463,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
 
     # --- Step 6.2: SWA Initialization (Iteration 13) ---
     from torch.optim.swa_utils import AveragedModel, SWALR
-    num_epochs = 20 # Increased for better SWA averaging
+    # num_epochs is now passed as an argument
     swa_model = AveragedModel(model)
     # Iteration 16: Re-Enable SWA for Auditor Stability (Clinical Gold Standard)
     swa_start = 15 # Provides enough averaging trajectory for the classifier
@@ -1040,6 +1040,7 @@ if __name__ == "__main__":
     parser.add_argument("--pos_weight", type=float, default=7.5, help="Weight for positive class in Focal Loss")
     parser.add_argument("--neg_weight", type=float, default=1.0, help="Weight for negative class in Focal Loss")
     parser.add_argument("--gamma", type=float, default=1.0, help="Gamma factor for Focal Loss")
+    parser.add_argument("--num_epochs", type=int, default=15, help="Number of training epochs")
     parser.add_argument("--saver_metric", type=str, default="recall", choices=["loss", "recall", "f1"], 
                         help="Metric used to save the best model (loss/recall/f1)")
     
@@ -1052,5 +1053,6 @@ if __name__ == "__main__":
         pos_weight=args.pos_weight,
         neg_weight=args.neg_weight,
         gamma=args.gamma,
+        num_epochs=args.num_epochs,
         saver_metric=args.saver_metric
     )

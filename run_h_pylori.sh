@@ -53,6 +53,7 @@ MODEL_NAME=${MODEL_NAME:-"convnext_tiny"}
 NEG_WEIGHT=${NEG_WEIGHT:-1.0}
 POS_WEIGHT=${POS_WEIGHT:-7.5}
 GAMMA=${GAMMA:-1.0}
+NUM_EPOCHS=${NUM_EPOCHS:-15}
 SAVER_METRIC=${SAVER_METRIC:-"recall"}
 
 # Capture standard output and error to the results directory manually if not on SLURM
@@ -63,13 +64,15 @@ SLURM_JOB_ID=${SLURM_JOB_ID:-"manual"}
 if [ "$SLURM_JOB_ID" == "manual" ]; then
     OUTPUT_LOG="results/output_${FOLD}_manual.txt"
     ERROR_LOG="results/error_${FOLD}_manual.txt"
-    echo "Starting Training for Fold: $FOLD of $NUM_FOLDS using $MODEL_NAME (NegWeight=$NEG_WEIGHT, PosWeight=$POS_WEIGHT, Gamma=$GAMMA, Saver=$SAVER_METRIC)" | tee -a "$OUTPUT_LOG"
+    echo "Starting Training for Fold: $FOLD of $NUM_FOLDS using $MODEL_NAME (NegWeight=$NEG_WEIGHT, PosWeight=$POS_WEIGHT, Gamma=$GAMMA, Epochs=$NUM_EPOCHS, Saver=$SAVER_METRIC)" | tee -a "$OUTPUT_LOG"
     python train.py --fold $FOLD --num_folds $NUM_FOLDS --model_name "$MODEL_NAME" \
-        --neg_weight "$NEG_WEIGHT" --pos_weight "$POS_WEIGHT" --gamma "$GAMMA" --saver_metric "$SAVER_METRIC" > >(tee -a "$OUTPUT_LOG") 2> >(tee -a "$ERROR_LOG" >&2)
+                    --neg_weight "$NEG_WEIGHT" --pos_weight "$POS_WEIGHT" --gamma "$GAMMA" \
+                    --num_epochs "$NUM_EPOCHS" --saver_metric "$SAVER_METRIC" > >(tee -a "$OUTPUT_LOG") 2> >(tee -a "$ERROR_LOG" >&2)
 else
-    echo "Starting Training for Fold: $FOLD of $NUM_FOLDS using $MODEL_NAME (NegWeight=$NEG_WEIGHT, PosWeight=$POS_WEIGHT, Gamma=$GAMMA, Saver=$SAVER_METRIC)"
+    echo "Starting Training for Fold: $FOLD of $NUM_FOLDS using $MODEL_NAME (NegWeight=$NEG_WEIGHT, PosWeight=$POS_WEIGHT, Gamma=$GAMMA, Epochs=$NUM_EPOCHS, Saver=$SAVER_METRIC)"
     python train.py --fold $FOLD --num_folds $NUM_FOLDS --model_name "$MODEL_NAME" \
-        --neg_weight "$NEG_WEIGHT" --pos_weight "$POS_WEIGHT" --gamma "$GAMMA" --saver_metric "$SAVER_METRIC"
+                    --neg_weight "$NEG_WEIGHT" --pos_weight "$POS_WEIGHT" --gamma "$GAMMA" \
+                    --num_epochs "$NUM_EPOCHS" --saver_metric "$SAVER_METRIC"
 fi
 
 # Note: Meta-Classifier is now handled globally in submit_all_folds.sh 
