@@ -340,8 +340,18 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
     # --- PATIENT-LEVEL SPLIT ---
     # In bag mode, full_dataset.bags is a list of (paths, label, patient_id)
     unique_patients = [bag[2] for bag in full_dataset.bags]
-    np.random.seed(42) # Ensure same shuffle across all fold runs
-    np.random.shuffle(unique_patients)
+    
+    # Global Seed Strategy (Iteration 21): Ensure deterministic initialization and splits
+    import random
+    random.seed(42 + fold_idx)
+    np.random.seed(42 + fold_idx)
+    torch.manual_seed(42 + fold_idx)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(42 + fold_idx)
+        
+    # Data Split reproducibility: Seed 42 for identity across jobs
+    split_rng = np.random.RandomState(42)
+    split_rng.shuffle(unique_patients)
     
     # Calculate fold boundaries
     fold_size = len(unique_patients) // num_folds
@@ -453,7 +463,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
 
     # --- Step 6.2: SWA Initialization (Iteration 13) ---
     from torch.optim.swa_utils import AveragedModel, SWALR
-    num_epochs = 15 # Increased for better SWA averaging
+    num_epochs = 20 # Increased for better SWA averaging
     swa_model = AveragedModel(model)
     # Iteration 16: Re-Enable SWA for Auditor Stability (Clinical Gold Standard)
     swa_start = 15 # Provides enough averaging trajectory for the classifier
