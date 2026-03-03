@@ -183,7 +183,7 @@ class TransformedSubset(Dataset):
     def __len__(self):
         return len(self.subset)
 
-def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
+def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=7.5, gamma=1.0, saver_metric="recall"):
     """
     Train a deep learning model for H. pylori contamination detection using k-fold cross-validation.
     This function implements a complete machine learning pipeline including:
@@ -200,6 +200,9 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
         fold_idx (int, optional): Current fold index for k-fold cross-validation. Default: 0
         num_folds (int, optional): Total number of folds for cross-validation. Default: 5
         model_name (str, optional): Model architecture ('convnext_tiny', 'resnet50', etc.). Default: "convnext_tiny"
+        pos_weight (float, optional): Weight for the positive class in Focal Loss. Default: 7.5
+        gamma (float, optional): Gamma parameter for Focal Loss. Default: 1.0
+        saver_metric (str, optional): Metric to use for saving the best model ('loss', 'recall', 'f1'). Default: "recall"
     Returns:
         None. Outputs saved to results/ directory with files prefixed by {run_id}_{slurm_id}_f{fold_idx}_{model_name}:
         - *_model_brain.pth: Best model weights (lowest validation loss)
@@ -421,13 +424,11 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
     model = get_model(model_name=model_name, num_classes=2, pretrained=True).to(device)
 
     # --- Step 6: Define the Learning Rules ---
-    # Strategy C: Extreme Recall Searcher (Iteration 17)
-    # Optimized to catch ALL potential infections, even at the cost of precision.
-    # Iteration 17: Searcher Configuration (PosWeight=7.5) to maximize Sensitivity 
-    # while relying on SWA + WD=0.1 to maintain discriminative quality.
-    loss_weights = torch.FloatTensor([1.0, 7.5]).to(device) 
-    # Gamma=1.0 for relaxed Focal Loss to prioritize broad signal capture.
-    criterion = FocalLoss(gamma=1, weight=loss_weights, smoothing=0.0)
+    # Strategy C: Profile-based Loss (Iteration 19 Support)
+    # Optimized to catch ALL potential infections or focus on balanced precision.
+    loss_weights = torch.FloatTensor([1.0, pos_weight]).to(device) 
+    # Gamma for Focal Loss to control focus on hard examples.
+    criterion = FocalLoss(gamma=gamma, weight=loss_weights, smoothing=0.0)
 
     # Optimizer Choice:
     # ConvNeXt is highly sensitive to the training recipe and benefits from AdamW.
@@ -495,6 +496,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
     # num_epochs = 15 // Set via scheduler in Step 6.2
     best_loss = float('inf')
     best_recall = 0.0 # Track sensitivity for Searcher phase
+    best_f1 = 0.0    # Track F1 score for Calibration phase
     
     # Track the "History" to plot learning curves later
     history = {
@@ -612,10 +614,11 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
                 all_val_preds.append(preds.item())
                 all_val_labels.append(labels.item())
         
-        from sklearn.metrics import recall_score
+        from sklearn.metrics import recall_score, f1_score
         val_recall = recall_score(all_val_labels, all_val_preds, zero_division=0)
+        val_f1 = f1_score(all_val_labels, all_val_preds, zero_division=0)
         
-        print(f"Val Loss: {val_epoch_loss:.4f} Acc: {val_epoch_acc:.4f} Recall: {val_recall:.4f}")
+        print(f"Val Loss: {val_epoch_loss:.4f} Acc: {val_epoch_acc:.4f} Recall: {val_recall:.4f} F1: {val_f1:.4f}")
 
         # Store history
         history['train_loss'].append(epoch_loss)
@@ -624,18 +627,44 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
         history['val_acc'].append(val_epoch_acc)
 
         # --- Report Card: Save the best version ---
-        # Searcher Logic: Prioritize Recall over Loss
-        if val_recall > best_recall:
-            best_recall = val_recall
-            best_loss = val_epoch_loss # Reset loss tracker to focus on this recall level
-            torch.save(model.state_dict(), best_model_path)
-            print(f"New Best Recall! Saving model to {best_model_path} (Recall: {val_recall:.4f})")
-        elif val_recall == best_recall and val_epoch_loss < best_loss:
-            best_loss = val_epoch_loss
-            torch.save(model.state_dict(), best_model_path)
-            print(f"Recall stable, Improved Loss. Saving model to {best_model_path} (Val Loss: {val_epoch_loss:.4f})")
+        # Strategy selection based on saver_metric
+        is_best = False
+        if saver_metric == "recall":
+            if val_recall > best_recall:
+                best_recall = val_recall
+                best_loss = val_epoch_loss # Reset loss tracker to focus on this recall level
+                is_best = True
+                print(f"New Best Recall! {val_recall:.4f}")
+            elif val_recall == best_recall and val_epoch_loss < best_loss:
+                best_loss = val_epoch_loss
+                is_best = True
+                print(f"Recall stable, Improved Loss: {val_epoch_loss:.4f}")
+        elif saver_metric == "f1":
+            if val_f1 > best_f1:
+                best_f1 = val_f1
+                best_loss = val_epoch_loss
+                is_best = True
+                print(f"New Best F1! {val_f1:.4f}")
+            elif val_f1 == best_f1 and val_epoch_loss < best_loss:
+                best_loss = val_epoch_loss
+                is_best = True
+                print(f"F1 stable, Improved Loss: {val_epoch_loss:.4f}")
+        else: # Default to loss
+            if val_epoch_loss < best_loss:
+                best_loss = val_epoch_loss
+                is_best = True
+                print(f"New Best Loss! {val_epoch_loss:.4f}")
 
-    print(f"Training complete. Best Val Recall: {best_recall:.4f}")
+        if is_best:
+            torch.save(model.state_dict(), best_model_path)
+            print(f"Saving model to {best_model_path}")
+
+    if saver_metric == "recall":
+        print(f"Training complete. Best Val Recall: {best_recall:.4f}")
+    elif saver_metric == "f1":
+        print(f"Training complete. Best Val F1: {best_f1:.4f}")
+    else:
+        print(f"Training complete. Best Val Loss: {best_loss:.4f}")
 
     # --- Step 7.8: Final SWA Update (Iteration 13) ---
     # Final SWA normalization (after training is fully complete)
@@ -987,6 +1016,18 @@ if __name__ == "__main__":
     parser.add_argument("--num_folds", type=int, default=5, help="Total number of folds")
     parser.add_argument("--model_name", type=str, default="convnext_tiny", choices=["resnet50", "convnext_tiny"], 
                         help="Backbone architecture to use (resnet50/convnext_tiny)")
+    parser.add_argument("--pos_weight", type=float, default=7.5, help="Weight for positive class in Focal Loss")
+    parser.add_argument("--gamma", type=float, default=1.0, help="Gamma factor for Focal Loss")
+    parser.add_argument("--saver_metric", type=str, default="recall", choices=["loss", "recall", "f1"], 
+                        help="Metric used to save the best model (loss/recall/f1)")
+    
     args = parser.parse_args()
     
-    train_model(fold_idx=args.fold, num_folds=args.num_folds, model_name=args.model_name)
+    train_model(
+        fold_idx=args.fold, 
+        num_folds=args.num_folds, 
+        model_name=args.model_name,
+        pos_weight=args.pos_weight,
+        gamma=args.gamma,
+        saver_metric=args.saver_metric
+    )

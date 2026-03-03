@@ -1606,6 +1606,34 @@ While recall was perfect, **Specificity dropped significantly**.
 
 ### Jobs
 - **ResNet50 Folds**: 105025 - 105030
-- **Status**: Training active.
+- **Status (Collapse)**: Strategy failed in Epoch 1. ResNet50 predicted 100% positive for every case, achieving "Fake 100% Recall" at 50% accuracy. The combination of $PosWeight=7.5$ and Recall-Only saving provided a trivial escape route for the optimizer.
+
+---
+
+## Iteration 19: Calibrated Profile Searcher (Precision-Guardrails)
+
+### Objectives
+1.  **Stop Strategy Collapse**: Prevent the model from predicting "always positive" by introducing discriminative guardrails.
+2.  **Modular Profiling**: Move training configuration into profiles (AUDITOR/SEARCHER) to streamline cross-experiment Reproducibility.
+3.  **The F1 Pivot**: Shift model saving from "Pure Recall" to "F1-Score" to force the Searcher to maintain at least some morphological specificity.
+
+### Strategy (The Profile Engine)
+-   **Profiling System**:
+    -   `train.py` updated to accept `--pos_weight`, `--gamma`, and `--saver_metric` from the shell.
+    -   `submit_all_folds.sh` now uses a `$PROFILE` variable to swap configurations instantly.
+-   **Iteration 19 Searcher Calibration**:
+    -   **Model**: ResNet50 (The Localist).
+    -   **Loss**: $PosWeight=3.5$ (Reduced from 7.5 to stop collapse).
+    -   **Loss**: $Gamma=2.0$ (Standard focal penalty restored).
+    -   **Saver**: `f1` (Prioritizes models with the best balance of Recall and Precision).
+-   **Logic**: SWA and Dropout 0.5 are maintained as the "Clinical Guardrails."
+
+### Expected Outcome
+-   Stable training with Recall $> 90\%$ and Precision $> 30\%$, providing a significant triage improvement over the single-model ConvNeXt $81\%$.
+
+### Jobs
+- **ResNet50 SEARCHER**: 105036 - 105041
+- **Status**: Training initialized with calibrated profiles.
+
 
 
