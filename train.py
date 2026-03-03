@@ -441,7 +441,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
 
     # --- Step 6.2: SWA Initialization (Iteration 13) ---
     from torch.optim.swa_utils import AveragedModel, SWALR
-    num_epochs = 20 # Increased for better SWA averaging
+    num_epochs = 15 # Increased for better SWA averaging
     swa_model = AveragedModel(model)
     # Iteration 16: Re-Enable SWA for Auditor Stability (Clinical Gold Standard)
     swa_start = 15 # Provides enough averaging trajectory for the classifier

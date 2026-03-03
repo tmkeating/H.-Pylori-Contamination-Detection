@@ -1576,5 +1576,36 @@ While recall was perfect, **Specificity dropped significantly**.
 
 ### Jobs
 - **Jobs**: 104966 - 104971 (Folds 0-4 + Summary)
-- **Status**: Training initialized on SLURM (A40 Nodes).
+
+### Results (Iteration 17 Analysis)
+- **The 0.05 Wall**: Even with $PosWeight=7.5$ and Recall-Driven saving, we hit a "Feature Architecture Ceiling." 
+- **The Paradox**: Accuracy reached **90%** (best yet), and **100% Precision** was maintained, but Clinical Recall ($P > 0.5$) stayed stuck at **81%**.
+- **Structural Cause**: ConvNeXt-Tiny's $7 \times 7$ kernels may be over-smoothing sparse bacteria into background noise. Probabilities for missed patients are identical to healthy patients ($\approx 0.05$), meaning the backbone is functionally blind to these "Ghost Cases."
+
+---
+
+## Iteration 18: Multi-Backbone Ensemble Searcher (Architectural Diversity)
+
+### Objectives
+1.  **Break the 0.05 Wall**: Use a complementary architecture to see high-frequency textures that ConvNeXt misses.
+2.  **Union-Based Triage**: Create an ensemble where if *either* model flags a patient, they are passed to the Auditor.
+3.  **Target**: 100% Patient Recall for the Searcher Stage.
+
+### Strategy (The Hybrid Searcher)
+-   **Backbone Ensemble**:
+    -   **ResNet50 (The Localist)**: Uses $3 \times 3$ kernels which are theoretically more sensitive to small, point-like bacteria than ConvNeXt's larger filters.
+    -   **ConvNeXt (The Globalist)**: Provides the baseline histological inflammatory context.
+-   **Training Payload**:
+    -   Duplicate the "Recall-Driven" Iteration 17 configuration ($PosWeight=7.5$, $Gamma=1.0$, SWA-Stability) for a ResNet50 sweep.
+-   **Ensemble Logic (`ensemble_searcher.py`)**:
+    -   **Optimistic OR**: $P_{\text{Ensemble}} = \max(P_{\text{ConvNeXt}}, P_{\text{ResNet}})$.
+    -   **Threshold**: If $P_{\text{Ensemble}} > 0.1$, flag for review.
+
+### Expected Outcome
+-   ResNet and ConvNeXt should fail on *different* patients, allowing the Union to reach 100% recall.
+
+### Jobs
+- **ResNet50 Folds**: 105025 - 105030
+- **Status**: Training active.
+
 
