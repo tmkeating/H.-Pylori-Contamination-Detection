@@ -426,8 +426,10 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
     # Iteration 12: Noise Filtering Calibration
     # Iteration 14: Sensitivity Refinement (PosWeight=2.2) to expand Recall 
     # while relying on SWA + WD=0.1 to prevent Precision loss.
-    loss_weights = torch.FloatTensor([1.0, 2.2]).to(device) 
-    criterion = FocalLoss(gamma=2, weight=loss_weights, smoothing=0.0)
+    # Iteration 15: Searcher Extreme Weights (Targeting 100% Recall)
+    loss_weights = torch.FloatTensor([1.0, 5.0]).to(device) 
+    # Gamma=1.0 for a flatter loss, forcing model to keep focusing on edge-case bacteria.
+    criterion = FocalLoss(gamma=1, weight=loss_weights, smoothing=0.0)
 
     # Optimizer Choice:
     # ConvNeXt is highly sensitive to the training recipe and benefits from AdamW.
@@ -443,7 +445,8 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
     from torch.optim.swa_utils import AveragedModel, SWALR
     num_epochs = 20 # Increased for better SWA averaging
     swa_model = AveragedModel(model)
-    swa_start = 15 # Start SWA in the final phase
+    # Iteration 15: Disabling SWA for Searcher to allow aggressive convergence
+    swa_start = 100 # Effectively disable SWA for this run
     swa_scheduler = SWALR(optimizer, swa_lr=1e-5) # Calibration: drastically reduced for stability
 
     # --- Optimization 5D: Preprocessing & Model Compilation (Kernel Fusion) ---
