@@ -421,16 +421,13 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
     model = get_model(model_name=model_name, num_classes=2, pretrained=True).to(device)
 
     # --- Step 6: Define the Learning Rules ---
-    # strategy B: Focal Loss for Sparse Bacteremia Detection
-    # Optimized to ignore common histological background and focus on sparse bacteria.
-    # Iteration 12: Noise Filtering Calibration
-    # Iteration 14: Sensitivity Refinement (PosWeight=2.2) to expand Recall 
-    # while relying on SWA + WD=0.1 to prevent Precision loss.
-    # Iteration 16: Return to Auditor Sensitivity (Balanced Loss)
-    # Using pos_weight=2.2 for consistent signal recovery without FP explosion.
-    loss_weights = torch.FloatTensor([1.0, 2.2]).to(device) 
-    # Gamma=2.0 for standard Focal Loss focus on difficult bacterial features.
-    criterion = FocalLoss(gamma=2, weight=loss_weights, smoothing=0.0)
+    # Strategy C: Extreme Recall Searcher (Iteration 17)
+    # Optimized to catch ALL potential infections, even at the cost of precision.
+    # Iteration 17: Searcher Configuration (PosWeight=7.5) to maximize Sensitivity 
+    # while relying on SWA + WD=0.1 to maintain discriminative quality.
+    loss_weights = torch.FloatTensor([1.0, 7.5]).to(device) 
+    # Gamma=1.0 for relaxed Focal Loss to prioritize broad signal capture.
+    criterion = FocalLoss(gamma=1, weight=loss_weights, smoothing=0.0)
 
     # Optimizer Choice:
     # ConvNeXt is highly sensitive to the training recipe and benefits from AdamW.
@@ -497,6 +494,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
     scaler = torch.amp.GradScaler('cuda')
     # num_epochs = 15 // Set via scheduler in Step 6.2
     best_loss = float('inf')
+    best_recall = 0.0 # Track sensitivity for Searcher phase
     
     # Track the "History" to plot learning curves later
     history = {
@@ -600,7 +598,24 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
                 
         val_epoch_loss = val_loss / len(val_indices)
         val_epoch_acc = float(val_corrects) / len(val_indices)
-        print(f"Val Loss: {val_epoch_loss:.4f} Acc: {val_epoch_acc:.4f}")
+        
+        # Calculate Validation Recall (Searcher Priority)
+        all_val_preds = []
+        all_val_labels = []
+        model.eval()
+        with torch.no_grad():
+            for bags, labels, _, _ in val_loader:
+                bags = bags.squeeze(0).to(device)
+                bags = det_preprocess_batch(bags, training=False)
+                outputs, _ = model.forward_bag(bags)
+                _, preds = torch.max(outputs, 1)
+                all_val_preds.append(preds.item())
+                all_val_labels.append(labels.item())
+        
+        from sklearn.metrics import recall_score
+        val_recall = recall_score(all_val_labels, all_val_preds, zero_division=0)
+        
+        print(f"Val Loss: {val_epoch_loss:.4f} Acc: {val_epoch_acc:.4f} Recall: {val_recall:.4f}")
 
         # Store history
         history['train_loss'].append(epoch_loss)
@@ -609,13 +624,18 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny"):
         history['val_acc'].append(val_epoch_acc)
 
         # --- Report Card: Save the best version ---
-        # If this epoch had the lowest loss yet (best performance considering weights), save it
-        if val_epoch_loss < best_loss:
+        # Searcher Logic: Prioritize Recall over Loss
+        if val_recall > best_recall:
+            best_recall = val_recall
+            best_loss = val_epoch_loss # Reset loss tracker to focus on this recall level
+            torch.save(model.state_dict(), best_model_path)
+            print(f"New Best Recall! Saving model to {best_model_path} (Recall: {val_recall:.4f})")
+        elif val_recall == best_recall and val_epoch_loss < best_loss:
             best_loss = val_epoch_loss
             torch.save(model.state_dict(), best_model_path)
-            print(f"Best model saved to {best_model_path} (Val Loss: {val_epoch_loss:.4f})")
+            print(f"Recall stable, Improved Loss. Saving model to {best_model_path} (Val Loss: {val_epoch_loss:.4f})")
 
-    print(f"Training complete. Best Val Loss: {best_loss:.4f}")
+    print(f"Training complete. Best Val Recall: {best_recall:.4f}")
 
     # --- Step 7.8: Final SWA Update (Iteration 13) ---
     # Final SWA normalization (after training is fully complete)

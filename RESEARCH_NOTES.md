@@ -1545,3 +1545,36 @@ While recall was perfect, **Specificity dropped significantly**.
 
 ### Jobs
 - **Jobs**: 104919 - 104924 (Folds 0-4 + Summary)
+
+### Results (Iteration 16)
+- **The 0.1 Frontier Success**: Successfully caught **10.8% more true cases** at the $P > 0.1$ threshold.
+- **Precision Integrity**: Maintained **100% Precision** at the clinical $P > 0.5$ level.
+- **The Ghost Patient Paradox**: Analysis of missed cases (`B22-01_1`, `B22-81_1`) shows they are hovering at **0.05 - 0.09 probability**.
+- **Conclusion**: The model is "aware" of the infection but the signal is diluted. Need to force these 0.05 cases above 0.1.
+
+---
+
+## Iteration 17: Extreme Recall Searcher (Recall-Driven Saver)
+
+### Objectives
+1.  **Eliminate Ghost Patients**: Push the 0.05-0.09 "Ghost Cases" above the 0.1 triage threshold.
+2.  **Recall-Priority Training**: Shift the training objective from "Loss Minimization" to "Sensitivity Maximization."
+3.  **100% Recall Searcher**: Create a triage model that flags *every* potential infection for human review.
+
+### Strategy (The Recall-Driven Saver)
+-   **Loss Calibration**:
+    -   **PosWeight**: Increased to **7.5** (Extreme penalty for missing bacteria).
+    -   **Gamma**: Reduced to **1.0** (Flattening the focal loss to prioritize broad signal capture).
+-   **Training Engine Update**:
+    -   **Recall-Driven Saver**: Modified `train.py` to save the "Best Model" based on **Validation Recall** rather than Validation Loss.
+    -   **Stability Guard**: Retained **SWA** (`swa_lr=1e-5`) and **Dropout 0.5** to prevent total strategy collapse (like Iteration 15).
+-   **Architecture**: ConvNeXt-Tiny + Gated Attention MIL (Restored Auditor Stability).
+
+### Expected Outcome
+-   **Stage-1 Recall ($P > 0.1$)**: Target **100%**.
+-   **Stage-2 Precision ($P > 0.5$)**: Target **> 90%** (some precision loss is acceptable if we catch 100% of infections).
+
+### Jobs
+- **Jobs**: 104966 - 104971 (Folds 0-4 + Summary)
+- **Status**: Training initialized on SLURM (A40 Nodes).
+
