@@ -1659,8 +1659,42 @@ While recall was perfect, **Specificity dropped significantly**.
 
 ### Jobs
 - **ResNet50 SEARCHER**: 105043 - 105048
-- **Status**: Training active.
+- **Status (Collapse)**: Strategy failed. ResNet50 still collapsed to 100% Recall (0% Precision) by Epoch 1. 
 
+---
 
+## Iteration 21: Stability Framework (Frozen BN + Gradient Clipping)
+
+### Objectives
+1.  **Stop "ResNet Collapse"**: Identify the root cause of violent validation loss spikes and early strategy failures.
+2.  **Modular Profiling (v2)**: Expand `profiles.sh` to include architecture-specific stability parameters (`FREEZE_BN`, `CLIP_GRAD`).
+3.  **The "Skeptical" ResNet**: Force the model to learn negative morphology by neutralizing the positive bias during the initial feature extraction phase.
+
+### Strategy (The Stability Patch)
+-   **Anatomy of the Collapse**: 
+    -   **BatchNorm Instability**: Variable MIL bag sizes create noisy running stats, leading to violent weight updates.
+    -   **Solution**: `FREEZE_BN="True"` (keeps BN in eval mode during train) and `CLIP_GRAD=0.5` (prevents gradient explosions).
+-   **Profiles Expansion (profiles.sh)**:
+    -   `set_profile_SEARCHER`: Updated with `POS_WEIGHT=0.5` (Skeptical mode) and `JITTER=0.35` (High visual noise).
+    -   `set_profile_AUDITOR`: Restored to "Golden" Iteration 17 configuration ($PosWeight=7.5$, $Gamma=1.0$, $Saver=recall$).
+-   **Pipeline Upgrades (train.py)**:
+    -   Integrated `--jitter` as a profile-driven augmentation parameter.
+    -   Fixed SWA model saving/loading logic for non-SWA runs.
+    -   Unified `OneCycleLR` scheduler to respect `use_swa` start points.
+
+### Expected Outcome
+-   Stable validation loss curves for ResNet50.
+-   Independent Test Accuracy $> 80\%$ (matching the "Fold 2" success from the previous run).
+-   Elimination of the "100% Recall / 0% Spec" failure mode in Fold 4.
+
+### Jobs (Iteration 21.4 - "Skeptical" ResNet Sweep)
+- **Jobs**: 105160 - 105164
+- **Summary Job**: 105165
+- **Configuration**: ResNet50, $0.5$ PosWeight, $0.35$ Jitter, $20$ Epochs, $0.05$ WD, F1-Saver.
+
+### Results (Iteration 21.3 Preliminary Analysis)
+- **The Fold 2 Proof-of-Concept**: In the previous run (Run 229), one fold successfully reached **84.5% Accuracy** on independent patients using ResNet50. This confirms the backbone is capable, but highly sensitive to the initial patient split. Iteration 21.4 aims to standardize this success across all 5 folds using the "Skeptical" initialization.
+
+---
 
 
