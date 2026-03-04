@@ -1697,4 +1697,32 @@ While recall was perfect, **Specificity dropped significantly**.
 
 ---
 
+## Iteration 21.5: Hyper-Skeptical ResNet (Artifact Suppression)
+
+### Objectives
+1.  **Break the Generalization Gap**: Address the "Fold 4 Paradox" (95% Val Acc vs 50% Test Acc).
+2.  **Suppress Site-Specific Artifacts**: Use ultra-high color noise to destroy the "shortcut" features the model is using to cheat on negative samples.
+3.  **Forced Skepticism**: Require overwhelming evidence to predict a positive class.
+
+### Strategy (The Negative-Preference Suite)
+-   **Extreme Regularization**:
+    -   **PosWeight ($0.25$)**: Force a $4:1$ bias toward the Negative class to neutralize "hallucinated" bacteria.
+    -   **Ultra-Jitter ($0.45$)**: Doubled the color/stain noise to break reliance on background texture.
+    -   **Strict Gradient Clipping ($0.3$)**: Suppress noisy weight updates from inconsistent MIL bags.
+-   **Extended Convergence**:
+    -   **Epochs**: Increased to **25** to allow the model to find stable features under high visual noise.
+    -   **Warmup ($40\%$)**: Extended cosine warmup to prevent early filter corruption.
+    -   **Weight Decay ($0.1$)**: High-penalty regularization to prevent over-specialization.
+
+### Expected Outcome
+-   Validation accuracy may drop slightly, but independent test accuracy should stabilize across all 5 folds.
+-   Fix the 100% False Positive rate in the hold-out set.
+
+### Jobs
+- **Jobs**: 105167 - 105171
+- **Summary Job**: 105172
+- **Configuration**: ResNet50, 0.25 PosWeight, 0.45 Jitter, 25 Epochs, 0.3 ClipGrad, F1-Saver.
+
+---
+
 
