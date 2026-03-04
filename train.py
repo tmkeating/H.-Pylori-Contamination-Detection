@@ -183,7 +183,39 @@ class TransformedSubset(Dataset):
     def __len__(self):
         return len(self.subset)
 
-def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=7.5, neg_weight=1.0, gamma=1.0, num_epochs=15, saver_metric="recall"):
+class MIL_SWA_Wrapper(nn.Module):
+    def __init__(self, swa_model):
+        super().__init__()
+        self.swa_model = swa_model
+    def forward(self, x):
+        # x shape from DataLoader is (1, Bag_Size, C, H, W)
+        x = x.squeeze(0) # Remove batch dim -> (Bag_Size, C, H, W)
+        # We don't need the attention weights for BN update
+        logits, _ = self.swa_model.module.forward_bag(x)
+        return logits
+
+def update_swa_bn(loader, swa_model, device):
+    """Custom BN update for MIL bags."""
+    swa_model.train()
+    wrapper = MIL_SWA_Wrapper(swa_model).to(device)
+    wrapper.train()
+    with torch.no_grad():
+        for bags, _, _, _ in tqdm(loader, desc="Updating SWA Batchnorm"):
+            bags = bags.to(device)
+            # Preprocess is required because it's part of the forward pipeline
+            # but usually we normalize inside the loop. 
+            # Logic: recreate the internal training preprocessing
+            # Note: det_preprocess_batch is available in the outer scope
+            bags = bags.squeeze(0)
+            # gpu_normalize is global
+            from torchvision.transforms import v2
+            gpu_normalize = v2.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+            bags = gpu_normalize(bags)
+            # Re-wrap in batch dim 1 for wrapper.forward
+            bags = bags.unsqueeze(0)
+            wrapper(bags)
+
+def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=7.5, neg_weight=1.0, gamma=1.0, num_epochs=15, saver_metric="recall", freeze_bn=False, clip_grad=0.0, pct_start=0.1, weight_decay=0.01, use_swa=True, swa_start=15):
     """
     Train a deep learning model for H. pylori contamination detection using k-fold cross-validation.
     This function implements a complete machine learning pipeline including:
@@ -314,6 +346,8 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
 
     # GPU-bound: Advanced augmentations performed significantly faster on A40
     # IHC Pivot: Increased Jitter to compensate for removing Macenko
+    # Iteration 21.2 Fix: Ensure v2 is correctly imported/loaded if not already in scope
+    from torchvision.transforms import v2
     gpu_augment = v2.Compose([
         v2.RandomHorizontalFlip(), 
         v2.RandomVerticalFlip(),
@@ -451,22 +485,14 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
     criterion = FocalLoss(gamma=gamma, weight=loss_weights, smoothing=0.0)
 
     # Optimizer Choice:
-    # ConvNeXt is highly sensitive to the training recipe and benefits from AdamW.
-    # Iteration 13: Weight decay set to 0.1 for maximum mimic suppression.
-    if "convnext" in model_name:
-        print(f"Using AdamW Optimizer for {model_name} stability (WD=0.1)...")
-        optimizer = AdamW(model.parameters(), lr=1e-5, weight_decay=0.1)
-    else:
-        # ResNet updated (AdamW) - Iteration 20 Calibration
-        print(f"Using AdamW Optimizer for {model_name} stability (LR=2e-5, WD=0.05)...")
-        optimizer = AdamW(model.parameters(), lr=2e-5, weight_decay=0.05)
+    # Iteration 21.2: Dynamic Weight Decay from Profile
+    print(f"Using AdamW Optimizer for {model_name} (LR=2e-5, WD={weight_decay})...")
+    optimizer = AdamW(model.parameters(), lr=2e-5, weight_decay=weight_decay)
 
     # --- Step 6.2: SWA Initialization (Iteration 13) ---
     from torch.optim.swa_utils import AveragedModel, SWALR
-    # num_epochs is now passed as an argument
+    # use_swa and swa_start are now passed as arguments
     swa_model = AveragedModel(model)
-    # Iteration 16: Re-Enable SWA for Auditor Stability (Clinical Gold Standard)
-    swa_start = 15 # Provides enough averaging trajectory for the classifier
     swa_scheduler = SWALR(optimizer, swa_lr=1e-5) # Calibration: drastically reduced for stability
 
     # --- Optimization 5D: Preprocessing & Model Compilation (Kernel Fusion) ---
@@ -491,7 +517,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
         max_lr=1e-4, 
         epochs=num_epochs, 
         steps_per_epoch=steps_per_epoch,
-        pct_start=0.1, # 10% Warmup phase
+        pct_start=pct_start, # Dynamic Warmup (Iteration 21.2)
         anneal_strategy='cos'
     )
     
@@ -545,6 +571,12 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
         
         # --- Study Mode (Train) ---
         model.train() 
+        if freeze_bn:
+            # Iteration 21.2: Freeze BN to stabilize MIL training on variable bag sizes
+            for m in model.modules():
+                if isinstance(m, nn.modules.batchnorm._BatchNorm):
+                    m.eval()
+        
         full_dataset.transform = train_transform # Set training augmentations
         running_loss = 0.0
         running_corrects = 0
@@ -571,13 +603,18 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
             scaler.scale(loss).backward()
             
             if (i + 1) % accumulation_steps == 0:
+                if clip_grad > 0:
+                    scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), clip_grad)
+                
                 scaler.step(optimizer)
                 scaler.update()
                 optimizer.zero_grad()
                 
                 # Calibration (Iteration 13.1): Only step OneCycle 
                 # before SWA takes over to prevent destructive oscillation
-                if epoch < swa_start:
+                # Iteration 21.3: now respects use_swa and swa_start
+                if not use_swa or epoch < swa_start:
                     scheduler.step()
                     
                 # Clear cache after optimization step to prevent creep
@@ -591,8 +628,8 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
         epoch_acc = float(running_corrects) / len(train_indices)
         print(f"Train Loss: {epoch_loss:.4f} Acc: {epoch_acc:.4f}")
 
-        # --- SWA Update (Iteration 13) ---
-        if epoch >= swa_start:
+        # --- SWA Update (Iteration 21.3 dynamic) ---
+        if use_swa and epoch >= swa_start:
             swa_model.update_parameters(model)
             swa_scheduler.step()
 
@@ -688,23 +725,44 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
         print(f"Training complete. Best Val Loss: {best_loss:.4f}")
 
     # --- Step 7.8: Final SWA Update (Iteration 13) ---
-    # Final SWA normalization (after training is fully complete)
-    # This prepares the averaged model's batchnorm layers for inference
-    # We must recreate the train_loader because it was deleted in Step 7.4
-    temp_train_loader = DataLoader(
-        train_transformed_copy, 
-        batch_size=batch_size_mil, 
-        sampler=sampler, 
-        num_workers=4, 
-        pin_memory=True
-    )
-    torch.optim.swa_utils.update_bn(temp_train_loader, swa_model, device=device)
-    del temp_train_loader
-    
-    # Save the Final SWA model instead of just the last model
-    swa_model_path = os.path.join(results_dir, f"{prefix}_model_brain.pth")
-    torch.save(swa_model.state_dict(), swa_model_path)
-    print(f"Final SWA Clinical Model saved to {swa_model_path}")
+    if use_swa:
+        # Final SWA normalization (after training is fully complete)
+        # This prepares the averaged model's batchnorm layers for inference
+        # We must recreate the train_loader because it was deleted in Step 7.4
+        temp_train_loader = DataLoader(
+            train_transformed_copy, 
+            batch_size=batch_size_mil, 
+            sampler=sampler, 
+            num_workers=4, 
+            pin_memory=True
+        )
+        
+        # Iteration 21 Fix: Custom BN update for MIL (handles 5D tensor error)
+        # torch.optim.swa_utils.update_bn(temp_train_loader, swa_model, device=device)
+        
+        swa_model.train()
+        with torch.no_grad():
+            for bags, _, _, _ in tqdm(temp_train_loader, desc="Updating SWA Batchnorm"):
+                # bags: (1, Bag_Size, C, H, W)
+                bags = bags.squeeze(0).to(device) # (Bag_Size, C, H, W)
+                # Replicate training normalization
+                from torchvision.transforms import v2
+                norm = v2.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+                bags = norm(bags)
+                # Forward pass through the actual model inside SWA wrapper
+                swa_model.module.forward_bag(bags)
+                
+        del temp_train_loader
+        
+        # Save the Final SWA model instead of just the last model
+        swa_model_path = os.path.join(results_dir, f"{prefix}_model_brain.pth")
+        torch.save(swa_model.state_dict(), swa_model_path)
+        print(f"Final SWA Clinical Model saved to {swa_model_path}")
+    else:
+        # Save the best model reached during training
+        best_model_path = os.path.join(results_dir, f"{prefix}_model_brain.pth")
+        torch.save(model.state_dict(), best_model_path)
+        print(f"Final Best (Non-SWA) Clinical Model saved to {best_model_path}")
 
     # --- Step 7.9: Save Learning Curves (Iteration 14 Fix) ---
     plt.figure(figsize=(12, 5))
@@ -800,7 +858,10 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
                     aug_bags = det_preprocess_batch(aug_bags, training=False)
                     
                     with torch.amp.autocast(device_type=get_autocast_device()):
-                        logits, _ = model.forward_bag(aug_bags)
+                        if use_swa:
+                            logits, _ = swa_model.module.forward_bag(aug_bags)
+                        else:
+                            logits, _ = model.forward_bag(aug_bags)
                     
                     if chunk_logits_sum is None:
                         chunk_logits_sum = logits
@@ -1043,6 +1104,12 @@ if __name__ == "__main__":
     parser.add_argument("--num_epochs", type=int, default=15, help="Number of training epochs")
     parser.add_argument("--saver_metric", type=str, default="recall", choices=["loss", "recall", "f1"], 
                         help="Metric used to save the best model (loss/recall/f1)")
+    parser.add_argument("--freeze_bn", type=str, default="False", help="Freeze BatchNorm layers (Iteration 21.2)")
+    parser.add_argument("--clip_grad", type=float, default=0.0, help="Gradient clipping norm (0.0 to disable)")
+    parser.add_argument("--pct_start", type=float, default=0.1, help="Warmup pct for OneCycleLR")
+    parser.add_argument("--weight_decay", type=float, default=0.01, help="Weight decay for optimizer")
+    parser.add_argument("--use_swa", type=str, default="True", help="Whether to use SWA")
+    parser.add_argument("--swa_start", type=int, default=15, help="Epoch to start SWA")
     
     args = parser.parse_args()
     
@@ -1054,5 +1121,11 @@ if __name__ == "__main__":
         neg_weight=args.neg_weight,
         gamma=args.gamma,
         num_epochs=args.num_epochs,
-        saver_metric=args.saver_metric
+        saver_metric=args.saver_metric,
+        freeze_bn=args.freeze_bn == "True",
+        clip_grad=args.clip_grad,
+        pct_start=args.pct_start,
+        weight_decay=args.weight_decay,
+        use_swa=args.use_swa == "True",
+        swa_start=args.swa_start
     )
