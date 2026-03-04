@@ -1,0 +1,104 @@
+Synchronizing dataset to local scratch: /tmp/ricse03_h_pylori_data
+Data synchronization complete.
+Starting Training for Fold: 3 of 5 using convnext_tiny
+--- Starting Run ID: 170 (Fold: 4/5, Model: convnext_tiny, SLURM Job: 104969) ---
+Using device: cuda
+Set float32 matmul precision to 'high' for A40 hardware optimization.
+Using Data Path: /tmp/ricse03_h_pylori_data
+Pre-processing: Using Standard ImageNet Normalization (IHC-mode).
+--- Fold 4/5 Split (MIL Bag Mode) ---
+Total Patients (Bags): 226
+Training Patients: 181
+Validation Patients: 45
+Independent Patient-level split:
+ - Train: 181 bags
+ - Val:   45 bags
+Training distribution (Bags): Negative=87, Contaminated=94
+Using AdamW Optimizer for convnext_tiny stability (WD=0.1)...
+Skipping torch.compile for convnext_tiny to conserve VRAM...
+Running on standard PyTorch (IPEX disabled).
+Epoch 1/20 (Fold 4/5)
+Train Loss: 2.8787 Acc: 0.4530
+Val Loss: 1.8842 Acc: 0.5556 Recall: 1.0000
+New Best Recall! Saving model to results/170_104969_f3_convnext_tiny_model_brain.pth (Recall: 1.0000)
+Epoch 2/20 (Fold 4/5)
+Train Loss: 1.3207 Acc: 0.4862
+Val Loss: 1.0990 Acc: 0.5556 Recall: 1.0000
+Recall stable, Improved Loss. Saving model to results/170_104969_f3_convnext_tiny_model_brain.pth (Val Loss: 1.0990)
+Epoch 3/20 (Fold 4/5)
+Train Loss: 1.0573 Acc: 0.5083
+Val Loss: 1.2073 Acc: 0.5556 Recall: 1.0000
+Epoch 4/20 (Fold 4/5)
+Train Loss: 0.8833 Acc: 0.5967
+Val Loss: 1.6157 Acc: 0.7778 Recall: 0.7600
+Epoch 5/20 (Fold 4/5)
+Train Loss: 0.6283 Acc: 0.7182
+Val Loss: 1.0285 Acc: 0.6000 Recall: 0.9600
+Epoch 6/20 (Fold 4/5)
+Train Loss: 0.4701 Acc: 0.8343
+Val Loss: 1.5837 Acc: 0.8889 Recall: 0.8000
+Epoch 7/20 (Fold 4/5)
+Train Loss: 0.1793 Acc: 0.9558
+Val Loss: 1.7765 Acc: 0.8889 Recall: 0.8000
+Epoch 8/20 (Fold 4/5)
+Train Loss: 0.0864 Acc: 0.9724
+Val Loss: 1.9978 Acc: 0.8667 Recall: 0.8000
+Epoch 9/20 (Fold 4/5)
+Train Loss: 0.2905 Acc: 0.9669
+Val Loss: 1.3236 Acc: 0.8444 Recall: 0.8400
+Epoch 10/20 (Fold 4/5)
+Train Loss: 0.3011 Acc: 0.8950
+Val Loss: 1.1260 Acc: 0.8222 Recall: 0.8800
+Epoch 11/20 (Fold 4/5)
+Train Loss: 0.2618 Acc: 0.8895
+Val Loss: 1.5307 Acc: 0.8667 Recall: 0.8000
+Epoch 12/20 (Fold 4/5)
+Train Loss: 0.1989 Acc: 0.9392
+Val Loss: 1.1653 Acc: 0.7333 Recall: 0.8800
+Epoch 13/20 (Fold 4/5)
+Train Loss: 0.1199 Acc: 0.9503
+Val Loss: 1.3846 Acc: 0.8889 Recall: 0.8400
+Epoch 14/20 (Fold 4/5)
+Train Loss: 0.0732 Acc: 1.0000
+Val Loss: 1.4850 Acc: 0.9111 Recall: 0.8400
+Epoch 15/20 (Fold 4/5)
+Train Loss: 0.0476 Acc: 0.9890
+Val Loss: 1.2517 Acc: 0.7778 Recall: 0.8800
+Epoch 16/20 (Fold 4/5)
+Train Loss: 0.0430 Acc: 0.9669
+Val Loss: 1.4235 Acc: 0.8444 Recall: 0.8400
+Epoch 17/20 (Fold 4/5)
+Train Loss: 0.0145 Acc: 1.0000
+Val Loss: 1.6925 Acc: 0.8889 Recall: 0.8400
+Epoch 18/20 (Fold 4/5)
+Train Loss: 0.0152 Acc: 1.0000
+Val Loss: 1.8442 Acc: 0.8889 Recall: 0.8400
+Epoch 19/20 (Fold 4/5)
+Train Loss: 0.0353 Acc: 0.9945
+Val Loss: 1.8132 Acc: 0.8889 Recall: 0.8400
+Epoch 20/20 (Fold 4/5)
+Train Loss: 0.0222 Acc: 0.9945
+Val Loss: 1.7906 Acc: 0.8444 Recall: 0.8400
+Training complete. Best Val Recall: 1.0000
+Final SWA Clinical Model saved to results/170_104969_f3_convnext_tiny_model_brain.pth
+Saved learning curves to results/170_104969_f3_convnext_tiny_learning_curves.png
+
+Evaluating on Independent Hold-Out set from: /tmp/ricse03_h_pylori_data/HoldOut with 8-way TTA and Multi-Pass Bag Coverage
+
+Patient-Level Classification Report (MIL):
+              precision    recall  f1-score   support
+
+    Negative       0.84      1.00      0.91        58
+    Positive       1.00      0.81      0.90        58
+
+    accuracy                           0.91       116
+   macro avg       0.92      0.91      0.90       116
+weighted avg       0.92      0.91      0.90       116
+
+
+Final Patient-Level Accuracy (MIL): 90.52%
+
+Generating final metrics and interpretability maps...
+Generating Grad-CAM for most suspicious patient bags in results/170_104969_f3_convnext_tiny_gradcam_samples...
+Generating Grad-CAM for 5 False Negative (Ghost) bags...
+Evaluation report saved to results/170_104969_f3_convnext_tiny_evaluation_report.csv
