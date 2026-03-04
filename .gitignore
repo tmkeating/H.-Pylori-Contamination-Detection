@@ -1,5 +1,6 @@
 *.cover
 *.csv
+*.joblib
 *.out
 *.pdf
 *.pho
@@ -20,13 +21,13 @@ _archive/
 best_model.pth
 coverage.xml
 env/
-# Whitelist finalResults for the checkpoint release
-!finalResults/
-!finalResults/**
-meta_rf_classifier.joblib
 nosetests.xml
 pip-delete-this-directory.txt
 pip-log.txt
 results/
 venv/
+# Whitelist finalResults for the checkpoint release
+!finalResults/
+!finalResults/**
+!finalResults/*.joblib
 finalResults/*.pth
