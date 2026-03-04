@@ -61,6 +61,7 @@ PCT_START=${PCT_START:-0.1}
 WEIGHT_DECAY=${WEIGHT_DECAY:-0.01}
 USE_SWA=${USE_SWA:-"False"}
 SWA_START=${SWA_START:-15}
+JITTER=${JITTER:-0.15}
 
 # Capture standard output and error to the results directory manually if not on SLURM
 SLURM_JOB_ID=${SLURM_JOB_ID:-"manual"}
@@ -70,19 +71,21 @@ SLURM_JOB_ID=${SLURM_JOB_ID:-"manual"}
 if [ "$SLURM_JOB_ID" == "manual" ]; then
     OUTPUT_LOG="results/output_${FOLD}_manual.txt"
     ERROR_LOG="results/error_${FOLD}_manual.txt"
-    echo "Starting Training for Fold: $FOLD of $NUM_FOLDS using $MODEL_NAME (NegWeight=$NEG_WEIGHT, PosWeight=$POS_WEIGHT, Gamma=$GAMMA, Epochs=$NUM_EPOCHS, Saver=$SAVER_METRIC, FreezeBN=$FREEZE_BN, ClipGrad=$CLIP_GRAD, PctStart=$PCT_START, WD=$WEIGHT_DECAY, SWA=$USE_SWA, SWAStart=$SWA_START)" | tee -a "$OUTPUT_LOG"
+    echo "Starting Training for Fold: $FOLD of $NUM_FOLDS using $MODEL_NAME (NegWeight=$NEG_WEIGHT, PosWeight=$POS_WEIGHT, Gamma=$GAMMA, Epochs=$NUM_EPOCHS, Saver=$SAVER_METRIC, FreezeBN=$FREEZE_BN, ClipGrad=$CLIP_GRAD, PctStart=$PCT_START, WD=$WEIGHT_DECAY, SWA=$USE_SWA, SWAStart=$SWA_START, Jitter=$JITTER)" | tee -a "$OUTPUT_LOG"
     python train.py --fold $FOLD --num_folds $NUM_FOLDS --model_name "$MODEL_NAME" \
                     --neg_weight "$NEG_WEIGHT" --pos_weight "$POS_WEIGHT" --gamma "$GAMMA" \
                     --num_epochs "$NUM_EPOCHS" --saver_metric "$SAVER_METRIC" \
                     --freeze_bn "$FREEZE_BN" --clip_grad "$CLIP_GRAD" --pct_start "$PCT_START" \
-                    --weight_decay "$WEIGHT_DECAY" --use_swa "$USE_SWA" --swa_start "$SWA_START" > >(tee -a "$OUTPUT_LOG") 2> >(tee -a "$ERROR_LOG" >&2)
+                    --weight_decay "$WEIGHT_DECAY" --use_swa "$USE_SWA" --swa_start "$SWA_START" \
+                    --jitter "$JITTER" > >(tee -a "$OUTPUT_LOG") 2> >(tee -a "$ERROR_LOG" >&2)
 else
-    echo "Starting Training for Fold: $FOLD of $NUM_FOLDS using $MODEL_NAME (NegWeight=$NEG_WEIGHT, PosWeight=$POS_WEIGHT, Gamma=$GAMMA, Epochs=$NUM_EPOCHS, Saver=$SAVER_METRIC, FreezeBN=$FREEZE_BN, ClipGrad=$CLIP_GRAD, PctStart=$PCT_START, WD=$WEIGHT_DECAY, SWA=$USE_SWA, SWAStart=$SWA_START)"
+    echo "Starting Training for Fold: $FOLD of $NUM_FOLDS using $MODEL_NAME (NegWeight=$NEG_WEIGHT, PosWeight=$POS_WEIGHT, Gamma=$GAMMA, Epochs=$NUM_EPOCHS, Saver=$SAVER_METRIC, FreezeBN=$FREEZE_BN, ClipGrad=$CLIP_GRAD, PctStart=$PCT_START, WD=$WEIGHT_DECAY, SWA=$USE_SWA, SWAStart=$SWA_START, Jitter=$JITTER)"
     python train.py --fold $FOLD --num_folds $NUM_FOLDS --model_name "$MODEL_NAME" \
                     --neg_weight "$NEG_WEIGHT" --pos_weight "$POS_WEIGHT" --gamma "$GAMMA" \
                     --num_epochs "$NUM_EPOCHS" --saver_metric "$SAVER_METRIC" \
                     --freeze_bn "$FREEZE_BN" --clip_grad "$CLIP_GRAD" --pct_start "$PCT_START" \
-                    --weight_decay "$WEIGHT_DECAY" --use_swa "$USE_SWA" --swa_start "$SWA_START"
+                    --weight_decay "$WEIGHT_DECAY" --use_swa "$USE_SWA" --swa_start "$SWA_START" \
+                    --jitter "$JITTER"
 fi
 
 # Note: Meta-Classifier is now handled globally in submit_all_folds.sh 

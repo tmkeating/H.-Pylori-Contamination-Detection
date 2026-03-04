@@ -15,23 +15,25 @@ function set_profile_AUDITOR() {
     export WEIGHT_DECAY=0.1
     export USE_SWA="True"
     export SWA_START=15
+    export JITTER=0.15
 }
 
 # Profile: SEARCHER (Iteration 21 Calibration - Rebalanced for ResNet Stability)
 # Fixed collapse by reducing POS_WEIGHT and using POS_PRECISION focus
 function set_profile_SEARCHER() {
     export NEG_WEIGHT=1.0
-    export POS_WEIGHT=1.0
+    export POS_WEIGHT=0.5
     export GAMMA=2.0
     export NUM_EPOCHS=20
     export SAVER_METRIC="f1"
     # --- Stability Patch (Iteration 21.2) ---
     export FREEZE_BN="True"
-    export CLIP_GRAD=1.0
+    export CLIP_GRAD=0.5
     export PCT_START=0.3
     export WEIGHT_DECAY=0.05
     export USE_SWA="True"
     export SWA_START=15
+    export JITTER=0.35
 }
 
 # Profile: EXTREME (Legacy Iteration 17)
