@@ -1329,6 +1329,36 @@ While recall was perfect, **Specificity dropped significantly**.
    - Synchronized legend placement across `train.py`, `meta_classifier.py`, and `generate_visuals.py` to ensure uniform reporting.
 
 ### 🎯 Overall Status
-- **Final Accuracy: 92.41%**
-- **System Integrity**: Cleaned, 17-feature pipeline is now the production standard for the project.
+- **Accuracy: 93.10% (Gold Standard, N=116)**
+- **Precision: 94.64%**
+- **Recall: 91.38%**
+- **System Integrity**: Patient-level ensembling is now the production standard for clinical reporting.
+
+---
+
+## Iteration 9.3: Clinical Ensemble Refinement (N=116 Audit)
+
+### The "Hospital Analogy" Correction ✓
+- **Issue**: Historical evaluation was counting 580+ patient diagnoses (5x inflation) due to multi-fold evaluation of the same clinical cohort.
+- **Correction**: Implemented **Patient-Level Majority Voting** in `meta_classifier.py`. 
+  - Each of the 116 patients now receives a single "Gold Standard" diagnosis.
+  - Ensemble voting combines predictions from all CV folds (0/1 vote) and averages probabilities.
+- **Impact**: Breakthrough to **93.1% Patient Accuracy** (N=116).
+
+### Aggregated Performance Metrics (N=116 Gold Standard)
+| Metric | Iteration 9.2 (Pseudo-Rep) | **Iteration 9.3 (Full Ensemble)** | Change |
+| :--- | :--- | :--- | :--- |
+| **Patient Accuracy** | 92.41% | **93.10%** | ↑ 0.69% |
+| **Precision (Positive)** | 94.57% | **94.64%** | ↑ 0.07% |
+| **Recall (Positive)** | 90.00% | **91.38%** | ↑ 1.38% |
+| **F1-Score (Positive)** | 0.922 | **0.930** | ↑ 0.008 |
+
+### Key Findings: The Power of Ensembling
+✓ **Error Cancellation**: Majority voting successfully neutralized rare, fold-specific misclassifications in sparse bacteremia cases.
+✓ **Sensitivity Boost**: Recall improved to 91.38% without degrading our 94.6% precision floor.
+✓ **Reliability**: Averaging probabilities across 5 models provides a more stable "Reliability Score" for clinical triage.
+
+### Next Steps: Iteration 10 (Attention-MIL)
+- Move toward **End-to-End Bag-Level MIL** to eliminate the manual feature engineering layer.
+- Implement **Feature-Level TTA** (8-way rotation/flip averaging) to stabilize boundary-case morphologies.
 

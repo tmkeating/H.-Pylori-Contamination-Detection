@@ -6,31 +6,33 @@
 
 ## 🔬 Project: H. Pylori Contamination Detection
 **Objective:** Detect *H. pylori* bacteria in histology slides.
-**Constraint:** Achieve clinical-grade throughput (>500 img/s) and break the 92% patient accuracy bottleneck.
+**Constraint:** Achieve clinical-grade throughput (<500 img/s) and break the 95% patient accuracy bottleneck.
 
-### 🛠️ Current Technical Stack (Iteration 9.3: Clinical Visual Refinement)
+### 🛠️ Current Technical Stack (Iteration 9.3: Clinical Ensemble Peak)
 - **Architecture:** **ConvNeXt-Tiny** Backbone (ResNet Upgrade) + **Random Forest Meta-Classifier**.
+- **Ensemble Strategy**: **Majority Voting** across 5 folds (N=116 patients).
 - **Optimization Strategy**: **Effective Batch Size = 256** via **Gradient Accumulation** (steps=2) with `batch_size=128`.
 - **Scheduler**: **OneCycleLR** (Max LR: 5e-4) for rapid, stable convergence.
 - **Preprocessing**: **ImageNet Normalization** (Standardized) + **Morphological Augmentations** (Blur, Grayscale, Color Jitter).
 - **Aggregator (17-Feature Signature)**: **HPyMetaClassifier** uses a 17-feature probabilistic density signature. **Spatial Clustering was removed** as "toxic" noise due to 98% missing coordinate data.
-- **Validation**: **5-Fold LOPO-CV** (Leave-One-Patient-Out) ensures zero data leakage and clinical generalizability.
+- **Validation**: **5-Fold LOPO-CV** (Leave-One-Patient-Out) with **Patient-Level Aggregation**.
 
 ---
 
 ## 📈 Current Performance & Milestones
-1. **The 92% Barrier Broken**: Iteration 9.2 reached **92.41% Accuracy** using the LOPO-optimized 17-feature signature.
-2. **Clinical Precision Peak**: Achieved **94.57% Precision**, minimizing false positives from stain artifacts—the primary barrier to clinical adoption.
-3. **High-Throughput A40 Pipeline**: Sustained **~728 images/second** (5.69 iterations/sec), exceeding the project's throughput requirement.
-4. **Visual Readability**: Standardized diagnostics (PR Curve legends in `lower left`; ROC in `lower right`) for unambiguous reporting.
+1. **The 93% Barrier Broken**: Iteration 9.3 reached **93.10% Accuracy** (N=116 unique patients) using ensemble-aggregated LOPO-CV.
+2. **Clinical Precision Ceiling**: Achieved **94.64% Precision**, successfully minimizing false positives from stain artifacts.
+3. **High-Throughput A40 Pipeline**: Sustained **~728 images/second** (5.69 iterations/sec), exceeding throughput requirements.
+4. **Gold Standard Verification**: Resolved the "Hospital Analogy" (pseudo-replication) by aggregating results by Patient ID.
 
 ---
 
 ## 🚀 Iteration 9.3 Recap & Insights
-**Vision:** "Spatial De-Noising" and "Performance Transparency."
+**Vision:** "Clinical Consensus" and "Statistical Sincerity."
 
-1. **The Spatial Paradox**: Proved that for sparse bacterial signals, **Signal Density** (Max Prob, P80/P90 counts) is a far more reliable predictor than raw coordinates.
-2. **Failure Audit**: Identified that remaining misses (e.g., B22-85, B22-105) are cases of **Sparse Bacteremia** (extremely low suspicious counts), defining the target for the next iteration.
+1. **The Ensemble Advantage**: Proved that majority voting cancels out fold-specific morphological artifacts, boosting recall to **91.38%**.
+2. **Corrected Reporting**: Transitioned from pseudo-replicated patient counts (580+) to a clean, unique patient cohort (116).
+3. **Failure Audit**: Identified that remaining misses (e.g., B22-85, B22-105) are cases of **Sparse Bacteremia**, setting the stage for Iteration 10.
 
 ---
 

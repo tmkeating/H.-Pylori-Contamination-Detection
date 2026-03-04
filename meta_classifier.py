@@ -153,29 +153,55 @@ class HPyMetaClassifier:
         This is the clinical gold standard: we train a model on N-1 patients and
         diagnose the 'missing' one. This ensures the model does not memorize
         stain-batch specific artifacts unique to a single patient folder.
+        
+        Aggregation:
+        Since each patient might be evaluated multiple times across different folds
+        (e.g., in a 5-fold cross-validation ensemble), we aggregate results by
+        PatientID using a majority vote to get the 'Gold Standard' accuracy for 
+        unique patients.
         """
         X = data[self.features]
         y = data["Actual"]
         groups = data["PatientID"]
         
         logo = LeaveOneGroupOut()
-        y_true, y_pred, y_probs = [], [], []
+        
+        # Store all predictions and true labels associated with patient IDs
+        # patient_results format: {patient_id: {'true': label, 'preds': [p1, p2...], 'probs': [pr1, pr2...]}}
+        patient_results = {}
         
         print("\nRunning Leave-One-Patient-Out Cross-Validation...")
         for train_idx, test_idx in logo.split(X, y, groups):
             X_train, X_test = X.iloc[train_idx], X.iloc[test_idx]
             y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
             
+            p_ids = groups.iloc[test_idx].values
+            
             # Use the parameters found during the Hyperparameter Sweep
             params = self.rf.get_params()
             clf = RandomForestClassifier(**params)
             clf.fit(X_train, y_train)
             
-            y_true.extend(y_test)
-            y_pred.extend(clf.predict(X_test))
-            y_probs.extend(clf.predict_proba(X_test)[:, 1])
+            fold_preds = clf.predict(X_test)
+            fold_probs = clf.predict_proba(X_test)[:, 1]
             
-        print("\n--- Meta-Classifier (Leave-One-Out) Results ---")
+            for i, p_id in enumerate(p_ids):
+                if p_id not in patient_results:
+                    patient_results[p_id] = {'true': y_test.iloc[i], 'preds': [], 'probs': []}
+                patient_results[p_id]['preds'].append(fold_preds[i])
+                patient_results[p_id]['probs'].append(fold_probs[i])
+        
+        # Aggregate by patient via Majority Voting
+        y_true, y_pred, y_probs = [], [], []
+        for p_id, res in patient_results.items():
+            y_true.append(res['true'])
+            # Majority Vote: Most common prediction
+            final_pred = 1 if np.mean(res['preds']) > 0.5 else 0
+            y_pred.append(final_pred)
+            # Ensemble Probability: Mean of probabilities
+            y_probs.append(np.mean(res['probs']))
+            
+        print(f"\n--- Meta-Classifier (Ensemble-Aggregated, N={len(y_true)}) Results ---")
         report = classification_report(y_true, y_pred, output_dict=True)
         print(classification_report(y_true, y_pred))
 
@@ -189,7 +215,7 @@ class HPyMetaClassifier:
         cm = confusion_matrix(y_true, y_pred)
         disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=['Negative', 'Positive'])
         disp.plot(cmap='Blues', values_format='d')
-        plt.title('Meta-Classifier: Patient-Level Confusion Matrix')
+        plt.title(f'Meta-Classifier: Patient-Level (N={len(y_true)}) Confusion Matrix')
         plt.savefig("results/meta_confusion_matrix.png")
         plt.close()
 
@@ -197,12 +223,17 @@ class HPyMetaClassifier:
         fpr, tpr, _ = roc_curve(y_true, y_probs)
         roc_auc = auc(fpr, tpr)
         
-        # Baseline: Max Probability (Backbone only)
-        fpr_max, tpr_max, _ = roc_curve(data["Actual"], data["Max_Prob"])
+        # To compare baseline properly, we need to aggregate the raw feature baseline too
+        aggregated_data = data.groupby("PatientID").agg({
+            "Actual": "first",
+            "Max_Prob": "mean",
+            "Count_P90": "mean"
+        })
+        
+        fpr_max, tpr_max, _ = roc_curve(aggregated_data["Actual"], aggregated_data["Max_Prob"])
         auc_max = auc(fpr_max, tpr_max)
         
-        # Baseline: Suspicious Count (Count_P90)
-        fpr_susp, tpr_susp, _ = roc_curve(data["Actual"], data["Count_P90"])
+        fpr_susp, tpr_susp, _ = roc_curve(aggregated_data["Actual"], aggregated_data["Count_P90"])
         auc_susp = auc(fpr_susp, tpr_susp)
 
         plt.figure()
@@ -224,13 +255,12 @@ class HPyMetaClassifier:
         precision, recall, _ = precision_recall_curve(y_true, y_probs)
         ap_score = average_precision_score(y_true, y_probs)
         
-        # Max Prob PR
-        prec_max, rec_max, _ = precision_recall_curve(data["Actual"], data["Max_Prob"])
-        ap_max = average_precision_score(data["Actual"], data["Max_Prob"])
+        # Aggregated Baselines
+        prec_max, rec_max, _ = precision_recall_curve(aggregated_data["Actual"], aggregated_data["Max_Prob"])
+        ap_max = average_precision_score(aggregated_data["Actual"], aggregated_data["Max_Prob"])
         
-        # Suspicious Count PR
-        prec_susp, rec_susp, _ = precision_recall_curve(data["Actual"], data["Count_P90"])
-        ap_susp = average_precision_score(data["Actual"], data["Count_P90"])
+        prec_susp, rec_susp, _ = precision_recall_curve(aggregated_data["Actual"], aggregated_data["Count_P90"])
+        ap_susp = average_precision_score(aggregated_data["Actual"], aggregated_data["Count_P90"])
 
         plt.figure()
         plt.plot(recall, precision, color='blue', lw=3, label=f'Meta-Classifier (AP = {ap_score:0.2f})')
@@ -244,7 +274,7 @@ class HPyMetaClassifier:
         plt.savefig("results/meta_pr.png")
         plt.close()
         
-        print("Meta-level plots (ROC, PR, CM) saved to results/")
+        print(f"Meta-level plots (ROC, PR, CM) for N={len(y_true)} unique patients saved to results/")
 
     def predict(self, patient_stats_df):
         """

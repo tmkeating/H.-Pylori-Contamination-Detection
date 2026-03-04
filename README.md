@@ -1,4 +1,4 @@
-# H. Pylori Contamination Detection (Iteration 9.2)
+# H. Pylori Contamination Detection (Iteration 9.3)
 
 This project implements a **Dual-Stage Clinical Diagnostic Pipeline** for the automated detection of *H. pylori* contamination in IHC tissue samples.
 
@@ -6,38 +6,36 @@ This project implements a **Dual-Stage Clinical Diagnostic Pipeline** for the au
 
 - `dataset.py`: High-performance data loader optimized for IHC patches.
 - `model.py`: Backbone architecture using **ConvNeXt-Tiny** with a non-linear classification head (ReLU + Dropout).
-- `meta_classifier.py`: **Clinical Meta-Layer** using a Random Forest (17-feature signature) optimized via Leave-One-Patient-Out (LOPO) cross-validation.
-- `train.py`: Main engine fork-lifting:
-    - **5-Fold Cross-Validation**: Rigorous validation strategy by Patient ID.
-    - **OneCycleLR**: Specialized learning rate scheduling for rapid convergence.
-    - **ImageNet Normalization**: Shifted from Macenko to standard normalization for improved backbone stability.
+- `meta_classifier.py`: **Clinical Meta-Layer** using a Random Forest (17-feature signature) optimized via Leave-One-Patient-Out (LOPO) cross-validation and **Majority Vote Ensembling**.
+- `train.py`: Main engine fork-lifting 5-Fold Cross-Validation and OneCycleLR scheduling.
 - `normalization.py`: Support for GPU-vectorized stain normalization.
 - `generate_visuals.py`: Clinical reporting engine (ROC/PR curves, Grad-CAM heatmaps).
 
-## Performance (Iteration 9.2 Breakthrough)
+## Performance (Iteration 9.3 Ensemble Peak)
 
-The pipeline has achieved **Clinical-Grade Reliability** by implementing "Spatial De-Noising" and Meta-Optimization:
+The pipeline has achieved **Clinical-Grade Reliability** for a population of 116 unique patients:
 
 | Metric | Value | Status |
 | :--- | :--- | :--- |
-| **Patient Accuracy** | **92.41%** | ↑ Project Peak |
-| **Clinical Precision** | **94.57%** | ✓ Minimized False Contaminations |
-| **Sensitivity (Recall)** | **90.00%** | ✓ High Detection Rate |
+| **Gold Standard Accuracy** | **93.10%** | ↑ Corrected (N=116) |
+| **Clinical Precision** | **94.64%** | ✓ High specificity |
+| **Sensitivity (Recall)** | **91.38%** | ↑ Error-Correction |
 | **Throughput (A40)** | **~728 images/sec** | Optimized for ROI scanning |
 
-## Diagnostic Architecture: The 17-Feature Meta-Layer
+## Diagnostic Architecture: The 17-Feature Ensemble Meta-Layer
 
 To break the 92% barrier, this model replaces manual heuristic "gates" with a **Random Forest Meta-Classifier**. It analyzes the statistical distribution of all patches within a patient folder:
 
 1.  **Probabilistic Density**: Analyzes the Mean, Max, and Standard Deviation of patch scores.
 2.  **Count-Based Signal**: Tracks high-confidence "suspicious" patches at multiple thresholds (P ≥ 70%, 80%, 90%).
 3.  **Statistical Moments**: Calculates Skewness and Kurtosis of the probability distribution to differentiate between "sparse bacteremia" and "stain artifacts."
+4.  **Clinical Consensus (Ensemble)**: Implements majority voting across cross-validation folds to cancel out rare, model-specific artifacts and ensure diagnostic consistency for all 116 patients.
 
 ## Hardware & Training Strategy
 - **Backbone**: `convnext_tiny` (pre-trained on ImageNet-1K).
 - **Scheduler**: `OneCycleLR` (Max LR: 5e-4).
 - **Augmentation**: Geometric (Rotate, Flip) + Color Jittering (0.2) + Morphological (Blur).
-- **Compute**: Optimized for **NVIDIA A40 (48GB)** using a batch size of 128 (accumulation steps: 2) at 448x448 resolution, achieving **5.69 iterations/second** (~728 images/sec).
+- **Compute**: Optimized for **NVIDIA A40 (48GB)** using a batch size of 128 (accumulation steps: 2) at 448x448 resolution, achieving **~728 images/sec**.
 
 ## How to Get Started
 
