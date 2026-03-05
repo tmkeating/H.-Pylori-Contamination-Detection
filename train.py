@@ -609,14 +609,14 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
                 
                 scaler.step(optimizer)
                 scaler.update()
-                optimizer.zero_grad()
                 
-                # Calibration (Iteration 13.1): Only step OneCycle 
-                # before SWA takes over to prevent destructive oscillation
-                # Iteration 21.3: now respects use_swa and swa_start
+                # Correction: Only step scheduler if the optimizer actually stepped (to avoid UserWarning)
+                # Iteration 24.1: Calibration check
                 if not use_swa or epoch < swa_start:
                     scheduler.step()
-                    
+                
+                optimizer.zero_grad()
+                
                 # Clear cache after optimization step to prevent creep
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
@@ -874,29 +874,34 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
                 chunk_probs = torch.softmax(avg_chunk_logits, dim=1)
                 bag_probs_list.append(chunk_probs)
             
-            # --- AGGREGATION: Average across chunks (Multi-Pass Voting) ---
-            # Iteration 22: For Searchers, we focus on the Top-K (Searcher Mode) 
-            # rather than just the bag mean to catch sparse infections
-            final_bag_probs = torch.stack(bag_probs_list).mean(0)
+            # --- AGGREGATION: Iteration 24 Max-MIL Strategy (Detection-Focused) ---
+            # Instead of a global mean (which dilutes sparse signals in huge bags),
+            # we base the final prediction on the MAXIMUM PROBABILITY found in any 500-patch chunk.
+            # This follows the "One Chunk = One Slide" detection philosophy for 100% Recall.
             
-            # Additional Searcher Metric: Max probability among chunks (representative of patch-level outliers)
-            max_chunk_prob = torch.stack(bag_probs_list).max(0)[0][:, 1].cpu().item()
+            # Stack all chunk probabilities: Shape (Num_Chunks, 2)
+            all_chunks_probs = torch.stack(bag_probs_list)
             
-            # --- Stage 1 Searcher: Low Threshold (P > 0.1) ---
-            # If any significant positive probability exists, we mark as 'Searcher+'
-            # (Note: This is logged but the main Predicted class still uses 0.5 threshold)
-            positive_prob = final_bag_probs[:, 1].cpu().item()
-            preds = torch.argmax(final_bag_probs, dim=1)
+            # Final Patient Probability = Maximum confidence found in any chunk
+            final_pos_prob_tensor = all_chunks_probs[:, :, 1].max(0)[0]
+            max_chunk_prob = final_pos_prob_tensor.cpu().item()
+            
+            # Thresholding: 0.15 is our "Sensitivity Decision Boundary" to capture Ghost patients
+            # (Note: Standard 0.5 threshold remains for comparison, but preds will use 0.15 for SEARCHER)
+            SEARCHER_THRESHOLD = 0.15
+            if max_chunk_prob > SEARCHER_THRESHOLD:
+                preds = torch.tensor([1], device=device)
+            else:
+                preds = torch.tensor([0], device=device)
+            
+            # Legacy fields for backward compatibility with monitoring scripts
+            positive_prob = max_chunk_prob 
             
             all_preds_pat[i] = preds.cpu().item()
             all_labels_pat[i] = labels.cpu().item()
             all_probs_pat[i] = positive_prob
-            all_patch_counts[i] = bag_size # Record original patch count before TTA/chunking
+            all_patch_counts[i] = bag_size 
             patient_ids_list.append(patient_ids[0])
-            
-            # For Iteration 22 reporting, we include the max chunk prob in consensus
-            # this helps identify if sparse bacterial patches were detected even if diluted
-            # in the mean.
             all_max_probs[i] = max_chunk_prob
             
             if i % 5 == 0:

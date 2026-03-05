@@ -1021,3 +1021,41 @@
 - **Stability**: Folds 2 and 3 should reach >50% Recall.
 - **Performance**: Fold 0 and 4 should maintain or exceed 88% Recall.
 - **Precision**: Maintain 100% Precision (+) across the ensemble.
+
+## Iteration 24: Sensitivity Squeeze (Run 187+)
+**Context**: Iteration 23 achieved stable 100% Precision (+) but plateaued at 79% Recall. To move the 'SEARCHER' profile toward 100% Recall, we are abandoning "bag averaging" in favor of "peak detection."
+
+### 🛠️ Strategic Fixes
+1. **Max-of-Chunks Inference**:
+   - Updated `train.py` to use `Final_Prob = Max(Chunk_Probs)` instead of the global mean.
+   - **Rationale**: In WSIs with 10k+ patches, even a confirmed bacterial colony in one region can be "averaged out" by background tissue. Max-pooling at inference time ensures the strongest local signal defines the patient status.
+2. **Aggressive Decision Boundary**:
+   - Lowered the classification threshold to **0.15** (from 0.5).
+   - **Rationale**: Analysis of previous consensus files shows "Ghost" patients reside in the 0.1-0.4 range, while true negatives are consistently below 0.05.
+3. **Loss Pressure Increase**:
+   - Set `POS_WEIGHT=10.0` and `GAMMA=3.0`.
+   - **Rationale**: Penalizing misses by 10x forces the backbone to attend to the rarest brown staining patterns.
+
+### 📉 Expected Outcome
+- **Recall (+)**: Target 100%.
+- **Accuracy**: Target 90% (allowing Precision to drop from 100% to ~85% to prioritize sensitivity).
+
+## Iteration 24: Sensitivity Squeeze (Run 187+)
+**Context**: Iteration 23 (Max-MIL Stability Searcher) achieved 100% Precision (+) and 100% Recall (-) across all 5 folds, but Recall (+) plateaued at 79%. The model is too conservative, as global bag averaging dilutes sparse bacterial signals (often present in only 1-3 patches per 5,000).
+
+### 🛠️ Strategic Fixes
+1. **"Peak-Detection" Inference Logic**:
+   - Refactored `train.py` to use `Final_Prob = Max(Chunk_Probs)` instead of the global bag mean.
+   - **Rationale**: In clinical slides with high background noise, 10,000 "empty" patches can pull a strong local bacterial signal below the 0.5 threshold. Using the Max-of-Chunks ensures the "strongest evidence" defines the patient status.
+2. **Aggressive Decision Boundary**:
+   - Shifted the final classification threshold to **0.15** (from 0.5).
+   - **Rationale**: Previous consensus data shows "Ghost" patients (sparse infections) reside in the 0.1-0.4 range, while true negatives consistently floor below 0.05.
+3. **Loss Pressure Calibration**:
+   - Set `POS_WEIGHT=10.0` and `GAMMA=3.0` in `profiles.sh`.
+   - **Rationale**: Increasing the penalty for missing a positive case by 13x (from 0.75) forces the ConvNeXt backbone to specifically refine features for the rarest brown-stained curved morphologies.
+
+### 📉 Expected Outcome
+- **Recall (+)**: Target 100% (capturing all 58/58 positive patients in the CV set).
+- **Precision (+)**: Expected drop to ~85-90% as the model becomes more sensitive to borderline artifacts.
+- **Accuracy**: Target 90% overall.
+- **Ensemble Role**: This model will serve as the "Searcher" in a dual-model ensemble, where the "Auditor" handles high-confidence positives and the "Searcher" flags potential missed infections for review.
