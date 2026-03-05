@@ -19,21 +19,21 @@ function set_profile_AUDITOR() {
     export POOL_TYPE="attention"
 }
 
-# Profile: SEARCHER (Iteration 22: Moderate Precision Searcher - Max-MIL)
-# Re-calibrated for stability: Balanced Jitter and 25 Epochs.
+# Profile: SEARCHER (Iteration 23: Stability Searcher - Max-MIL)
+# Focus: Stabilizing Fold 2/3 convergence while maintaining 100% Precision (+) in Fold 4.
 function set_profile_SEARCHER() {
     export NEG_WEIGHT=1.0
     # Moderate PosWeight to anchor the background while Max-Pooling isolates signal
-    export POS_WEIGHT=0.5
+    export POS_WEIGHT=0.75 # Increased from 0.5 to anchor gradient in sparse folds
     export GAMMA=2.0
-    export NUM_EPOCHS=25
+    export NUM_EPOCHS=30 # Extended from 25 to allow slow Max-MIL feature mining
     export SAVER_METRIC="recall"
     export FREEZE_BN="True"
     export CLIP_GRAD=0.5
-    export PCT_START=0.3
-    export WEIGHT_DECAY=0.1
+    export PCT_START=0.4 # Extended warmup (from 0.3) for gradient stability
+    export WEIGHT_DECAY=0.05 # Slightly reduced WD to allow easier gradient flow
     export USE_SWA="True"
-    export SWA_START=18
+    export SWA_START=22 # Offset to account for 30-epoch duration
     export JITTER=0.25
     export POOL_TYPE="max"
 }

@@ -999,3 +999,25 @@
 ---
 
 
+
+## Iteration 23: Stability Searcher (Run 177+)
+**Context**: Iteration 22 (Max-MIL) successfully broke the "Positive-Only" collapse and achieved 100% Precision (+) in Fold 4, with 88% Recall in Fold 0. However, Folds 2 and 3 failed to converge (0% Recall), indicating the learning process is too conservative for the sparse signal.
+
+### 🛠️ Strategic Fixes
+1. **Convergence Extension**:
+   - Increased `NUM_EPOCHS` to 30 (from 25).
+   - **Rationale**: Max-Pooling only updates the "winning" patch per bag. This significantly slows the effective learning rate for the backbone, requiring more iterations to find the rare bacterial features.
+2. **Aggressive Warmup**:
+   - Increased `PCT_START` to 0.4 (from 0.3).
+   - **Rationale**: A longer linear warmup prevents the Max-MIL head from "locking out" true positive patches early in training due to noisy initial weights.
+3. **Gradient Pressure**:
+   - Increased `POS_WEIGHT` to 0.75 (from 0.5).
+   - **Rationale**: In folds where the model is "giving up," a slightly higher positive weight forces the optimizer to prioritize the rare signal without triggering the Precision-killing collapse seen at weights > 1.0.
+4. **Precision Preservation**:
+   - Maintained `FREEZE_BN="True"` and `JITTER=0.25`.
+   - **Rationale**: These were critical in Iteration 22 for maintaining the 100% Precision (+) state.
+
+### 📉 Expected Outcome
+- **Stability**: Folds 2 and 3 should reach >50% Recall.
+- **Performance**: Fold 0 and 4 should maintain or exceed 88% Recall.
+- **Precision**: Maintain 100% Precision (+) across the ensemble.
