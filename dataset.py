@@ -118,11 +118,13 @@ class HPyloriDataset(Dataset):
                             added_keys.add(file_key)
                     
                     # Priority 3: Use overall Positive patient patches (BAIXA/ALTA)
-                    # even if they don't have patch-level annotations in the Excel
+                    # even if they don't have patch-level annotations in the Excel.
+                    # CRITICAL: We mark these as -1 (Generic Positive) instead of 1 (Annotated Positive)
+                    # so that Guaranteed Sampling in Iteration 22 only triggers on EXACT bacterial patches.
                     elif patient_id in self.patient_densities and self.patient_densities[patient_id] != 'NEGATIVA':
                         file_key = (patient_id, img_name)
                         if file_key not in added_keys:
-                            self.samples.append((os.path.join(patient_path, img_name), 1))
+                            self.samples.append((os.path.join(patient_path, img_name), -1))
                             added_keys.add(file_key)
                     
                     # Priority 4: Otherwise skip
@@ -132,6 +134,7 @@ class HPyloriDataset(Dataset):
         # --- Step 4: MIL Bag-Mode Organization ---
         if self.bag_mode:
             # Reorganize samples into bags by patient ID
+            # patient_bags[bag_id] = {'samples': [paths], 'label': y, 'pos_samples': [annotated_paths]}
             patient_bags = {}
             for img_path, label in self.samples:
                 # Use the full folder name as the bag ID to keep them granular
@@ -146,16 +149,20 @@ class HPyloriDataset(Dataset):
                 if p_id_full not in patient_bags:
                     # Get clinical label from the base ID (root patient status)
                     patient_label = self.patient_labels.get(base_id, 0)
-                    patient_bags[p_id_full] = {'samples': [], 'label': patient_label}
+                    patient_bags[p_id_full] = {'samples': [], 'label': patient_label, 'pos_samples': []}
                 
                 patient_bags[p_id_full]['samples'].append(img_path)
+                
+                # If this specific patch is annotated as Positive, track it for injection logic
+                if label == 1:
+                    patient_bags[p_id_full]['pos_samples'].append(img_path)
             
-            # List of (list_of_paths, patient_label, bag_id)
+            # List of (list_of_paths, patient_label, bag_id, list_of_pos_paths)
             self.bags = []
             for bag_id, data in patient_bags.items():
                 paths = data['samples']
                 # No longer truncating at init; __getitem__ handles sampling
-                self.bags.append((paths, data['label'], bag_id))
+                self.bags.append((paths, data['label'], bag_id, data['pos_samples']))
 
     def __len__(self):
         if self.bag_mode:
@@ -168,14 +175,37 @@ class HPyloriDataset(Dataset):
         This runs every time the computer "grabs" an image (or bag) to study it.
         """
         if self.bag_mode:
-            img_paths, label, patient_id = self.bags[idx]
+            img_paths, label, patient_id, pos_paths = self.bags[idx]
             
-            # --- Dynamic Bag Sampling (TOTAL COVERAGE) ---
+            # --- Dynamic Bag Sampling with Guaranteed Positive Injection (Iteration 22) ---
             if self.train and len(img_paths) > self.max_bag_size:
-                # Randomly sample patches to ensure eventually seeing everything
-                selected_paths = np.random.choice(img_paths, self.max_bag_size, replace=False)
+                # 1. Start selection list
+                # Use a set for deterministic selection of distinct paths
+                selected_set = set()
+                
+                # 2. Injection Logic: Ensure annotated positive patches are in the 500-patch sample
+                # This prevents "Empty Bag False Negatives" during training for Searchers.
+                if label == 1 and len(pos_paths) > 0:
+                    # Inject up to 25 annotated bacteria to anchor the gradient
+                    inject_count = min(len(pos_paths), 25)
+                    inject_indices = np.random.choice(len(pos_paths), inject_count, replace=False)
+                    for i in inject_indices:
+                        selected_set.add(pos_paths[i])
+                
+                # 3. Fill the remaining slots with random background tissue
+                remaining_slots = self.max_bag_size - len(selected_set)
+                available_background = [p for p in img_paths if p not in selected_set]
+                
+                if len(available_background) > 0:
+                    back_count = min(len(available_background), remaining_slots)
+                    back_indices = np.random.choice(len(available_background), back_count, replace=False)
+                    for i in back_indices:
+                        selected_set.add(available_background[i])
+                
+                selected_paths = list(selected_set)
+            
             elif len(img_paths) > self.max_bag_size:
-                # Deterministic for validation/testing
+                # Deterministic for validation/testing (Multi-pass loop in train.py handles coverage)
                 selected_paths = sorted(img_paths)[:self.max_bag_size]
             else:
                 selected_paths = img_paths

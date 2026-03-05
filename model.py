@@ -48,9 +48,10 @@ class HPyNet(nn.Module):
     - ResNet50: Classic, fast, highly optimized for A40 (torch.compile).
     - ConvNeXt-Tiny: Modern, 7x7 kernels, better morphology extraction.
     """
-    def __init__(self, model_name="resnet50", num_classes=2, pretrained=True):
+    def __init__(self, model_name="resnet50", num_classes=2, pretrained=True, pool_type="attention"):
         super(HPyNet, self).__init__()
         self.model_name = model_name.lower()
+        self.pool_type = pool_type.lower()
         
         # 1. Initialize Backbone
         if self.model_name == "resnet50":
@@ -87,7 +88,12 @@ class HPyNet(nn.Module):
         )
         
         # 3. MIL Attention Gate (Iteration 4 Readiness)
-        self.attention_gate = AttentionGate(feature_dim=self.feature_dim)
+        if self.pool_type == "attention":
+            self.attention_gate = AttentionGate(feature_dim=self.feature_dim)
+        elif self.pool_type == "max":
+            self.attention_gate = None # Max-pooling doesn't need a learnable gate
+        else:
+            raise ValueError(f"Unsupported pool_type: {pool_type}. Use 'attention' or 'max'.")
 
     def forward(self, x, return_features=False):
         # Standard patch-level forward pass
@@ -133,18 +139,24 @@ class HPyNet(nn.Module):
             
         features = torch.cat(all_features, dim=0)
 
-        # 2. Attention aggregation
+        # 2. Pooling aggregation
         # features shape: (Bag_Size, feature_dim)
-        A = self.attention_gate(features) # (1, Bag_Size)
-        M = torch.mm(A, features)         # (1, feature_dim)
+        if self.pool_type == "attention":
+            A = self.attention_gate(features) # (1, Bag_Size)
+            M = torch.mm(A, features)         # (1, feature_dim)
+        else:
+            # Global Max Pooling (Iteration 22: Precision Searcher)
+            # Route gradients ONLY to the most suspicious feature
+            M, _ = torch.max(features, dim=0, keepdim=True) # (1, feature_dim)
+            A = None # No attention weights in max-pooling mode
         
         # 3. Final classification on the aggregated feature
         logits = self.patch_head(M)             # (1, num_classes)
         return logits, A
 
 # Factory function to build the model
-def get_model(model_name="resnet50", num_classes=2, pretrained=True):
-    return HPyNet(model_name=model_name, num_classes=num_classes, pretrained=pretrained)
+def get_model(model_name="resnet50", num_classes=2, pretrained=True, pool_type="attention"):
+    return HPyNet(model_name=model_name, num_classes=num_classes, pretrained=pretrained, pool_type=pool_type)
 
 if __name__ == "__main__":
     # If you run this file directly, it will just show you the structure of the brain

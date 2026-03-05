@@ -215,7 +215,7 @@ def update_swa_bn(loader, swa_model, device):
             bags = bags.unsqueeze(0)
             wrapper(bags)
 
-def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=7.5, neg_weight=1.0, gamma=1.0, num_epochs=15, saver_metric="recall", freeze_bn=False, clip_grad=0.0, pct_start=0.1, weight_decay=0.01, use_swa=True, swa_start=15, jitter=0.15):
+def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=7.5, neg_weight=1.0, gamma=1.0, num_epochs=15, saver_metric="recall", freeze_bn=False, clip_grad=0.0, pct_start=0.1, weight_decay=0.01, use_swa=True, swa_start=15, jitter=0.15, pool_type="attention"):
     """
     Train a deep learning model for H. pylori contamination detection using k-fold cross-validation.
     This function implements a complete machine learning pipeline including:
@@ -475,7 +475,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
     )
 
     # --- Step 5: Build the customized AI brain ---
-    model = get_model(model_name=model_name, num_classes=2, pretrained=True).to(device)
+    model = get_model(model_name=model_name, num_classes=2, pretrained=True, pool_type=pool_type).to(device)
 
     # --- Step 6: Define the Learning Rules ---
     # Strategy C: Profile-based Loss (Iteration 19 Support)
@@ -832,6 +832,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
     all_preds_pat = np.zeros(num_holdout, dtype=np.int8)
     all_labels_pat = np.zeros(num_holdout, dtype=np.int8)
     all_probs_pat = np.zeros(num_holdout, dtype=np.float32)
+    all_max_probs = np.zeros(num_holdout, dtype=np.float32) # Searcher indicator
     all_patch_counts = np.zeros(num_holdout, dtype=np.int32)
     
     patient_ids_list = []
@@ -874,7 +875,12 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
                 bag_probs_list.append(chunk_probs)
             
             # --- AGGREGATION: Average across chunks (Multi-Pass Voting) ---
+            # Iteration 22: For Searchers, we focus on the Top-K (Searcher Mode) 
+            # rather than just the bag mean to catch sparse infections
             final_bag_probs = torch.stack(bag_probs_list).mean(0)
+            
+            # Additional Searcher Metric: Max probability among chunks (representative of patch-level outliers)
+            max_chunk_prob = torch.stack(bag_probs_list).max(0)[0][:, 1].cpu().item()
             
             # --- Stage 1 Searcher: Low Threshold (P > 0.1) ---
             # If any significant positive probability exists, we mark as 'Searcher+'
@@ -884,9 +890,14 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
             
             all_preds_pat[i] = preds.cpu().item()
             all_labels_pat[i] = labels.cpu().item()
-            all_probs_pat[i] = final_bag_probs[:, 1].cpu().item()
+            all_probs_pat[i] = positive_prob
             all_patch_counts[i] = bag_size # Record original patch count before TTA/chunking
             patient_ids_list.append(patient_ids[0])
+            
+            # For Iteration 22 reporting, we include the max chunk prob in consensus
+            # this helps identify if sparse bacterial patches were detected even if diluted
+            # in the mean.
+            all_max_probs[i] = max_chunk_prob
             
             if i % 5 == 0:
                 torch.cuda.empty_cache()
@@ -903,12 +914,12 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
             "PatientID": patient_ids_list[i],
             "Actual": all_labels_pat[i],
             "Predicted": all_preds_pat[i],
-            "Searcher_Flag": 1 if all_probs_pat[i] > 0.1 else 0, # Low-threshold Searcher logic
-            "Mean_Prob": all_probs_pat[i], # For MIL, the bag prob IS the diagnosis
-            "Max_Prob": all_probs_pat[i],
+            "Searcher_Flag": 1 if all_max_probs[i] > 0.1 or all_probs_pat[i] > 0.1 else 0, # Trigger on Mean or Top-K
+            "Bag_Mean_Prob": all_probs_pat[i], 
+            "Max_Prob": all_max_probs[i], # Max chunk probability (approx patch-max)
             "Meta_Prob": all_probs_pat[i],
-            "Patch_Count": all_patch_counts[i], # Now reporting original patient patch count
-            "Method": "Attention-MIL",
+            "Patch_Count": all_patch_counts[i], 
+            "Method": f"MIL-{pool_type}",
             "Correct": 1 if all_preds_pat[i] == all_labels_pat[i] else 0
         })
     consensus_df = pd.DataFrame(consensus_data)
@@ -993,18 +1004,25 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
         # Use chunks for forward pass - keep chunks on CPU, load only current chunk to GPU
         
         # Find Attention weights to choose the top patches (we don't need gradients for this part)
-        all_attns = []
+        # Iteration 22: If Max-Pooling, we use Top-K probabilities instead of attention
+        all_indicators = [] # Can be attention or logits
         with torch.no_grad():
             for start_idx in range(0, bag_imgs.size(0), vram_bag_limit):
                 chunk = bag_imgs[start_idx:start_idx + vram_bag_limit].to(device)
                 chunk = det_preprocess_batch(chunk, training=False)
-                _, attn = model.forward_bag(chunk)
-                all_attns.append(attn.cpu()) # Keep results on CPU to save VRAM
+                
+                if pool_type == "attention":
+                    _, indicator = model.forward_bag(chunk)
+                    all_indicators.append(indicator.cpu()) # (1, N)
+                else:
+                    # For Max-Pooling, use patch-level logits (Class 1) as search indicator
+                    indicator = model(chunk) # (N, num_classes)
+                    all_indicators.append(indicator[:, 1:2].transpose(0, 1).cpu()) # (1, N)
         
-        attention = torch.cat(all_attns, dim=1).squeeze(0) # (Bag_Size,)
+        indicators = torch.cat(all_indicators, dim=1).squeeze(0) # (Bag_Size,)
         
-        # Take top 3 most "Attended" patches
-        top_patch_vals, top_patch_indices = torch.topk(attention, k=min(3, bag_imgs.size(0)))
+        # Take top 3 most "Significant" patches
+        top_patch_vals, top_patch_indices = torch.topk(indicators, k=min(3, bag_imgs.size(0)))
         
         for rank, p_idx in enumerate(top_patch_indices):
             # Only load the specific patch and its input tensor for Grad-CAM
@@ -1049,16 +1067,20 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
             p_id = patient_ids_list[bag_idx]
             bag_imgs, label, _ = holdout_dataset[bag_idx]
             
-            all_attns = []
+            all_indicators = []
             with torch.no_grad():
                 for start_idx in range(0, bag_imgs.size(0), vram_bag_limit):
                     chunk = bag_imgs[start_idx:start_idx + vram_bag_limit].to(device)
                     chunk = det_preprocess_batch(chunk, training=False)
-                    _, attn = model.forward_bag(chunk)
-                    all_attns.append(attn.cpu())
+                    if pool_type == "attention":
+                        _, indicator = model.forward_bag(chunk)
+                        all_indicators.append(indicator.cpu())
+                    else:
+                        indicator = model(chunk)
+                        all_indicators.append(indicator[:, 1:2].transpose(0, 1).cpu())
             
-            attention = torch.cat(all_attns, dim=1).squeeze(0)
-            top_patch_vals, top_patch_indices = torch.topk(attention, k=min(3, bag_imgs.size(0)))
+            indicators = torch.cat(all_indicators, dim=1).squeeze(0)
+            top_patch_vals, top_patch_indices = torch.topk(indicators, k=min(3, bag_imgs.size(0)))
             
             for rank, p_idx in enumerate(top_patch_indices):
                 patch_img = bag_imgs[p_idx:p_idx+1].to(device)
@@ -1111,6 +1133,8 @@ if __name__ == "__main__":
     parser.add_argument("--use_swa", type=str, default="True", help="Whether to use SWA")
     parser.add_argument("--swa_start", type=int, default=15, help="Epoch to start SWA")
     parser.add_argument("--jitter", type=float, default=0.15, help="ColorJitter intensity (brightness/contrast)")
+    parser.add_argument("--pool_type", type=str, default="attention", choices=["attention", "max"], 
+                        help="MIL aggregation pooling type (Iteration 22)")
     
     args = parser.parse_args()
     
@@ -1129,5 +1153,6 @@ if __name__ == "__main__":
         weight_decay=args.weight_decay,
         use_swa=args.use_swa == "True",
         swa_start=args.swa_start,
-        jitter=args.jitter
+        jitter=args.jitter,
+        pool_type=args.pool_type
     )
