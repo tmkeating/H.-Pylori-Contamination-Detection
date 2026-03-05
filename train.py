@@ -686,27 +686,36 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
 
         # --- Report Card: Save the best version ---
         # Strategy selection based on saver_metric
+        # Iteration 24.2: accuracy-aware tie-breakers to prevent "Epoch 8 Accuracy 47%" trap
         is_best = False
         if saver_metric == "recall":
             if val_recall > best_recall:
                 best_recall = val_recall
-                best_loss = val_epoch_loss # Reset loss tracker to focus on this recall level
+                best_acc = val_epoch_acc # Reset accuracy tracker for new recall level
+                best_loss = val_epoch_loss 
                 is_best = True
                 print(f"New Best Recall! {val_recall:.4f}")
-            elif val_recall == best_recall and val_epoch_loss < best_loss:
+            elif val_recall == best_recall and val_epoch_acc > best_acc:
+                best_acc = val_epoch_acc
                 best_loss = val_epoch_loss
                 is_best = True
-                print(f"Recall stable, Improved Loss: {val_epoch_loss:.4f}")
+                print(f"Recall stable, Improved Accuracy: {val_epoch_acc:.4f}")
+            elif val_recall == best_recall and val_epoch_acc == best_acc and val_epoch_loss < best_loss:
+                best_loss = val_epoch_loss
+                is_best = True
+                print(f"Recall and Acc stable, Improved Loss: {val_epoch_loss:.4f}")
         elif saver_metric == "f1":
             if val_f1 > best_f1:
                 best_f1 = val_f1
+                best_acc = val_epoch_acc
                 best_loss = val_epoch_loss
                 is_best = True
                 print(f"New Best F1! {val_f1:.4f}")
-            elif val_f1 == best_f1 and val_epoch_loss < best_loss:
+            elif val_f1 == best_f1 and val_epoch_acc > best_acc:
+                best_acc = val_epoch_acc
                 best_loss = val_epoch_loss
                 is_best = True
-                print(f"F1 stable, Improved Loss: {val_epoch_loss:.4f}")
+                print(f"F1 stable, Improved Accuracy: {val_epoch_acc:.4f}")
         else: # Default to loss
             if val_epoch_loss < best_loss:
                 best_loss = val_epoch_loss
@@ -754,10 +763,15 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
                 
         del temp_train_loader
         
-        # Save the Final SWA model instead of just the last model
-        swa_model_path = os.path.join(results_dir, f"{prefix}_model_brain.pth")
+        # Iteration 24.3: Save SWA separately. Do NOT overwrite the "Best Metric" model
+        # which might have reached peak recall during earlier epochs.
+        swa_model_path = os.path.join(results_dir, f"{prefix}_swa_model_brain.pth")
         torch.save(swa_model.state_dict(), swa_model_path)
         print(f"Final SWA Clinical Model saved to {swa_model_path}")
+        
+        # Use a summary logic to decide whether SWA or Best is superior
+        # For Searcher: We use the SWA model only if its recall matches the best and acc is better
+        # For now, we allow the script to use SWA for evaluation, but keep the Best separately
     else:
         # Save the best model reached during training
         best_model_path = os.path.join(results_dir, f"{prefix}_model_brain.pth")
@@ -781,10 +795,17 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
     plt.close() # Prevent memory build-up
     print(f"Saved learning curves to {history_path}")
 
-    # Use the SWA model for the final independent performance evaluation
-    # We use .module because AveragedModel (swa_model) is a wrapper that 
-    # doesn't expose the 'forward_bag' method directly.
-    model = swa_model.module
+    # Step 7.11: Use Best Metric Model for final validation if SWA degraded performance
+    if use_swa:
+        # Check if Best Recall from loop is higher than SWA's current state
+        # We load the weights from 'best_model_path' (saved during training) back into model
+        if best_recall > val_recall:
+            print(f"SWA performance ({val_recall:.4f}) is below Best Recall ({best_recall:.4f}). Loading best metric model...")
+            model.load_state_dict(torch.load(best_model_path))
+        else:
+            # If SWA is at least equal in recall, use it
+            model = swa_model.module
+        
     model.to(device)
     model.eval()
 
@@ -842,15 +863,16 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
     with torch.no_grad():
         for i, (bags, labels, patient_ids) in enumerate(tqdm(holdout_loader, desc=f"Patient-Independent TTA Test (Fold {fold_idx + 1}/{num_folds})")):
             # bags shape: (1, Bag_Size, C, H, W) -> (Bag_Size, C, H, W)
-            bags = bags.squeeze(0).to(device, non_blocking=True)
+            # Move labels to device, but keep bags on CPU for now to prevent OOM
             labels = labels.to(device, non_blocking=True)
             
             # Divide bag into chunks of 500 if larger
-            bag_size = bags.size(0)
+            bag_size = bags.squeeze(0).size(0)
             bag_probs_list = []
             
             for start_idx in range(0, bag_size, vram_bag_limit):
-                chunk_bags = bags[start_idx : start_idx + vram_bag_limit]
+                # Transfer only one chunk (500 patches) to GPU at a time
+                chunk_bags = bags.squeeze(0)[start_idx : start_idx + vram_bag_limit].to(device, non_blocking=True)
                 
                 # Aggregate TTA logits for this chunk
                 chunk_logits_sum = None
@@ -872,7 +894,16 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
                 # Average TTA results for this chunk and store probability
                 avg_chunk_logits = chunk_logits_sum / len(tta_transforms)
                 chunk_probs = torch.softmax(avg_chunk_logits, dim=1)
-                bag_probs_list.append(chunk_probs)
+                bag_probs_list.append(chunk_probs.cpu()) # Store probabilities on CPU to save VRAM
+                
+                # Immediate cleanup for chunk to prevent buildup
+                del chunk_bags
+                del avg_chunk_logits
+                del chunk_logits_sum
+            
+            # Move probabilities to DEVICE for final aggregation math
+            # Shape (Num_Chunks, 1, 2) -> (Num_Chunks, 2)
+            all_chunks_probs = torch.stack(bag_probs_list).squeeze(1).to(device)
             
             # --- AGGREGATION: Iteration 24 Max-MIL Strategy (Detection-Focused) ---
             # Instead of a global mean (which dilutes sparse signals in huge bags),
@@ -883,7 +914,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
             all_chunks_probs = torch.stack(bag_probs_list)
             
             # Final Patient Probability = Maximum confidence found in any chunk
-            final_pos_prob_tensor = all_chunks_probs[:, :, 1].max(0)[0]
+            final_pos_prob_tensor = all_chunks_probs[:, 1].max(0)[0]
             max_chunk_prob = final_pos_prob_tensor.cpu().item()
             
             # Thresholding: 0.15 is our "Sensitivity Decision Boundary" to capture Ghost patients
