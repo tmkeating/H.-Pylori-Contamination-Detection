@@ -13,32 +13,31 @@
 - **Stability Engine**: **Frozen BatchNorm** (`FREEZE_BN="True"`) + **Gradient Clipping** (`CLIP_GRAD=0.3-0.5`).
 - **Data Augmentation**: **Dynamic Jitter Control** (`JITTER=0.15-0.45`) to suppress site-specific artifacts.
 - **Centralized Control**: **profiles.sh** (Single Source of Truth for AUDITOR/SEARCHER hyper-profiles).
-- **Optimization Strategy**: **AdamW** (LR=2e-5, WD=0.05-0.1) & **SWA** (Stochastic Weight Averaging).
+- **Optimization Strategy**: **AdamW** (LR=2e-5, WD=0.1) & **SWA** (Stochastic Weight Averaging).
+- **Architecture Shift (Iteration 22)**: **Max-Pooling MIL** & **Guaranteed Sampling** to solve the "Dilution Problem."
 - **Metric Tracking**: **F1-Score Model Checkpointing** to prevent strategy collapse.
 
 ---
 
 ## 📈 Current Performance & Milestones
-1. **The 0.05 Wall**: Identified a systematic feature-representation failure where sparse "Ghost Patients" hover at $P \approx 0.05$.
+1. **The 0.05 Wall**: Identified a systematic feature-representation failure where sparse "Ghost Patients" hover at $P \approx 0.05$ due to attention dilution.
 2. **Stability Breakthrough**: Resolved "ResNet Collapse" using **Frozen BN** and **Gradient Clipping** to handle noisy MIL bag statistics.
 3. **Artifact Suppression**: Identified a "Fold 4 Paradox" (95% Val Acc vs 50% Test Acc) caused by site-specific shortcut features. Used **Ultra-Jitter (0.45)** to neutralize these artifacts.
-4. **The Skepticism Pivot**: Demonstrated that **$PosWeight=0.25$** achieves **100% Precision (+)** on independent hold-out patients, albeit at lower recall.
+4. **The Skepticism Pivot**: Demonstrated that **$PosWeight=0.25$** achieves **100% Precision (+)** on independent hold-out patients, identifying the "True Negative" boundary.
 
 ---
 
-## 🧪 Future Research: Iteration 22 (The "Goldilocks" Ensemble)
-**Projected Vision:** Achieving 85%+ Recall & Precision through strategic PR convergence.
+## 🧪 Future Research: Iteration 22 (The "Precision Searcher")
+**Projected Vision:** Solving the "Dilution" and "Sampling Void" problems to break the 95% Recall barrier.
 
-- **The 0.35 Target**: Calibrating ResNet50 to $PosWeight=0.35$ and $Jitter=0.30$ to find the "balanced" diagnostic boundary.
-- **Searcher Union**: Merging ConvNeXt-Tiny (Auditor configuration) with the new ResNet50 (Searcher configuration) using `ensemble_searcher.py`.
-- **Ensemble Logic**: $P_{\text{final}} = \max(P_{\text{conv}}, P_{\text{res}})$. This maximizes the clinical "Searcher" recall by catching any case flagged by either architecture.
-- **Auditor Guardrails**: Applying the Iteration 21.5 "Hyper-Skeptical" ResNet (100% Precision) as a final validator to suppress false positives.
-- **System Objective**: Target **95%+ Recall** for the Searcher phase while maintaining **100% Precision** for the Auditor phase.
+- **Max-Pooling MIL**: Replace Attention ($A^T V$) with $\max(features)$ to route gradients directly to bacterial candidates, bypassing the "weighted average" noise of background tissue.
+- **Guaranteed Positive Sampling**: Update `dataset.py` to force-inject annotated bacteria into every training bag for $Y=1$ patients, eliminating the "Empty Bag" training bias.
+- **Top-K Inference**: Shift patient diagnosis from global mean probability to the **Top-3 highest patch probabilities**.
+- **System Objective**: Target **95%+ Searcher Recall** ($P > 0.1$) while maintaining **100% Auditor Precision**.
 
 **File reference:**
-- [profiles.sh](profiles.sh): The **Central Source of Truth** for all experiment hyperparameters.
-- [train.py](train.py): Refactored **SWA Lifecycle** & **Modular Weighting** engine.
-- [submit_all_folds.sh](submit_all_folds.sh): Modified SLURM orchestrator for profile-based submission.
-- [summarize_results.py](summarize_results.py): Automated clinical reporting with $\pm$ error bounds and RunID tracking.
-- [ensemble_searcher.py](ensemble_searcher.py): Script for merging multi-backbone inference outputs.
-- [RESEARCH_NOTES.md](RESEARCH_NOTES.md): Detailed logs of the "Strategy Collapse" and Iteration 21 recovery.
+- [profiles.sh](profiles.sh): The **Central Source of Truth** for all experiment hyperparameters (now including `POOL_TYPE`).
+- [model.py](model.py): Implementing `pool_type` ("attention" vs "max") in `HPyNet`.
+- [dataset.py](dataset.py): Implementing **Guaranteed Sampling** using `patch_meta` annotations.
+- [train.py](train.py): Refactored **Top-K Inference** and **SWA Lifecycle**.
+- [RESEARCH_NOTES.md](RESEARCH_NOTES.md): Detailed logs of the "Strategy Collapse" and Iteration 22 recovery.

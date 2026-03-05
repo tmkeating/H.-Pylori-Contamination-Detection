@@ -967,28 +967,34 @@
 
 ---
 
-## Iteration 21.6: The "Goldilocks" Sweep (Precision-Recall Convergence)
+## Iteration 22: Precision Searcher Architecture (Max-MIL & Guaranteed Sampling)
 
 ### Objectives
-1.  **Standardize Fold 0 Success**: Replicate the balanced performance of Run 237 across the entire ensemble.
-2.  **Anchor the P-N Boundary**: Soften the hyper-skepticism just enough to recover Recall(+) without re-triggering the Artifact Collapse.
+1.  **Solve the MIL Dilution Problem**: Prevent sparse bacterial signals (3/2000 patches) from being averaged into invisibility by the background tissue.
+2.  **Fix sampling bias**: Guarantee that positive bags always contain annotated bacteria during training to prevent "False Negative Training."
+3.  **Break the 0.05 Wall**: Successfully boost "Ghost Patient" probabilities into the triage range ($P > 0.1$).
 
-### Strategy (The Balanced-Regularization Suite)
--   **Tuning the "Skeptical" Bias**:
-    -   **PosWeight ($0.35$)**: Increased from $0.25$ to recover missed bacterial signals.
-    -   **Jitter ($0.30$)**: Reduced from $0.45$ to allow the model to distinguish subtler edges, while remaining high enough to suppress staining artifacts.
-    -   **ClipGrad ($0.5$)**: Slightly relaxed to allow more meaningful feature updates during SWA.
--   **Epoch Strategy**: 
-    -   Maintain **25 epochs** with **SWA at Epoch 18**.
-    -   Maintain **FreezeBN=True** to ensure running stats don't drift during the shift in class weights.
+### Strategy (The "Hit-Based" Detection Logic)
+-   **Architecture Shift (Max-MIL)**:
+    -   Replace **Weighted Average Attention** with **Global Max-Pooling** across the bag dimension for the Searcher profile.
+    -   **Benefit**: This routes the gradient *only* to the single most suspicious patch, ignoring background mucus and debris that cause "Artifact Collapse."
+-   **Guaranteed Sampling (In-Bag balancing)**:
+    -   Modify `HPyloriDataset` to force-include patches with `Presence=1` (from `patch_meta`) in the 500-patch training sample for positive bags.
+    -   **Benefit**: Eliminates epochs where a positive bag is accidentally "cropped" into a negative bag, a major cause of model confusion.
+-   **Top-K Inference Triage**:
+    -   Base patient diagnosis on the **Top-3 highest patch probabilities** rather than the global bag mean.
+    -   **Benefit**: Acts as a natural noise-filter for single-patch artifacts (e.g., ink/dust) while remaining hyper-sensitive to multi-patch colonies.
 
 ### Expected Outcome
--   Independent Test Accuracy $\to$ **80%+** for all folds.
--   Recall (+) $\to$ **85%+** (Searcher Stage requirement).
--   Precision (+) $\to$ **60%+** (Triage Stage requirement).
+-   Searcher Recall ($P > 0.1$) $\to$ **95%+**.
+-   Searcher Precision $\to$ **30--50%** (Sufficient for triage).
+-   Elimination of the "Negative-Only" collapse seen in Iteration 21.5.
 
-### Jobs
-- **Configuration**: ResNet50, 0.35 PosWeight, 0.30 Jitter, 25 Epochs, 0.5 ClipGrad, F1-Saver.
+### Implementation Checklist
+- [ ] Add `pool_type` ("attention" vs "max") to `HPyNet` in `model.py`.
+- [ ] Update `HPyloriDataset.__getitem__` to inject annotated positive patches.
+- [ ] Implement `Top-K` probability aggregation in `train.py`.
+- [ ] Update `profiles.sh` with `export POOL_TYPE="max"`.
 
 ---
 
