@@ -1073,3 +1073,15 @@
 ### 📉 Expected Outcome
 - **Recall (+)**: Substantial increase in the Hold-Out set evaluation.
 - **Precision (+)**: Increased stability by removing label noise.
+
+## Iteration 24.6: Multi-Level Data Cleanup (Redundant Patches)
+**Context**: An audit revealed additional duplicates in the `Annotated` set (`B22-68_0` and `B22-141_0`) containing 6 identical images each. To ensure maximum data purity, these redundant samples were removed to prevent morphological overfitting.
+
+### 🛠️ Strategic Fixes
+1. **Bag & Image Blacklist**:
+    - Expanded `dataset.py` to blacklist both conflicting bags (`B22-01_1`, `B22-03_1`) and redundant bags (`B22-68_0`, `B22-141_0`).
+    - Implemented a specific `image_blacklist` to skip the 12 redundant `.png` files directly.
+    - **Rationale**: Prevents "Data Leakage" where identical patches might appear in both training and validation folds during K-Fold rotation.
+
+### 📉 Expected Outcome
+- **Scientific Rigor**: Guaranteed that every bag used in the 5-fold ensemble contains unique visual evidence.

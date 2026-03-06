@@ -140,15 +140,24 @@ class HPyloriDataset(Dataset):
             # Iteration 24.4: Blacklist Conflict Patients
             # B22-01_1 (Positive) and B22-03_1 (Negative) are identical sets of images
             # and create a contradictory signal that hampers training.
-            conflict_blacklist = ["B22-01_1", "B22-03_1", "B22-124_0", "B22-141_0"]
+            # B22-68_0 and B22-141_0 are also identical redundant sets (ALTA).
+            conflict_blacklist = ["B22-01_1", "B22-03_1", "B22-68_0", "B22-141_0"]
+            
+            # --- Optional: Image-Level Blacklist (Advanced Audit) ---
+            # Explicitly blacklist the specific filenames from the redundant sets
+            image_blacklist = ["00131.png", "00141.png", "00290.png", "00298.png", "00315.png", "00352.png"]
             
             for img_path, label in self.samples:
                 # Use the full folder name as the bag ID to keep them granular
                 # (e.g. 'B22-47_0', 'B22-47_1' are separate bags)
                 folder_name = os.path.basename(os.path.dirname(img_path))
+                img_name = os.path.basename(img_path)
                 p_id_full = folder_name
                 
                 if p_id_full in conflict_blacklist:
+                    continue
+                
+                if img_name in image_blacklist and p_id_full in ["B22-68_0", "B22-141_0"]:
                     continue
                 
                 # Extract the base ID to look up clinical labels in Excel
