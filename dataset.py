@@ -143,9 +143,17 @@ class HPyloriDataset(Dataset):
             # B22-68_0 and B22-141_0 are also identical redundant sets (ALTA).
             conflict_blacklist = ["B22-01_1", "B22-03_1", "B22-68_0", "B22-141_0"]
             
-            # --- Optional: Image-Level Blacklist (Advanced Audit) ---
-            # Explicitly blacklist the specific filenames from the redundant sets
-            image_blacklist = ["00131.png", "00141.png", "00290.png", "00298.png", "00315.png", "00352.png"]
+            # Iteration 24.7: Surgical Image Blacklist (Path-Specific)
+            # We must use (Folder, Filename) tuples because numeric names like 00131.png 
+            # are recycled across all patients.
+            image_blacklist_set = {
+                ("B22-68_0", "00131.png"), ("B22-141_0", "00131.png"),
+                ("B22-68_0", "00141.png"), ("B22-141_0", "00141.png"),
+                ("B22-68_0", "00290.png"), ("B22-141_0", "00290.png"),
+                ("B22-68_0", "00298.png"), ("B22-141_0", "00298.png"),
+                ("B22-68_0", "00315.png"), ("B22-141_0", "00315.png"),
+                ("B22-68_0", "00352.png"), ("B22-141_0", "00352.png")
+            }
             
             for img_path, label in self.samples:
                 # Use the full folder name as the bag ID to keep them granular
@@ -157,7 +165,8 @@ class HPyloriDataset(Dataset):
                 if p_id_full in conflict_blacklist:
                     continue
                 
-                if img_name in image_blacklist and p_id_full in ["B22-68_0", "B22-141_0"]:
+                # Check for specific redundant patches within identified folders
+                if (p_id_full, img_name) in image_blacklist_set:
                     continue
                 
                 # Extract the base ID to look up clinical labels in Excel
