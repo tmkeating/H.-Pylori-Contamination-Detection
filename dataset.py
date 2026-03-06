@@ -140,7 +140,7 @@ class HPyloriDataset(Dataset):
             # Iteration 24.4: Blacklist Conflict Patients
             # B22-01_1 (Positive) and B22-03_1 (Negative) are identical sets of images
             # and create a contradictory signal that hampers training.
-            conflict_blacklist = ["B22-01_1", "B22-03_1"]
+            conflict_blacklist = ["B22-01_1", "B22-03_1", "B22-124_0", "B22-141_0"]
             
             for img_path, label in self.samples:
                 # Use the full folder name as the bag ID to keep them granular
