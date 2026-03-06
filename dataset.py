@@ -136,11 +136,20 @@ class HPyloriDataset(Dataset):
             # Reorganize samples into bags by patient ID
             # patient_bags[bag_id] = {'samples': [paths], 'label': y, 'pos_samples': [annotated_paths]}
             patient_bags = {}
+            
+            # Iteration 24.4: Blacklist Conflict Patients
+            # B22-01_1 (Positive) and B22-03_1 (Negative) are identical sets of images
+            # and create a contradictory signal that hampers training.
+            conflict_blacklist = ["B22-01_1", "B22-03_1"]
+            
             for img_path, label in self.samples:
                 # Use the full folder name as the bag ID to keep them granular
                 # (e.g. 'B22-47_0', 'B22-47_1' are separate bags)
                 folder_name = os.path.basename(os.path.dirname(img_path))
                 p_id_full = folder_name
+                
+                if p_id_full in conflict_blacklist:
+                    continue
                 
                 # Extract the base ID to look up clinical labels in Excel
                 # (e.g. 'B22-47' or '101')

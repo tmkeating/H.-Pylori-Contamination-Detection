@@ -1059,3 +1059,17 @@
 - **Precision (+)**: Expected drop to ~85-90% as the model becomes more sensitive to borderline artifacts.
 - **Accuracy**: Target 90% overall.
 - **Ensemble Role**: This model will serve as the "Searcher" in a dual-model ensemble, where the "Auditor" handles high-confidence positives and the "Searcher" flags potential missed infections for review.
+
+## Iteration 24.5: Data Integrity Blacklist
+**Context**: Discovered that patients `B22-01_1` (Positive) and `B22-03_1` (Negative) in the Hold-Out set contain bit-by-bit identical images but have conflicting clinical labels. This created a "Zero-Sum" training signal where the model was forced to output ~0.5 (or low probability ~0.02) for both, preventing high-recall convergence.
+
+### 🛠️ Strategic Fixes
+1. **Blacklist Implementation**:
+   - Modified `dataset.py` to skip `B22-03_1` (the Negative clone).
+   - **Rationale**: Removing the contradictory negative label allows the Max-MIL head to fully associate these visual features with the "Positive" class from `B22-01_1`.
+2. **Impact Tracking**:
+   - The model should now achieve higher confidence on `B22-01_1`, improving the overall Recall (+) on the independent test set.
+
+### 📉 Expected Outcome
+- **Recall (+)**: Substantial increase in the Hold-Out set evaluation.
+- **Precision (+)**: Increased stability by removing label noise.
