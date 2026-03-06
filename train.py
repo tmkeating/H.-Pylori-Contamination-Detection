@@ -911,9 +911,6 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
             # we base the final prediction on the MAXIMUM PROBABILITY found in any 500-patch chunk.
             # This follows the "One Chunk = One Slide" detection philosophy for 100% Recall.
             
-            # Stack all chunk probabilities: Shape (Num_Chunks, 2)
-            all_chunks_probs = torch.stack(bag_probs_list)
-            
             # Final Patient Probability = Maximum confidence found in any chunk
             final_pos_prob_tensor = all_chunks_probs[:, 1].max(0)[0]
             max_chunk_prob = final_pos_prob_tensor.cpu().item()
