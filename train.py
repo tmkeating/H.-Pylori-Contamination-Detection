@@ -607,11 +607,12 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
                     scaler.unscale_(optimizer)
                     torch.nn.utils.clip_grad_norm_(model.parameters(), clip_grad)
                 
+                # Correction: Step scheduler normally, but handle the UserWarning better if necessary
+                # Iteration 24.1: Calibration check
                 scaler.step(optimizer)
                 scaler.update()
                 
-                # Correction: Only step scheduler if the optimizer actually stepped (to avoid UserWarning)
-                # Iteration 24.1: Calibration check
+                # Check for SWA or normal scheduler
                 if not use_swa or epoch < swa_start:
                     scheduler.step()
                 
