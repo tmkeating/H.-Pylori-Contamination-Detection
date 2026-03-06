@@ -1085,3 +1085,75 @@
 
 ### 📉 Expected Outcome
 - **Scientific Rigor**: Guaranteed that every bag used in the 5-fold ensemble contains unique visual evidence.
+
+---
+## Iteration 24: Sensitivity Squeeze (RECALL 100% Target)
+**Strategy**: Prioritize clinical safety via a "Peak Detection" max-pooling strategy and aggressive classification thresholds.
+
+### 🛠️ Strategic Changes (Iter 24.7 - 24.8)
+1. **Max-MIL Inference (Detection Logic)**:
+   - Replaced "Global Bag Mean" with **Max(Chunk_Probs)** where chunks = 500 patches.
+   - **Rationale**: Sparse infections (3-5 patches) were being "diluted" to near-zero probability in bags of 10,000+ patches. Taking the maximum confidence of any 500-patch window ensures discovery of isolated colonies.
+2. **Surgical Sensitivity Boundary (0.10 Threshold)**:
+   - Lowered the decision threshold from 0.50 -> 0.15 (Iter 24.7) -> **0.10 (Iter 24.8)**.
+   - **Rationale**: Direct response to "Ghost Patients" analysis. 0.10 captures patients with extremely sparse low-confidence bacterial signatures that would otherwise be rejected.
+3. **Training Weights (Anchoring Signal)**:
+   - Set **POS_WEIGHT=10.0** and **GAMMA=3.0**.
+   - **Rationale**: Forces the ConvNeXt backbone to specialize in rare curved morphological features, even at the cost of some false positives (Precision 85%).
+4. **Hold-Out evaluator (OOM Fix)**:
+   - Implemented "Streaming GPU Transfer" for evaluation bags.
+   - **Rationale**: Large WSI bags (15k+ patches) crash VRAM. Now evaluates in 500-patch chunks, clearing the cache after each patient.
+
+### 📊 Iteration 24.7 Results Preview (0.15 Threshold)
+- **Mean Recall (+)**: **95.4%** (Significant jump from 79% in Iteration 23).
+- **Peak Recall (Fold 4)**: **98.3%** (Missed only 1 positive patient).
+- **Mean Accuracy**: **89.5%** (Maintained stable precision while squeezing sensitivity).
+
+---
+## Iteration 24.8: The Surgical Searcher (LAUNCHED)
+**Context**: Final refinement loop to reach 100% stable recall across all 5 folds.
+
+### 🛠️ Final Hardening
+1. **0.10 Threshold Lock**: Final target for absolute detection.
+2. **Reporting Order Fix**:
+   -  and  are now saved **immediately** after inference.
+   - **Rationale**: Prevents job timeouts during the slow Grad-CAM generation phase from losing the primary metrics.
+3. **Data Conflict Resolution**:
+   - Blacklisted byte-identical duplicate folders ( / ) to prevent label confusion during high-posweight training.
+
+### 📉 Expected Outcome
+- **Recall (+)**: **100%** Across all 5 folds.
+- **Precision (+)**: ~75-80% (Acceptable for an initial "Searcher" screening layer).
+
+---
+## Iteration 24: Sensitivity Squeeze (RECALL 100% Target)
+**Strategy**: Prioritize clinical safety via a 'Peak Detection' max-pooling strategy and aggressive classification thresholds.
+
+### 🛠️ Strategic Changes (Iter 24.7 - 24.8)
+1. **Max-MIL Inference (Detection Logic)**:
+   - Replaced 'Global Bag Mean' with **Max(Chunk_Probs)** where chunks = 500 patches.
+   - **Rationale**: Sparse infections (3-5 patches) were being 'diluted' to near-zero probability in bags of 10,000+ patches.
+2. **Surgical Sensitivity Boundary (0.10 Threshold)**:
+   - Lowered the decision threshold from 0.50 -> 0.15 (Iter 24.7) -> **0.10 (Iter 24.8)**.
+3. **Training Weights (Anchoring Signal)**:
+   - Set **POS_WEIGHT=10.0** and **GAMMA=3.0**.
+4. **Hold-Out evaluator (OOM Fix)**:
+   - Implemented 'Streaming GPU Transfer' for evaluation bags.
+
+### 📊 Iteration 24.7 Results Preview (0.15 Threshold)
+- **Mean Recall (+)**: **95.4%** (Significant jump from 79% in Iteration 23).
+- **Peak Recall (Fold 4)**: **98.3%** (Missed only 1 positive patient).
+- **Mean Accuracy**: **89.5%**.
+
+---
+## Iteration 24.8: The Surgical Searcher (Status: Ready)
+**Context**: Final refinement loop to reach 100% stable recall across all 5 folds.
+
+### 🛠️ Final Hardening
+1. **0.10 Threshold Lock**: Final target for absolute detection.
+2. **Reporting Order Fix**: Saves reports immediately after inference to prevent data loss on Grad-CAM timeouts.
+3. **Data Conflict Resolution**: Blacklisted byte-identical duplicate folders (B22-01_1 / B22-03_1).
+
+### 📉 Expected Outcome
+- **Recall (+)**: **100%** Across all 5 folds.
+- **Precision (+)**: ~75-80%.

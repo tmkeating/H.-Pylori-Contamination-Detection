@@ -66,8 +66,8 @@ sbatch --dependency=afterok:$DEPENDENCIES <<EOF
 # Activate virtual environment
 source ../venv/bin/activate
 
-echo "All folds finished. Iteration 12: Gated Attention Noise Filtering Summary..."
-# Fix naming conflict: Explicitly specify results dir and limit to last 5 runs
+echo "All folds finished. Iteration 24.8: Max-MIL Sensitivity Summary..."
+# Fix: Summary script expects results dir and --last 5 for the latest fold set
 python summarize_results.py --dir results --last 5
 
 echo "Clinical analysis and visualization generated."

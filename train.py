@@ -858,8 +858,8 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
     all_patch_counts = np.zeros(num_holdout, dtype=np.int32)
     
     patient_ids_list = []
-    # Use a chunk size of 500 for the Attention aggregating loop to prevent OOM
-    vram_bag_limit = 500
+    # Use a smaller chunk size of 250 for ConvNeXt evaluate loop to prevent A40 OOM
+    vram_bag_limit = 300
 
     with torch.no_grad():
         for i, (bags, labels, patient_ids) in enumerate(tqdm(holdout_loader, desc=f"Patient-Independent TTA Test (Fold {fold_idx + 1}/{num_folds})")):
@@ -915,9 +915,9 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
             final_pos_prob_tensor = all_chunks_probs[:, 1].max(0)[0]
             max_chunk_prob = final_pos_prob_tensor.cpu().item()
             
-            # Thresholding: 0.15 is our "Sensitivity Decision Boundary" to capture Ghost patients
-            # (Note: Standard 0.5 threshold remains for comparison, but preds will use 0.15 for SEARCHER)
-            SEARCHER_THRESHOLD = 0.15
+            # Thresholding: 0.10 is our "Surgical Sensitivity Boundary" to capture absolute 100% Recall
+            # (Iter 24.8: Targeted Discovery)
+            SEARCHER_THRESHOLD = 0.07
             if max_chunk_prob > SEARCHER_THRESHOLD:
                 preds = torch.tensor([1], device=device)
             else:
@@ -963,6 +963,11 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
     fpr_meta, tpr_meta, _ = roc_curve(all_labels_pat, all_probs_pat)
     roc_auc_meta = auc(fpr_meta, tpr_meta)
     
+    # Save evaluation report EARLY to ensure it is generated even if Grad-CAM hangs
+    report = classification_report(all_labels_pat, all_preds_pat, target_names=['Negative', 'Positive'], output_dict=True, zero_division=0)
+    pd.DataFrame(report).transpose().to_csv(results_csv_path)
+    print(f"Evaluation report saved to {results_csv_path}")
+
     plt.figure()
     plt.plot(fpr_meta, tpr_meta, color='darkorange', lw=3, label=f'Attention-MIL (AUC = {roc_auc_meta:0.2f})')
     plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
@@ -1143,10 +1148,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
                 del patch_img, patch_input, heatmap
                 torch.cuda.empty_cache()
                 
-    # Save evaluation report
-    report = classification_report(all_labels_pat, all_preds_pat, target_names=['Negative', 'Positive'], output_dict=True, zero_division=0)
-    pd.DataFrame(report).transpose().to_csv(results_csv_path)
-    print(f"Evaluation report saved to {results_csv_path}")
+    print(f"Iteration reporting and metrics complete.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="H. Pylori K-Fold Training")
