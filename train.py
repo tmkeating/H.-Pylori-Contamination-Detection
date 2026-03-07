@@ -8,6 +8,7 @@ import numpy as np               # Numeric library
 import pandas as pd              # Data manipulation library
 import matplotlib.pyplot as plt  # Drawing/plotting library
 import argparse
+import gc
 from torch.utils.data import DataLoader, random_split, Dataset, Subset, WeightedRandomSampler # Tools to manage and split data
 from torchvision import transforms # Tools to prep images for the AI
 from torchvision import disable_beta_transforms_warning
@@ -859,7 +860,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
     
     patient_ids_list = []
     # Use a smaller chunk size of 250 for ConvNeXt evaluate loop to prevent A40 OOM
-    vram_bag_limit = 300
+    vram_bag_limit = 500
 
     with torch.no_grad():
         for i, (bags, labels, patient_ids) in enumerate(tqdm(holdout_loader, desc=f"Patient-Independent TTA Test (Fold {fold_idx + 1}/{num_folds})")):
@@ -1032,6 +1033,8 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
         target_layer = model.backbone.layer4[2]
 
     # Free up memory before visualization
+    # Iteration 24.9: Clear all training/evaluation gradients and model temporary buffers
+    gc.collect()
     torch.cuda.empty_cache()
     
     # Context to enable gradients for Grad-CAM
@@ -1045,6 +1048,8 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
         # Find Attention weights to choose the top patches (we don't need gradients for this part)
         # Iteration 22: If Max-Pooling, we use Top-K probabilities instead of attention
         all_indicators = [] # Can be attention or logits
+        # Ensure we are in eval mode and no_grad to minimize memory during search
+        model.eval()
         with torch.no_grad():
             for start_idx in range(0, bag_imgs.size(0), vram_bag_limit):
                 chunk = bag_imgs[start_idx:start_idx + vram_bag_limit].to(device)
@@ -1057,6 +1062,10 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
                     # For Max-Pooling, use patch-level logits (Class 1) as search indicator
                     indicator = model(chunk) # (N, num_classes)
                     all_indicators.append(indicator[:, 1:2].transpose(0, 1).cpu()) # (1, N)
+                
+                # Cleanup chunk immediately
+                del chunk
+                torch.cuda.empty_cache()
         
         indicators = torch.cat(all_indicators, dim=1).squeeze(0) # (Bag_Size,)
         
@@ -1117,6 +1126,10 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
                     else:
                         indicator = model(chunk)
                         all_indicators.append(indicator[:, 1:2].transpose(0, 1).cpu())
+                    
+                    # Cleanup chunk immediately (Iter 24.9)
+                    del chunk
+                    torch.cuda.empty_cache()
             
             indicators = torch.cat(all_indicators, dim=1).squeeze(0)
             top_patch_vals, top_patch_indices = torch.topk(indicators, k=min(3, bag_imgs.size(0)))
