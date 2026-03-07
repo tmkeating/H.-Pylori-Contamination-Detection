@@ -541,7 +541,6 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
     # --- Step 7: The Main Training Loop ---
     # We use Automatic Mixed Precision (AMP) to speed up training on the A40
     scaler = torch.amp.GradScaler('cuda')
-    # num_epochs = 15 // Set via scheduler in Step 6.2
     best_loss = float('inf')
     best_recall = 0.0 # Track sensitivity for Searcher phase
     best_f1 = 0.0    # Track F1 score for Calibration phase
