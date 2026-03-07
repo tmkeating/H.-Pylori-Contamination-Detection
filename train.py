@@ -611,12 +611,12 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
                 # Correction: Step scheduler normally, but handle the UserWarning better if necessary
                 # Iteration 24.1: Calibration check
                 scaler.step(optimizer)
-                scaler.update()
                 
                 # Check for SWA or normal scheduler
                 if not use_swa or epoch < swa_start:
                     scheduler.step()
-                
+
+                scaler.update()
                 optimizer.zero_grad()
                 
                 # Clear cache after optimization step to prevent creep

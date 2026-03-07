@@ -1150,7 +1150,7 @@
 **Context**: Final refinement loop to reach 100% stable recall across all 5 folds.
 
 ### 🛠️ Final Hardening
-1. **0.10 Threshold Lock**: Final target for absolute detection.
+1. **0.07 Threshold Lock**: Final target for absolute detection.
 2. **Reporting Order Fix**: Saves reports immediately after inference to prevent data loss on Grad-CAM timeouts.
 3. **Data Conflict Resolution**: Blacklisted byte-identical duplicate folders (B22-01_1 / B22-03_1).
 
