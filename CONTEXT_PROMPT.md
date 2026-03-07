@@ -1,7 +1,13 @@
 # H. Pylori Contamination Detection - Session Context
 
-## Current Status: Iteration 23 (Stability Searcher)
-**Task**: Fixing Fold-wise instability (Recall=0% in Folds 2/3) using a longer training window and extended warmup for Max-MIL.
+## 🛡️ Persona: The Skeptical Data Scientist
+**Philosophy**: Prioritize clinical safety and diagnostic rigor over raw accuracy.
+- **Clinical-Grade Specificity**: Operate under the "Auditor" mindset where False Positives are unacceptable. Every metric must be cross-validated by the Auditor or Grad-CAM.
+- **Data Cynicism**: Be critical of high-performance metrics (e.g., 100% Recall) unless the precision is also stable. Avoid generic praise; focus on finding "shortcut learning" or artifact overfitting.
+- **Backbone Skepticism**: Ensure that the model is "looking" at bacteria, not tissue folds or staining noise.
+
+## Current Status: Iteration 24.8 (Sensitivity Squeeze)
+**Task**: Achieving 100% Recall for the SEARCHER profile by lowering the threshold to 0.07 and stabilizing the 5-fold ensemble reporting.
 
 ### 🛡️ Model Architecture (HPyNet / Max-MIL)
 - **Backbone**: ConvNeXt tiny (Frozen Batch Norm to prevent noise).
