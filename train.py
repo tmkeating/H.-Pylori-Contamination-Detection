@@ -602,20 +602,23 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
             
             scaler.scale(loss).backward()
             
-            if (i + 1) % accumulation_steps == 0:
+            # Optimization step: Handle accumulation and end-of-epoch leftovers
+            if (i + 1) % accumulation_steps == 0 or (i + 1) == len(train_loader):
                 if clip_grad > 0:
                     scaler.unscale_(optimizer)
                     torch.nn.utils.clip_grad_norm_(model.parameters(), clip_grad)
                 
-                # Correction: Step scheduler normally, but handle the UserWarning better if necessary
-                # Iteration 24.1: Calibration check
+                # Check for NaNs/Infs: scaler.step only steps if gradients are valid
+                old_scale = scaler.get_scale()
                 scaler.step(optimizer)
+                scaler.update() # Update scale after step
                 
-                # Check for SWA or normal scheduler
-                if not use_swa or epoch < swa_start:
-                    scheduler.step()
+                # Only update scheduler if the optimizer actually stepped
+                # (GradScaler reduces the scale if it skips a step due to NaN/Inf)
+                if scaler.get_scale() >= old_scale:
+                    if not use_swa or epoch < swa_start:
+                        scheduler.step()
 
-                scaler.update()
                 optimizer.zero_grad()
                 
                 # Clear cache after optimization step to prevent creep
