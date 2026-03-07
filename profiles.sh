@@ -7,7 +7,7 @@ function set_profile_AUDITOR() {
     export POS_WEIGHT=7.5
     export GAMMA=1.0
     export NUM_EPOCHS=20
-    export SAVER_METRIC="recall"
+    export SAVER_METRIC="f1"
     export FREEZE_BN="False"
     export CLIP_GRAD=0.0
     export PCT_START=0.1
@@ -27,7 +27,7 @@ function set_profile_SEARCHER() {
     # Increased to 3.0 to focus gradients on 'Hard' sparse bacterial targets
     export GAMMA=3.0
     # Maintained 30 epochs and 0.4 warmup for Max-MIL stability
-    export NUM_EPOCHS=1 
+    export NUM_EPOCHS=30 
     export SAVER_METRIC="recall"
     export FREEZE_BN="True"
     export CLIP_GRAD=0.5
