@@ -64,3 +64,15 @@
 ### 📉 Expected Outcome
 - **Recall (+)**: **100%** (Final target reached for the Searcher profile).
 - **Precision (+)**: Maintain >70%.
+
+## Iteration 24.9: Post-Collapse Update (Run 167-171)
+**Context**: The initial 24.9 run achieved 100% Training Accuracy by Epoch 10, but hit a "Delta Collapse" where the model became overly confident (Probs: 0.99 or 0.05). This led to missing hard cases like B22-01_1 and B22-54_1.
+
+### 🛠️ Strategic Fixes (Entropy Recovery)
+1. **Label Smoothing (0.05)**: FocalLoss now uses 0.05 smoothing to prevent probability saturation (previously was 0.0).
+2. **Attention Entropy Penalty (-0.001 * Ent)**: Added to the loss to force the model to look at multiple patches (prevents a single artifact from capturing all gradient).
+3. **Weight Decay Increase (0.05)**: Increased from 0.01 to 0.05 in `SEARCHER` profile to combat the 100% training accuracy "memorization."
+4. **Grad-Check Removal**: Disabling gradient checkpointing during evaluation for consistency.
+
+### 📉 New Target
+Maintain Top-3 Chunk aggregation while forcing the backbone to extract richer feature diversity.

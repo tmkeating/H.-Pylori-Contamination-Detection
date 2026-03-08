@@ -482,8 +482,8 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
     # Strategy C: Profile-based Loss (Iteration 19 Support)
     # Optimized to catch ALL potential infections or focus on balanced precision.
     loss_weights = torch.FloatTensor([neg_weight, pos_weight]).to(device) 
-    # Gamma for Focal Loss to control focus on hard examples.
-    criterion = FocalLoss(gamma=gamma, weight=loss_weights, smoothing=0.0)
+    # Iteration 24.9: Hardcoded label smoothing to 0.05 to prevent probability saturation
+    criterion = FocalLoss(gamma=gamma, weight=loss_weights, smoothing=0.05)
 
     # Optimizer Choice:
     # Iteration 21.2: Dynamic Weight Decay from Profile
@@ -592,8 +592,18 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
             # Use dynamic device type for autocast to avoid warnings on CPU-only runs
             with torch.amp.autocast(device_type=get_autocast_device()):
                 # Use the MIL forward pass
-                outputs, _ = model.forward_bag(bags) # returns (1, 2), (1, N)
+                outputs, attention = model.forward_bag(bags) # returns (1, 2), (1, N)
                 loss = criterion(outputs, labels) 
+                
+                # Iteration 24.9: Entropy penalty for Attention weights
+                # Prevents 'Delta Collapse' (1 patch gets all weight)
+                if attention is not None:
+                    # entropy = -sum(p * log(p))
+                    att_entropy = -torch.sum(attention * torch.log(attention + 1e-8))
+                    # Minimize -entropy == Maximize entropy
+                    # coefficient 0.001 is a safe starting point
+                    loss = loss - 0.001 * att_entropy 
+                
                 loss = loss / accumulation_steps
             
             _, preds = torch.max(outputs, 1)
