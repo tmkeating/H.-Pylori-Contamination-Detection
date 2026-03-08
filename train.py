@@ -34,7 +34,7 @@ class FocalLoss(nn.Module):
     the sparse, hard-to-detect bacterial signals.
     Includes Label Smoothing (Optimization 7) to prevent overconfidence.
     """
-    def __init__(self, alpha=1, gamma=2, weight=None, smoothing=0.05):
+    def __init__(self, alpha=1, gamma=2, weight=None, smoothing=0.00):
         super(FocalLoss, self).__init__()
         self.alpha = alpha
         self.gamma = gamma
@@ -511,15 +511,13 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
         print(f"Skipping torch.compile for {model_name} to conserve VRAM...")
         # model = torch.compile(model, mode="reduce-overhead")
     
-    # --- Step 6.2: OneCycle Learning Rate Scheduler ---
-    steps_per_epoch = len(train_loader) // accumulation_steps
-    scheduler = optim.lr_scheduler.OneCycleLR(
+    # --- Step 6.2: Dynamic LR Scheduler ---
+    # Iteration 24.9: Shift to ReduceLROnPlateau for generalization (Stability Check)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, 
-        max_lr=1e-4, 
-        epochs=num_epochs, 
-        steps_per_epoch=steps_per_epoch,
-        pct_start=pct_start, # Dynamic Warmup (Iteration 21.2)
-        anneal_strategy='cos'
+        mode='min', 
+        factor=0.5, 
+        patience=3
     )
     
     # --- Step 6.5: Hardware Optimization (Optional) ---
@@ -615,9 +613,10 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
                 
                 # Only update scheduler if the optimizer actually stepped
                 # (GradScaler reduces the scale if it skips a step due to NaN/Inf)
-                if scaler.get_scale() >= old_scale:
-                    if not use_swa or epoch < swa_start:
-                        scheduler.step()
+                # Iteration 24.9: ReduceLROnPlateau stepped after validation phase
+                # if scaler.get_scale() >= old_scale:
+                #     if not use_swa or epoch < swa_start:
+                #         scheduler.step()
 
                 optimizer.zero_grad()
                 
@@ -681,6 +680,10 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
         val_f1 = f1_score(all_val_labels, all_val_preds, zero_division=0)
         
         print(f"Val Loss: {val_epoch_loss:.4f} Acc: {val_epoch_acc:.4f} Recall: {val_recall:.4f} F1: {val_f1:.4f}")
+
+        # --- Iteration 24.9: Dynamic LR Adjustment ---
+        if not use_swa or epoch < swa_start:
+            scheduler.step(val_epoch_loss)
 
         # Store history
         history['train_loss'].append(epoch_loss)
@@ -839,7 +842,8 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
         pin_memory=True
     )
     
-    # 8-way TTA transforms (Flips and Rotations)
+    # 16-way Deterministic TTA (Flips + Rotations + Optional Contrast Boost)
+    # Adding a contrast boost pass to help "pop" sparse IHC signals
     tta_transforms = [
         lambda x: x, # Original
         v2.RandomHorizontalFlip(p=1.0),
@@ -848,7 +852,16 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
         lambda x: torch.rot90(x, 2, [2, 3]),
         lambda x: torch.rot90(x, 3, [2, 3]),
         lambda x: v2.RandomHorizontalFlip(p=1.0)(torch.rot90(x, 1, [2, 3])),
-        lambda x: v2.RandomVerticalFlip(p=1.0)(torch.rot90(x, 1, [2, 3]))
+        lambda x: v2.RandomVerticalFlip(p=1.0)(torch.rot90(x, 1, [2, 3])),
+        # 8 more with 1.1x Contrast stability boost
+        lambda x: v2.ColorJitter(contrast=(1.1, 1.1))(x),
+        lambda x: v2.ColorJitter(contrast=(1.1, 1.1))(v2.RandomHorizontalFlip(p=1.0)(x)),
+        lambda x: v2.ColorJitter(contrast=(1.1, 1.1))(v2.RandomVerticalFlip(p=1.0)(x)),
+        lambda x: v2.ColorJitter(contrast=(1.1, 1.1))(torch.rot90(x, 1, [2, 3])),
+        lambda x: v2.ColorJitter(contrast=(1.1, 1.1))(torch.rot90(x, 2, [2, 3])),
+        lambda x: v2.ColorJitter(contrast=(1.1, 1.1))(torch.rot90(x, 3, [2, 3])),
+        lambda x: v2.ColorJitter(contrast=(1.1, 1.1))(v2.RandomHorizontalFlip(p=1.0)(torch.rot90(x, 1, [2, 3]))),
+        lambda x: v2.ColorJitter(contrast=(1.1, 1.1))(v2.RandomVerticalFlip(p=1.0)(torch.rot90(x, 1, [2, 3])))
     ]
 
 
@@ -861,8 +874,10 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
     all_patch_counts = np.zeros(num_holdout, dtype=np.int32)
     
     patient_ids_list = []
-    # Use a smaller chunk size of 250 for ConvNeXt evaluate loop to prevent A40 OOM
+    # Use a chunk size of 500 for ConvNeXt evaluate loop to prevent A40 OOM
     vram_bag_limit = 500
+    # Iteration 24.9: Sliding Window Overlap (50%) to prevent signal split
+    eval_stride = 250 
 
     with torch.no_grad():
         for i, (bags, labels, patient_ids) in enumerate(tqdm(holdout_loader, desc=f"Patient-Independent TTA Test (Fold {fold_idx + 1}/{num_folds})")):
@@ -874,9 +889,20 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
             bag_size = bags.squeeze(0).size(0)
             bag_probs_list = []
             
-            for start_idx in range(0, bag_size, vram_bag_limit):
+            # Use sliding window if bag is large enough, otherwise take the whole bag
+            if bag_size <= vram_bag_limit:
+                chunk_ranges = [(0, bag_size)]
+            else:
+                chunk_ranges = []
+                for s in range(0, bag_size - vram_bag_limit + 1, eval_stride):
+                    chunk_ranges.append((s, s + vram_bag_limit))
+                # Add final chunk to ensure coverage
+                if chunk_ranges[-1][1] < bag_size:
+                    chunk_ranges.append((bag_size - vram_bag_limit, bag_size))
+
+            for start_idx, end_idx in chunk_ranges:
                 # Transfer only one chunk (500 patches) to GPU at a time
-                chunk_bags = bags.squeeze(0)[start_idx : start_idx + vram_bag_limit].to(device, non_blocking=True)
+                chunk_bags = bags.squeeze(0)[start_idx : end_idx].to(device, non_blocking=True)
                 
                 # Aggregate TTA logits for this chunk
                 chunk_logits_sum = None
@@ -909,17 +935,21 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
             # Shape (Num_Chunks, 1, 2) -> (Num_Chunks, 2)
             all_chunks_probs = torch.stack(bag_probs_list).squeeze(1).to(device)
             
-            # --- AGGREGATION: Iteration 24 Max-MIL Strategy (Detection-Focused) ---
-            # Instead of a global mean (which dilutes sparse signals in huge bags),
-            # we base the final prediction on the MAXIMUM PROBABILITY found in any 500-patch chunk.
-            # This follows the "One Chunk = One Slide" detection philosophy for 100% Recall.
+            # --- AGGREGATION: Iteration 24.9 Top-3 Mixed MIL Strategy ---
+            # Instead of a global mean or a single max, we use the mean of the top 3 chunks.
+            # This balances signal capture with noise resilience.
             
-            # Final Patient Probability = Maximum confidence found in any chunk
-            final_pos_prob_tensor = all_chunks_probs[:, 1].max(0)[0]
+            # Final Patient Probability = Mean of the Top 3 most confident chunks
+            if all_chunks_probs.size(0) >= 3:
+                top_k_probs, _ = torch.topk(all_chunks_probs[:, 1], k=3)
+                final_pos_prob_tensor = top_k_probs.mean()
+            else:
+                # Fallback to max if we have fewer than 3 chunks
+                final_pos_prob_tensor = all_chunks_probs[:, 1].max(0)[0]
+
             max_chunk_prob = final_pos_prob_tensor.cpu().item()
             
-            # Thresholding: 0.10 is our "Surgical Sensitivity Boundary" to capture absolute 100% Recall
-            # (Iter 24.8: Targeted Discovery)
+            # Thresholding: 0.07 is our "Surgical Sensitivity Boundary"
             SEARCHER_THRESHOLD = 0.07
             if max_chunk_prob > SEARCHER_THRESHOLD:
                 preds = torch.tensor([1], device=device)

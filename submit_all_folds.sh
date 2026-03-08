@@ -66,9 +66,12 @@ sbatch --dependency=afterok:$DEPENDENCIES <<EOF
 # Activate virtual environment
 source ../venv/bin/activate
 
-echo "All folds finished. Iteration 24.8: Max-MIL Sensitivity Summary..."
+echo "All folds finished. Iteration 24.9: Robust Generalization Summary..."
 # Fix: Summary script expects results dir and --last 5 for the latest fold set
 python summarize_results.py --dir results --last 5
+
+echo "Generating Ensemble Voting Summary (OR-Logic)..."
+python ensemble_voting.py
 
 echo "Clinical analysis and visualization generated."
 EOF

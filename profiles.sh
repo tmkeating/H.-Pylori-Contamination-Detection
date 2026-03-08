@@ -18,23 +18,23 @@ function set_profile_AUDITOR() {
     export POOL_TYPE="attention"
 }
 
-# Profile: SEARCHER (Iteration 24: Sensitivity Squeeze - Target 100% Recall)
-# Using Max-MIL + High PosWeight to anchor sparse signals
+# Profile: SEARCHER (Iteration 24.9: Robust Generalization - Target 100% Recall)
+# Using Max-MIL + Stabilized Weighted Training + ReduceLROnPlateau
 function set_profile_SEARCHER() {
     export NEG_WEIGHT=1.0
-    # Increased to 10.0 to force the optimizer to ignore no "Ghost" patients
-    export POS_WEIGHT=10.0 
-    # Increased to 3.0 to focus gradients on 'Hard' sparse bacterial targets
+    # Iteration 24.9: Balanced the PosWeight to 5.0 to prevent gradient saturation
+    export POS_WEIGHT=5.0 
+    # Maintained 3.0 to focus gradients on 'Hard' sparse bacterial targets
     export GAMMA=3.0
-    # Maintained 30 epochs and 0.4 warmup for Max-MIL stability
-    export NUM_EPOCHS=30
+    # Reduced epochs with early stopping potential
+    export NUM_EPOCHS=20
     export SAVER_METRIC="recall"
     export FREEZE_BN="True"
-    export CLIP_GRAD=0.5
-    export PCT_START=0.4
-    export WEIGHT_DECAY=0.05
+    export CLIP_GRAD=1.0
+    export PCT_START=0.1
+    export WEIGHT_DECAY=0.01
     export USE_SWA="True"
-    export SWA_START=22
+    export SWA_START=12
     export JITTER=0.25
     export POOL_TYPE="max"
 }
