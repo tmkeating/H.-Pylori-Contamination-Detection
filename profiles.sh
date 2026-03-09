@@ -30,15 +30,15 @@ function set_profile_SEARCHER() {
     export WEIGHT_DECAY=0.05
     # Reduced epochs with early stopping potential
     export NUM_EPOCHS=20
-    export SAVER_METRIC="recall"
+    export SAVER_METRIC="f1"
     export FREEZE_BN="True"
     export CLIP_GRAD=1.0
     export PCT_START=0.1
-    export WEIGHT_DECAY=0.01
+    export WEIGHT_DECAY=0.05
     export USE_SWA="True"
     export SWA_START=12
     export JITTER=0.25
-    export POOL_TYPE="max"
+    export POOL_TYPE="attention"
 }
 
 # Profile: EXTREME (Diagnostic Safety Mode)

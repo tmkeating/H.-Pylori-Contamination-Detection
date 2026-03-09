@@ -1,10 +1,11 @@
 #!/bin/bash
 
 # Simple script to submit all 5 folds for H. Pylori cross-validation
-# Usage: PROFILE=SEARCHER MODEL_NAME=convnext_tiny ./submit_all_folds.sh
+# Usage: PROFILE=SEARCHER MODEL_NAME=convnext_tiny ITER=25.0 ./submit_all_folds.sh
 
 MODEL_NAME=${MODEL_NAME:-"convnext_tiny"}
 PROFILE=${PROFILE:-"AUDITOR"}
+ITER=${ITER:-"25.0"}
 
 # 1. Source the Model Profiles (Central Source of Truth)
 if [ -f "profiles.sh" ]; then
@@ -33,10 +34,10 @@ echo "Parameters: NegWeight=$NEG_WEIGHT, PosWeight=$POS_WEIGHT, Gamma=$GAMMA, Ep
 for FOLD in {0..4}
 do
     echo "-------------------------------------------"
-    echo "Submitting SLURM job for Fold $FOLD using $MODEL_NAME ($PROFILE Profile)..."
+    echo "Submitting SLURM job for Fold $FOLD using $MODEL_NAME ($PROFILE Profile, Iter $ITER)..."
     # Capture the job ID
     # Iteration 21.3: Expanded export list to include Stability parameters
-    JOB_OUT=$(sbatch -p dcca40 --export=ALL,FOLD=$FOLD,MODEL_NAME=$MODEL_NAME,NEG_WEIGHT=$NEG_WEIGHT,POS_WEIGHT=$POS_WEIGHT,GAMMA=$GAMMA,NUM_EPOCHS=$NUM_EPOCHS,FREEZE_BN=$FREEZE_BN,CLIP_GRAD=$CLIP_GRAD,PCT_START=$PCT_START,SAVER_METRIC=$SAVER_METRIC,WEIGHT_DECAY=$WEIGHT_DECAY,USE_SWA=$USE_SWA,SWA_START=$SWA_START,JITTER=$JITTER run_h_pylori.sh)
+    JOB_OUT=$(sbatch -p dcca40 --export=ALL,FOLD=$FOLD,MODEL_NAME=$MODEL_NAME,NEG_WEIGHT=$NEG_WEIGHT,POS_WEIGHT=$POS_WEIGHT,GAMMA=$GAMMA,NUM_EPOCHS=$NUM_EPOCHS,FREEZE_BN=$FREEZE_BN,CLIP_GRAD=$CLIP_GRAD,PCT_START=$PCT_START,SAVER_METRIC=$SAVER_METRIC,WEIGHT_DECAY=$WEIGHT_DECAY,USE_SWA=$USE_SWA,SWA_START=$SWA_START,JITTER=$JITTER,ITER=$ITER run_h_pylori.sh)
     echo "$JOB_OUT"
     JOB_ID=$(echo $JOB_OUT | awk '{print $4}')
     

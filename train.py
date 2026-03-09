@@ -216,7 +216,7 @@ def update_swa_bn(loader, swa_model, device):
             bags = bags.unsqueeze(0)
             wrapper(bags)
 
-def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=7.5, neg_weight=1.0, gamma=1.0, num_epochs=15, saver_metric="recall", freeze_bn=False, clip_grad=0.0, pct_start=0.1, weight_decay=0.01, use_swa=True, swa_start=15, jitter=0.15, pool_type="attention"):
+def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=7.5, neg_weight=1.0, gamma=1.0, num_epochs=15, saver_metric="recall", freeze_bn=False, clip_grad=0.0, pct_start=0.1, weight_decay=0.01, use_swa=True, swa_start=15, jitter=0.15, pool_type="attention", iter_name="24.9"):
     """
     Train a deep learning model for H. pylori contamination detection using k-fold cross-validation.
     This function implements a complete machine learning pipeline including:
@@ -266,8 +266,10 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
     # Get the numeric run ID and the SLURM job ID (if it exists)
     slurm_id = os.environ.get("SLURM_JOB_ID", "local")
     run_id = f"{get_next_run_number(results_dir, slurm_id):02d}"
-    prefix = f"{run_id}_{slurm_id}_f{fold_idx}_{model_name}" 
-    print(f"--- Starting Run ID: {run_id} (Fold: {fold_idx + 1}/{num_folds}, Model: {model_name}, SLURM Job: {slurm_id}) ---")
+    
+    # Iteration 25.0: Added iteration name to prefix for better output organization
+    prefix = f"{run_id}_{iter_name}_{slurm_id}_f{fold_idx}_{model_name}" 
+    print(f"--- Starting Run ID: {run_id} (Fold: {fold_idx + 1}/{num_folds}, Model: {model_name}, SLURM Job: {slurm_id}, Iter: {iter_name}) ---")
 
     # Define versioned file paths
     best_model_path = os.path.join(results_dir, f"{prefix}_model_brain.pth")
@@ -482,8 +484,8 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
     # Strategy C: Profile-based Loss (Iteration 19 Support)
     # Optimized to catch ALL potential infections or focus on balanced precision.
     loss_weights = torch.FloatTensor([neg_weight, pos_weight]).to(device) 
-    # Iteration 24.9: Hardcoded label smoothing to 0.05 to prevent probability saturation
-    criterion = FocalLoss(gamma=gamma, weight=loss_weights, smoothing=0.05)
+    # Iteration 25.0: Disabled label smoothing (0.0) as per user request.
+    criterion = FocalLoss(gamma=gamma, weight=loss_weights, smoothing=0.0)
 
     # Optimizer Choice:
     # Iteration 21.2: Dynamic Weight Decay from Profile
@@ -959,8 +961,8 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
 
             max_chunk_prob = final_pos_prob_tensor.cpu().item()
             
-            # Thresholding: 0.07 is our "Surgical Sensitivity Boundary"
-            SEARCHER_THRESHOLD = 0.07
+            # Thresholding: 0.40 is our "Surgical Sensitivity Boundary" for Iteration 25.0
+            SEARCHER_THRESHOLD = 0.40
             if max_chunk_prob > SEARCHER_THRESHOLD:
                 preds = torch.tensor([1], device=device)
             else:
@@ -1226,6 +1228,7 @@ if __name__ == "__main__":
     parser.add_argument("--jitter", type=float, default=0.15, help="ColorJitter intensity (brightness/contrast)")
     parser.add_argument("--pool_type", type=str, default="attention", choices=["attention", "max"], 
                         help="MIL aggregation pooling type (Iteration 22)")
+    parser.add_argument("--iter", type=str, default="24.9", help="Iteration version for filename prefixing")
     
     args = parser.parse_args()
     
@@ -1245,5 +1248,6 @@ if __name__ == "__main__":
         use_swa=args.use_swa == "True",
         swa_start=args.swa_start,
         jitter=args.jitter,
-        pool_type=args.pool_type
+        pool_type=args.pool_type,
+        iter_name=args.iter
     )

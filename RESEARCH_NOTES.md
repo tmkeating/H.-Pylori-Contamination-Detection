@@ -76,3 +76,15 @@
 
 ### 📉 New Target
 Maintain Top-3 Chunk aggregation while forcing the backbone to extract richer feature diversity.
+
+## Iteration 25.0: Balanced Signal Recovery (Run 297+)
+**Strategy**: Neutralize the False Positive explosion by moving from Max-MIL to Entropy-Regularized Attention-MIL and recalibrating the decision boundary.
+
+### 🛠️ Strategic Fixes
+1. **Disabled Label Smoothing**: Restored to 0.0 as per user preference (prevents conservative bias).
+2. **Threshold Shift (0.07 → 0.40)**: Moved the classification boundary above the observed "Noise Floor" (0.16-0.35) found in Iteration 24.9.
+3. **Metric Switch (Recall → F1)**: Optimization changed to `f1` in `profiles.sh` to prevent chasing Recall at the cost of infinite False Positives.
+4. **Restored Attention Pooling**: Moved from `max` back to `attention` in `SEARCHER` profile to leverage the Entropy Penalty for noise dilution.
+
+### 📊 Expected Outcome
+Reduction in False Positives by 80% while maintaining the "Ghost Patient" detection via TTA and sliding window coverage.
