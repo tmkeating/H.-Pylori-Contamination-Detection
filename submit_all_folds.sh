@@ -44,8 +44,10 @@ do
     # Add to dependency list
     if [ -z "$DEPENDENCIES" ]; then
         DEPENDENCIES="$JOB_ID"
+        MIN_JOB="$JOB_ID"
     else
         DEPENDENCIES="$DEPENDENCIES:$JOB_ID"
+        MAX_JOB="$JOB_ID"
     fi
     
     # Wait 1 second to ensure sequential submission and prevent race conditions
@@ -71,10 +73,10 @@ echo "All folds finished. Iteration 24.9: Robust Generalization Summary..."
 # Fix: Summary script expects results dir and --last 5 for the latest fold set
 python summarize_results.py --dir results --last 5
 
-echo "Generating Ensemble Voting Summary (OR-Logic)..."
-python ensemble_voting.py
+echo \"Generating Ensemble Voting Summary (OR-Logic) for runs ${MIN_JOB}-${MAX_JOB}...\"
+python ensemble_voting.py --runs ${MIN_JOB}-${MAX_JOB}
 
-echo "Clinical analysis and visualization generated."
+echo \"Clinical analysis and visualization generated.\"
 EOF
 
 echo "-------------------------------------------"
