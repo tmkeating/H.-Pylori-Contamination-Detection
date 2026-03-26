@@ -12,19 +12,20 @@
 ### 🛡️ Model Architecture (HPyNet / Attention-MIL)
 - **Backbone**: ConvNeXt-Tiny (Frozen Batch Norm to prevent noise).
 - **Pooling**: Attention-MIL with **Entropy Regularization** (`loss - 0.001 * entropy`) to force focus on multiple patches and prevent "Delta Collapse."
-- **Inference**: 16-way Contrast-Boosted TTA (1.1x contrast) and 50% Overlapping Sliding Window (250-patch stride).
+- **Inference**: High-Resolution Rescue Strategy (Proposed).
+  - **Current**: 16-way Contrast-Boosted TTA (1.1x contrast) and 50% Overlapping Sliding Window (250-patch stride).
+  - **Next Step**: Dense Rescue Stride (128 or 100 pixels) for the "Unreachable Six" patients to bridge the 95% accuracy gap.
 
-### 🧪 Training Configuration (SEARCHER Profile)
-- **Profile**: `set_profile_SEARCHER` (Iteration 25.0)
-- **Optimizer**: AdamW (WD=0.05), **ReduceLROnPlateau** scheduler for stability.
-- **Loss**: FocalLoss (Gamma=3.0, PosWeight=5.0) with **0.0 Label Smoothing** (restored to 0.0 per user preference).
-- **Ensemble Logic**: Majority Vote (3/5 models) at **0.40 threshold** OR Safety Sensitivity Override at **0.20 threshold**.
+### 🧪 Training Configuration (SEARCHER / AUDITOR / ENSEMBLE)
+- **Searcher**: High Recall (100% target), 5.0 PosWeight, 3.0 Gamma.
+- **Auditor**: High Precision (94%+), 7.5 PosWeight, 1.0 Gamma.
+- **Triple Ensemble**: Combinator of Searcher, Auditor, and High-Accuracy ConvNeXt runs.
+- **Meta-Classifier**: Random Forest fusion of 90 engineered features (Peak, Mean, Density, Gap). Current Accuracy: 92.24%.
 
 ### 📊 Performance History
-- **Iteration 21 (Auditor)**: 41% Mean Recall, 100% Precision (+).
-- **Iteration 24.8**: Hit a wall at 97.2% Recall; identified "Ghost Patient" B22-81_1.
-- **Iteration 24.9**: "Delta Collapse" phase (100% Train Acc, failed Generalization).
-- **Iteration 25.1**: **100% RECALL (+)**, 53.8% Precision (+). All 116 hold-out patients detected.
+- **Iteration 25.1**: **100% RECALL (+)** at 53.8% Precision.
+- **Ensemble 1.0**: 94.2% Precision at 86% Recall.
+- **Meta-Classifier 1.0**: 91.4% Accuracy, struggling with the "Unreachable Six" (B22-206, B22-262, B22-69, B22-81, B22-85, B22-01).
 
 ### 📂 Key Files
 - [dataset.py](dataset.py): Multi-phase sampling (Guaranteed Positive Patches).

@@ -1,5 +1,14 @@
-# Model Profiles for H. Pylori Detection
-# This is the CENTRAL SOURCE of TRUTH for all experiment hyperparameters.
+# H. Pylori Experiment Hyperparameter Profiles
+# ---------------------------------------------
+# This is the CENTRAL SOURCE of TRUTH for all experiment configurations.
+# Definitions here are sourced by submit_all_folds.sh and run_h_pylori.sh 
+# to ensure consistency across the 5-fold cross-validation pipeline.
+#
+# Profiles:
+#   AUDITOR:  Precision focus (High PosWeight, Low Gamma, High WD).
+#   SEARCHER: Recall focus (Target 100% Recall, Balanced PosWeight, High Gamma).
+#   EXTREME:  Diagnostic safety mode (Max-MIL pooling, massive PosWeight).
+# ---------------------------------------------
 
 # Profile: AUDITOR (Clinical Grade - 100% Precision)
 function set_profile_AUDITOR() {

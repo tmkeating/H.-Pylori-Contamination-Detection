@@ -1,0 +1,116 @@
+Synchronizing dataset to local scratch: /tmp/ricse03_h_pylori_data
+Data synchronization complete.
+Starting Training for Fold: 1 of 5 using convnext_tiny (NegWeight=1.0, PosWeight=5.0, Gamma=3.0, Epochs=20, Saver=f1, FreezeBN=True, ClipGrad=1.0, PctStart=0.1, WD=0.05, SWA=True, SWAStart=12, Jitter=0.25, Pool=attention, Iter=25.1)
+--- Starting Run ID: 303 (Fold: 2/5, Model: convnext_tiny, SLURM Job: 106070, Iter: 25.1) ---
+Using device: cuda
+Set float32 matmul precision to 'high' for A40 hardware optimization.
+Using Data Path: /tmp/ricse03_h_pylori_data
+Pre-processing: Using Standard ImageNet Normalization (IHC-mode).
+--- Fold 2/5 Split (MIL Bag Mode) ---
+Total Patients (Bags): 224
+Training Patients: 180
+Validation Patients: 44
+Independent Patient-level split:
+ - Train: 180 bags
+ - Val:   44 bags
+Training distribution (Bags): Negative=86, Contaminated=94
+Pos Weight 5.0 > 1.0: Disabling Sampler, using Shuffle=True.
+Using AdamW Optimizer for convnext_tiny (LR=2e-5, WD=0.05)...
+Skipping torch.compile for convnext_tiny to conserve VRAM...
+Running on standard PyTorch (IPEX disabled).
+Epoch 1/20 (Fold 2/5)
+Train Loss: 0.9811 Acc: 0.5333
+Val Loss: 0.5656 Acc: 0.5227 Recall: 1.0000 F1: 0.6866
+New Best F1! 0.6866
+Saving model to results/303_25.1_106070_f1_convnext_tiny_model_brain.pth
+Epoch 2/20 (Fold 2/5)
+Train Loss: 0.5524 Acc: 0.5222
+Val Loss: 0.4942 Acc: 0.5227 Recall: 1.0000 F1: 0.6866
+Epoch 3/20 (Fold 2/5)
+Train Loss: 0.5040 Acc: 0.5222
+Val Loss: 0.4445 Acc: 0.5227 Recall: 1.0000 F1: 0.6866
+Epoch 4/20 (Fold 2/5)
+Train Loss: 0.3909 Acc: 0.5222
+Val Loss: 0.3366 Acc: 0.5227 Recall: 1.0000 F1: 0.6866
+Epoch 5/20 (Fold 2/5)
+Train Loss: 0.3514 Acc: 0.5556
+Val Loss: 0.3091 Acc: 0.5227 Recall: 1.0000 F1: 0.6866
+Epoch 6/20 (Fold 2/5)
+Train Loss: 0.2762 Acc: 0.5778
+Val Loss: 0.2001 Acc: 0.6364 Recall: 1.0000 F1: 0.7419
+New Best F1! 0.7419
+Saving model to results/303_25.1_106070_f1_convnext_tiny_model_brain.pth
+Epoch 7/20 (Fold 2/5)
+Train Loss: 0.2037 Acc: 0.7111
+Val Loss: 0.1820 Acc: 0.6364 Recall: 1.0000 F1: 0.7419
+Epoch 8/20 (Fold 2/5)
+Train Loss: 0.1442 Acc: 0.8222
+Val Loss: 0.1592 Acc: 0.7727 Recall: 1.0000 F1: 0.8214
+New Best F1! 0.8214
+Saving model to results/303_25.1_106070_f1_convnext_tiny_model_brain.pth
+Epoch 9/20 (Fold 2/5)
+Train Loss: 0.0970 Acc: 0.8611
+Val Loss: 0.1692 Acc: 0.9091 Recall: 0.9565 F1: 0.9167
+New Best F1! 0.9167
+Saving model to results/303_25.1_106070_f1_convnext_tiny_model_brain.pth
+Epoch 10/20 (Fold 2/5)
+Train Loss: 0.1073 Acc: 0.9667
+Val Loss: 0.1705 Acc: 0.8864 Recall: 0.9565 F1: 0.8980
+Epoch 11/20 (Fold 2/5)
+Train Loss: 0.0481 Acc: 0.9444
+Val Loss: 0.3710 Acc: 0.9318 Recall: 0.9130 F1: 0.9333
+New Best F1! 0.9333
+Saving model to results/303_25.1_106070_f1_convnext_tiny_model_brain.pth
+Epoch 12/20 (Fold 2/5)
+Train Loss: 0.1200 Acc: 0.9778
+Val Loss: 0.2298 Acc: 0.9091 Recall: 0.9565 F1: 0.9167
+Epoch 13/20 (Fold 2/5)
+Train Loss: 0.0428 Acc: 0.9889
+Val Loss: 0.2578 Acc: 0.9545 Recall: 0.9565 F1: 0.9565
+New Best F1! 0.9565
+Saving model to results/303_25.1_106070_f1_convnext_tiny_model_brain.pth
+Epoch 14/20 (Fold 2/5)
+Train Loss: 0.0521 Acc: 0.9944
+Val Loss: 0.2612 Acc: 0.9318 Recall: 0.9565 F1: 0.9362
+Epoch 15/20 (Fold 2/5)
+Train Loss: 0.0335 Acc: 0.9722
+Val Loss: 0.3237 Acc: 0.9318 Recall: 0.9130 F1: 0.9333
+Epoch 16/20 (Fold 2/5)
+Train Loss: 0.0370 Acc: 0.9889
+Val Loss: 0.3218 Acc: 0.9318 Recall: 0.9130 F1: 0.9333
+Epoch 17/20 (Fold 2/5)
+Train Loss: 0.0296 Acc: 0.9889
+Val Loss: 0.3160 Acc: 0.9545 Recall: 0.9130 F1: 0.9333
+Epoch 18/20 (Fold 2/5)
+Train Loss: 0.0208 Acc: 0.9889
+Val Loss: 0.3343 Acc: 0.9318 Recall: 0.9130 F1: 0.9333
+Epoch 19/20 (Fold 2/5)
+Train Loss: 0.0277 Acc: 0.9889
+Val Loss: 0.3483 Acc: 0.9318 Recall: 0.9130 F1: 0.9333
+Epoch 20/20 (Fold 2/5)
+Train Loss: 0.0093 Acc: 0.9944
+Val Loss: 0.3486 Acc: 0.9545 Recall: 0.9130 F1: 0.9333
+Training complete. Best Val F1: 0.9565
+Final SWA Clinical Model saved to results/303_25.1_106070_f1_convnext_tiny_swa_model_brain.pth
+Saved learning curves to results/303_25.1_106070_f1_convnext_tiny_learning_curves.png
+
+Evaluating on Independent Hold-Out set from: /tmp/ricse03_h_pylori_data/HoldOut with 8-way TTA and Multi-Pass Bag Coverage
+
+Patient-Level Classification Report (MIL):
+              precision    recall  f1-score   support
+
+    Negative       0.89      0.98      0.93        57
+    Positive       0.98      0.88      0.93        57
+
+    accuracy                           0.93       114
+   macro avg       0.93      0.93      0.93       114
+weighted avg       0.93      0.93      0.93       114
+
+Evaluation report saved to results/303_25.1_106070_f1_convnext_tiny_evaluation_report.csv
+
+Final Patient-Level Accuracy (MIL): 92.98%
+
+Generating final metrics and interpretability maps...
+Generating Grad-CAM for most suspicious patient bags in results/303_25.1_106070_f1_convnext_tiny_gradcam_samples...
+Generating Grad-CAM for 5 False Negative (Ghost) bags...
+Iteration reporting and metrics complete.

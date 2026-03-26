@@ -1,0 +1,9 @@
+Metric,Value
+Recall,0.9122807017543859
+Precision,0.9122807017543859
+Accuracy,0.9122807017543859
+TP,52.0
+FP,5.0
+FN,5.0
+TN,52.0
+Ultimate_Ghost_Count,5.0

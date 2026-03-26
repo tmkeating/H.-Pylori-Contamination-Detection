@@ -1,4 +1,17 @@
 #!/bin/bash
+# H. Pylori Visual Reconstruction & Grad-CAM Utility
+# ------------------------------------------------
+# Generates spatial heatmaps (Grad-CAM) to verify that the model is detecting 
+# actual bacterial morphology and not tissue artifacts.
+#
+# What it does:
+#   1. Reconstructs the full slide view from chunked patches.
+#   2. Highlights regions of high probability using the Grad-CAM algorithm.
+#   3. Saves visual samples to ensure diagnostic accountability.
+#
+# Usage:
+#   sbatch run_visuals.sh
+# ------------------------------------------------
 #SBATCH --job-name=h_pylori_visuals     # Name of the job
 #SBATCH -D .                           # Use CURRENT directory as working directory
 #SBATCH -n 4                           # Number of cores

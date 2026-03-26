@@ -1,3 +1,25 @@
+"""
+# H. Pylori Diagnostic Dataset & Sampling Logic
+# --------------------------------------------
+# This script manages the data-level orchestration for the H. Pylori pipeline, 
+# ensuring balanced training and rigorous hold-out evaluation.
+#
+# What it does:
+#   1. Patient-Level Management: Links whole-slide images (WSIs) with binary 
+#      diagnosis (Negative vs. Confirmed H. Pylori).
+#   2. Multi-Phase Sampling: 
+#      - Training: Implements guaranteed positive patch sampling per bag.
+#      - Inference: Supports sliding window (stride-based) bag extraction.
+#   3. Data Integrity & Safety:
+#      - Blacklists confirmed duplicate bags (e.g., B22-03_1, B22-141_0).
+#      - Excludes redundant low-quality patches identified during clinical audits.
+#   4. Dynamic Path Resolution: Checks for local NVMe scratch storage (/tmp) 
+#      before falling back to network storage (/import/fhome).
+#
+# Usage:
+#   dataset = HPyloriDataset(root_dir, patient_csv, patch_csv, bag_mode=True)
+# --------------------------------------------
+"""
 import os                       # Library to interact with the operating system (files and folders)
 import torch                    # Added for MIL stacking
 import numpy as np               # Library for numerical operations
@@ -29,8 +51,25 @@ class HPyloriDataset(Dataset):
 
     def __init__(self, root_dir, patient_csv, patch_csv, transform=None, bag_mode=False, max_bag_size=500, train=False):
         """
-        Initialization: This runs once when you create the dataset.
-        It links the data files with the image folders.
+        Constructor for the H. Pylori Dataset.
+
+        TECHNICAL DECISION: Local vs. Network Storage
+        -------------------------------------------
+        The loader implements a path-fallback strategy:
+        1. Local Storage (/tmp/): Checked first. High-speed NVMe scratch 
+           space is critical for 105773+ image batches to prevent 
+           IO-wait bottlenecks during training.
+        2. Network Storage (/import/fhome/): Fallback for permanence. 
+           Significantly slower (NFS overhead) but ensures data 
+           availability across SLURM cluster nodes.
+
+        CLINICAL SAFETY: Conflict & Redundancy Filtering (Iteration 24)
+        -------------------------------------------------------------
+        Includes a hard-coded blacklist of "Conflict Patients" (e.g., B22-03_1) 
+        and specific redundant patches. These were identified during 
+        clinical audit as having contradictory labels or low-quality 
+        captures that create "gradient noise," hindering model convergence 
+        on high-confidence samples.
         """
         self.root_dir = root_dir   # The folder where images are stored
         self.transform = transform # Any changes we want to make to images (resizing, etc.)

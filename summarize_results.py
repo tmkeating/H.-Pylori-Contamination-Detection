@@ -1,3 +1,23 @@
+"""
+# H. Pylori Result Summarization Utility
+# --------------------------------------
+# Aggregates individual evaluation reports from 5-fold cross-validation runs
+# to generate a grand summary of the model's performance.
+#
+# What it does:
+#   1. Looks for '*_evaluation_report.csv' files in a specified directory.
+#   2. Parses key metrics (Accuracy, Precision(+), Recall(+), F1-Macro).
+#   3. Calculates mean and standard deviation across folds to ensure stability.
+#   4. Saves the final aggregation to 'grand_cv_summary.csv'.
+#
+# Usage:
+#   python3 summarize_results.py --dir results --last 5
+#
+# Arguments:
+#   --dir:  Directory containing the *_evaluation_report.csv files (Default: results).
+#   --last: Only summarize the last N reports found (useful for 5-fold ensembles).
+# --------------------------------------
+"""
 import pandas as pd
 import glob
 import os

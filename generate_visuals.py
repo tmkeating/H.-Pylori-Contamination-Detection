@@ -1,4 +1,24 @@
-
+"""
+# H. Pylori Visual Profiling & Metric Suite
+# ----------------------------------------
+# This script performs high-quality evaluation of the H. Pylori diagnostic models, 
+# generating both quantitative metrics and qualitative Grad-CAM spatial heatmaps.
+#
+# What it does:
+#   1. Metric Generation: Produces ROC curves, PR curves, and Confusion Matrices 
+#      to evaluate model stability across individual folds.
+#   2. Probability Profiling: Generates probability histograms to detect 
+#      "Noise Floor" (low-confidence noise vs. high-confidence bacteria).
+#   3. Spatial Grad-CAM: Reconstructs high-resolution spatial maps of WSI 
+#      regions that the model flags as H. Pylori, allowing clinical experts 
+#      to verify morphological structures.
+#   4. Patient-Level Consensus: Outputs individual patient probabilities 
+#      for ensemble fusion in meta_classifier.py.
+#
+# Usage:
+#   python3 generate_visuals.py --model path/to/model.pth --output_dir results/fold0
+# ----------------------------------------
+"""
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Subset

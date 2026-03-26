@@ -1,0 +1,28 @@
+All folds finished. Iteration 24.9: Robust Generalization Summary...
+Filtering to the last 5 reports...
+
+============================================================
+                H. Pylori Iteration Summary                 
+                   (Showing Last 5 Runs)                    
+============================================================
+
+[302 106069] Acc: 0.8947 | Prec(+): 0.9091 | Rec(+): 0.8772 | Rec(-): 0.9123
+[303 106070] Acc: 0.9298 | Prec(+): 0.9804 | Rec(+): 0.8772 | Rec(-): 0.9825
+[304 106071] Acc: 0.9035 | Prec(+): 0.9600 | Rec(+): 0.8421 | Rec(-): 0.9649
+[305 106072] Acc: 0.9035 | Prec(+): 0.9107 | Rec(+): 0.8947 | Rec(-): 0.9123
+[306 106073] Acc: 0.9123 | Prec(+): 0.9796 | Rec(+): 0.8421 | Rec(-): 0.9825
+
+------------------------------------------------------------
+               MEAN CROSS-VALIDATION RESULTS                
+------------------------------------------------------------
+Accuracy:     0.9088 ± 0.0133
+Precision(+): 0.9480 ± 0.0357
+Recall(+):    0.8667 ± 0.0235
+Recall(-):    0.9509 ± 0.0360
+F1 Macro:     0.9086 ± 0.0132
+============================================================
+
+Grand summary saved to results/grand_cv_summary_302-306.csv
+Grand averages with ± saved to results/grand_cv_averages_302-306.csv
+/var/spool/slurmd/job106074/slurm_script: línea 16: error sintáctico cerca del elemento inesperado `('
+/var/spool/slurmd/job106074/slurm_script: línea 16: `echo \"Generating Ensemble Voting Summary (OR-Logic) for runs 106069-106073...\"'

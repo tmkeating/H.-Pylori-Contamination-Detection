@@ -1,3 +1,22 @@
+"""
+# H. Pylori Staining Normalization Utility
+# ----------------------------------------
+# This script implements Macenko normalization to standardize histological staining
+# across different whole slide images (WSIs). This reduces the model's sensitivity 
+# to staining intensity variations (H&E depth) between labs or tissue blocks.
+#
+# What it does:
+#   1. Fits a Macenko normalizer to a reference H&E image.
+#   2. Decomposes the stain matrix of input patches.
+#   3. Projects input patches onto the reference stain space.
+#   4. Supports both CPU (PIL/Numpy) and GPU (Torch) backends for high-speed inference.
+#
+# Usage:
+#   normalizer = MacenkoNormalizer()
+#   normalizer.fit(reference_patch)
+#   normalized_patch = normalizer(input_patch)
+# ----------------------------------------
+"""
 import torch
 import torchstain.torch.normalizers as torchstain_normalizers
 import numpy as np

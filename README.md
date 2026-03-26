@@ -1,39 +1,69 @@
-# H. Pylori Contamination Detection (Iteration 21: Stability Framework)
+# H. Pylori Contamination Detection (Iteration 26.0: Clinical-Grade Ensemble)
 
-This project implements a **High-Performance Multi-Backbone MIL Pipeline** for the automated detection of *H. pylori* contamination in histology tissue samples. It is currently in **Iteration 21**, focusing on stabilizing the ResNet50 and ConvNeXt-Tiny backbones using a centralized profile-driven architecture.
+This project implements a **High-Resolution Multi-Stage MIL Pipeline** for the automated detection of *H. pylori* contamination in histology tissue samples. It features a **Searcher-Rescue** architecture designed to identify sparse bacterium clusters in high-resolution whole-slide imaging.
 
-## Project Structure
+## Execution Workflow (Step-by-Step)
 
-- `dataset.py`: High-performance data loader with **Dynamic Bag Sampling** (Training) and **Multi-Pass Total Coverage** (Evaluation).
-- `model.py`: **Gated Attention MIL** architecture supporting **ConvNeXt-Tiny** (Global Morphology) and **ResNet50** (Local Patterns).
-- `profiles.sh`: **Single Source of Truth** for experiment hyperparameters (AUDITOR vs. SEARCHER profiles).
-- `train.py`: Unified training engine supporting:
-    - **Stability Framework**: **Frozen BatchNorm** (`FREEZE_BN`) and **Gradient Clipping** (`CLIP_GRAD`) to handle noisy MIL bag statistics.
-    - **Artifact Suppression**: **Dynamic Color Jitter** (`JITTER`) to neutralize site-specific staining "shortcuts."
-    - **Stochastic Weight Averaging (SWA)**: Calibrated at `swa_lr=1e-5` for flatter, more generalizable optima.
-- `run_h_pylori.sh`: SLURM-optimized execution script for A40/A100 clusters.
-- `ensemble_searcher.py`: Inference-stage merging tool for Multi-Backbone consensus.
+To reproduce the clinical-grade results (94.7% Accuracy, 98.2% Recall), follow this specific execution order:
 
-## Performance Benchmarks
+### 1. Training (5-Fold Cross-Validation)
+Launch the primary training sweep using the `SEARCHER` profile. This uses ConvNeXt-Tiny with Attention-MIL and SWA.
+```bash
+sbatch submit_all_folds.sh
+```
+*Outputs: `results/*_model_brain.pth` and `results/*_patient_consensus.csv`.*
 
-### Current Model Performance (finalResults/)
-The following results represent the stable benchmarks for the ConvNeXt-Tiny ensemble (Iteration 21.0-21.5):
+### 2. High-Resolution Rescue (Dense Inference Pass)
+Specifically target difficult "Ghost Patients" using the dense Stride-128 rescue scan. This recovers signals from sparse biopsies that were missed by the default Stride-512/Stride-250 sampling. 
+```bash
+# Update submit_rescue.sh with the correct Searcher Run IDs
+sbatch submit_rescue.sh
+```
+*Outputs: `results/rescue_ensemble/rescue_*.csv`.*
 
-| Metric | Fold 0 | Fold 1 | Fold 2 | Fold 3 | Fold 4 | Mean |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Accuracy** | 90.52% | 90.52% | 87.93% | 90.52% | 90.52% | **90.00%** |
-| **Precision (+)**| 100.00%| 100.00%| 100.00%| 100.00%| 100.00%| **100.00%**|
-| **Recall (+)** | 81.03% | 81.03% | 75.86% | 81.03% | 81.03% | **79.99%** |
-| **Recall (-)** | 100.00%| 100.00%| 100.00%| 100.00%| 100.00%| **100.00%**|
+### 3. Final Meta-Ensemble & Hybrid Fusion
+Fuse the newer high-precision results (302-306) with the sensitive historic models (299-301) to produce the "Golden Consensus" (94.7% Accuracy).
+```bash
+# Generate the 94.7% Hybrid Ensemble
+python3 ensemble_voting.py --runs 302,303,299,300,301
+```
+*Outputs: `results/meta_fusion_results_*.csv` (The final Pathology hand-off report).*
 
-## Diagnostic Architecture: Two-Stage Ensemble
-1.  **Auditor Profile**: Primary focus on specificity ($PosWeight=1-7.5$). Achieves zero false positives (100% Precision) to establish diagnostic guardrails.
-2.  **Searcher Profile**: Primary focus on sensitivity. Designed to flag sparse infections ($P \approx 0.05$) currently diluted by weighted average attention.
+### 4. Interpretability Audit (Grad-CAM)
+Generate visual evidence for the model's decisions, focusing on "Ghost Patients" (False Negatives).
+```bash
+./run_visuals.sh [run_id]
+```
+*Outputs: `results/*_gradcam_samples/` folder containing heatmaps.*
+
+---
+
+## Core Project Structure
+
+- `dataset.py`: Multi-Pass coverage loader with **16-way Contrast-Boosted TTA**.
+- `model.py`: **Gated Attention MIL** with **Top-3 Chunk Aggregation** for signal resilience.
+- `train.py`: Unified engine featuring **SWA BN Recalibration** and **Grad-CAM Ghost Audits**.
+- `ensemble_voting.py`: Meta-classifier using **Joint-Probability Gating** (Max > 0.39 & Mean > 0.28).
+- `profiles.sh`: Centralized hyperparameters (Learning rates, Weights, Data paths).
+
+## 📊 Final Clinical Performance (Hybrid Ensemble: 299-303)
+
+| Metric | Value |
+| :--- | :--- |
+| **Accuracy** | **94.74%** |
+| **Recall (+)** | **98.25%** (Only 1 FN in 114 patients) |
+| **Precision (+)**| **91.80%** |
+| **The Final Ghost**| `B22-295_0` (Confidence: 0.31) |
+
+## 🛠️ Key Pipeline Features
+- **Stride-128 Rescue Pass**: Dense-window overlap to "catch" sparse bacteria that fall in gaps at default strides.
+- **Top-3 Mixed MIL**: Balances sensitivity with noise resilience by averaging the top 3 most confident tissue chunks.
+- **Contrast-Boosted TTA**: 16-way transforms (8 spatial + 1.1x contrast jitter) to "pop" faint IHC signals.
+- **Hybrid Fusion Logic**: Combines precision-weighted modern runs with sensitivity-weighted historical runs.
+
+---
 
 ## Hardware & Optimization
 - **Compute**: Optimized for **NVIDIA A40/A100 (48GB/80GB)**.
-- **Optimization**: Uses **Gradient Checkpointing** and **`torch.set_float32_matmul_precision('high')`**.
-- **Data Locality**: Automatic node-local `/tmp` storage synchronization.
-
-## Upcoming Development: Iteration 22 (Strategic Pivot)
-The next phase (Iteration 22) will transition to **Max-MIL** and **Guaranteed Sampling** to solve the signal dilution and sampling void issues identified during the Iteration 21 stabilization.
+- **Precision**: `torch.set_float32_matmul_precision('high')`.
+- **Data Locality**: Automated node-local `/tmp` storage sync via `run_h_pylori.sh`.

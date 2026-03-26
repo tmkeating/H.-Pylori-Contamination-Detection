@@ -1,4 +1,24 @@
 #!/bin/bash
+# H. Pylori 5-Fold SLURM Orchestrator
+# ----------------------------------
+# This script manages the full cross-validation pipeline by submitting all 5 folds
+# to the SLURM cluster and scheduling a final summarization job that waits for 
+# them to complete.
+#
+# What it does:
+#   1. Orchestrates training for all 5 folds using a specific Profile (Searcher/Auditor).
+#   2. Sources hyperparameter configurations from profiles.sh.
+#   3. Uses --dependency=afterok to schedule a Summary Job (summarize_results.py) 
+#      and a Voting Job (ensemble_voting.py) ONLY after all folds finish successfully.
+#
+# Usage:
+#   PROFILE=SEARCHER MODEL_NAME=convnext_tiny ITER=25.0 ./submit_all_folds.sh
+#
+# Environment Variables:
+#   PROFILE:    The model profile from profiles.sh (AUDITOR, SEARCHER, etc.)
+#   MODEL_NAME: Backbone architecture (Default: convnext_tiny)
+#   ITER:       Iteration number for experiment tracking.
+# ----------------------------------
 
 # Simple script to submit all 5 folds for H. Pylori cross-validation
 # Usage: PROFILE=SEARCHER MODEL_NAME=convnext_tiny ITER=25.0 ./submit_all_folds.sh

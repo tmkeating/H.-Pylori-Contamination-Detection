@@ -1,4 +1,25 @@
 #!/bin/bash
+# H. Pylori Core Training & Inference Worker
+# -----------------------------------------
+# This script handles the heavy lifting for a single fold: data synchronization, 
+# environment setup, and execution of the train.py script. It is designed to run 
+# as a SLURM batch job but supports manual execution via a 'manual' flag.
+#
+# What it does:
+#   1. Synchronizes the dataset from network storage to local NVMe SSD (/tmp) 
+#      using rsync for high-speed I/O.
+#   2. Activates the Python virtual environment.
+#   3. Executes train.py with specific Profile (SEARCHER/AUDITOR) hyperparameters.
+#   4. Manages specialized logging for SLURM vs. manual runs.
+#
+# Usage:
+#   sbatch run_h_pylori.sh
+#   (Usually invoked by submit_all_folds.sh)
+#
+# Environment Variables (Inherited from submit_all_folds.sh):
+#   FOLD, MODEL_NAME, NEG_WEIGHT, POS_WEIGHT, GAMMA, NUM_EPOCHS, FREEZE_BN, 
+#   CLIP_GRAD, PCT_START, WD, USE_SWA, JITTER, POOL_TYPE, ITER.
+# -----------------------------------------
 #SBATCH --job-name=h_pylori_fast
 #SBATCH -D .
 #SBATCH -n 1                           # One task

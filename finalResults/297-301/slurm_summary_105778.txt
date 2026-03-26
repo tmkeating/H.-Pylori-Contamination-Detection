@@ -1,0 +1,47 @@
+All folds finished. Iteration 24.9: Robust Generalization Summary...
+Filtering to the last 5 reports...
+
+============================================================
+                H. Pylori Iteration Summary                 
+                   (Showing Last 5 Runs)                    
+============================================================
+
+[297 105773] Acc: 0.8947 | Prec(+): 0.9245 | Rec(+): 0.8596 | Rec(-): 0.9298
+[298 105774] Acc: 0.9386 | Prec(+): 0.9808 | Rec(+): 0.8947 | Rec(-): 0.9825
+[299 105775] Acc: 0.9035 | Prec(+): 0.9600 | Rec(+): 0.8421 | Rec(-): 0.9649
+[300 105776] Acc: 0.8947 | Prec(+): 0.9091 | Rec(+): 0.8772 | Rec(-): 0.9123
+[301 105777] Acc: 0.9123 | Prec(+): 0.9796 | Rec(+): 0.8421 | Rec(-): 0.9825
+
+------------------------------------------------------------
+               MEAN CROSS-VALIDATION RESULTS                
+------------------------------------------------------------
+Accuracy:     0.9088 ± 0.0182
+Precision(+): 0.9508 ± 0.0326
+Recall(+):    0.8632 ± 0.0229
+Recall(-):    0.9544 ± 0.0319
+F1 Macro:     0.9086 ± 0.0182
+============================================================
+
+Grand summary saved to results/grand_cv_summary_297-301.csv
+Grand averages with ± saved to results/grand_cv_averages_297-301.csv
+Generating Ensemble Voting Summary (OR-Logic)...
+--- Ensemble Results ---
+Recall:    0.9825
+Precision: 0.5895
+Accuracy:  0.6491
+TP: 56, FP: 39, FN: 1, TN: 18
+FAILURE: Recall is 98.25%
+
+Missed patients (Ultimate Ghost Patients):
+  - B22-81_1 (Max Prob: 0.0695, Mean Prob: 0.0583)
+
+--- Individual Folds ---
+Fold 0 (Job 105343): Recall=0.9825, Prec=0.7273, Acc=0.8070
+Fold 1 (Job 105344): Recall=0.9825, Prec=0.7887, Acc=0.8596
+Fold 2 (Job 105345): Recall=0.9649, Prec=0.7432, Acc=0.8158
+Fold 3 (Job 105346): Recall=0.9825, Prec=0.6437, Acc=0.7193
+Fold 4 (Job 105347): Recall=0.9474, Prec=0.8182, Acc=0.8684
+
+Detailed report saved to [results/ensemble_voting_report_272-276.csv](results/ensemble_voting_report_272-276.csv)
+Concise summary saved to [results/ensemble_voting_summary_272-276.csv](results/ensemble_voting_summary_272-276.csv)
+Clinical analysis and visualization generated.

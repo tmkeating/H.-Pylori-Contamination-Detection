@@ -1,3 +1,24 @@
+"""
+# H. Pylori Detection Model Architecture (HPyNet)
+# -----------------------------------------------
+# Implementation of a Multiple Instance Learning (MIL) framework specifically 
+# designed for sparse bacterial detection in whole-slide histological images.
+#
+# Components:
+#   1. Feature Extractor (Backbone): 
+#      - Supports ConvNeXt-Tiny (Modern kernels for morphology) or ResNet50.
+#      - Frozen Batch Norm to prevent noise floor instability.
+#   2. Gated Attention MIL:
+#      - tanh(Vx): High-dimensional non-linear feature interaction.
+#      - sigmoid(Ux): Noise suppression gate to filter tissue artifacts.
+#      - Temperature Scaling: Optimizes the "sharpness" of the focus.
+#   3. Entropy Regularization:
+#      - Forced focus on multiple patches to prevent 1-patch "Delta Collapse".
+#
+# Usage:
+#   model = get_model(model_name="convnext_tiny", num_classes=2, pool_type="attention")
+# -----------------------------------------------
+"""
 import torch # The core Deep Learning library
 import torch.nn as nn # Tools to build layers for our "brain"
 from torchvision import models # Access to famous, pre-trained AI architectures
@@ -5,9 +26,27 @@ from torchvision import models # Access to famous, pre-trained AI architectures
 class AttentionGate(nn.Module):
     """
     Gated Attention mechanism for Multiple Instance Learning (MIL).
-    - tanh(Vx): Captures non-linear feature interactions.
-    - sigmoid(Ux): Acts as a filter/gate to suppress noise.
-    Iteration 12: Switched to Gated attention for H. Pylori mimic suppression.
+    This layer learns to weigh each patch in a Whole Slide Image (WSI) bag 
+    proportionally to its diagnostic relevance.
+
+    TECHNICAL RATIONALE: tanh(V) * sigmoid(U) Gating
+    -----------------------------------------------
+    Standard attention often struggles with "mimics" (stain precipitate or 
+    cell debris) that visually resemble H. Pylori. 
+    - tanh(Vx): Captures non-linear feature interactions and morphology.
+    - sigmoid(Ux): Acts as a learned noise gate. If a patch contains 
+      stain precipitate, the model learns to output a low sigmoid value 
+      for that patch, effectively "muting" the noise before it reaches 
+      the final classifier.
+
+    CLINICAL SAFETY: Attention Temperature (T=1.0)
+    ----------------------------------------------
+    The temperature parameter controls the entropy of the decision. 
+    - T=1.0: Initial state for balanced search.
+    - During inference, a 'Searcher' profile might use lower T to 
+      peak on the single most suspicious patch (maximizing sensitivity).
+    - An 'Auditor' profile uses higher T to integrate context across 
+      multiple patches, reducing the impact of isolated artifacts.
     """
     def __init__(self, feature_dim=2048, hidden_dim=256):
         super(AttentionGate, self).__init__()

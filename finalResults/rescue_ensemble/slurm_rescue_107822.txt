@@ -1,0 +1,83 @@
+--- 🏥 Starting Full-Ensemble Rescue SLURM (Stride: 128) ---
+Targets: B22-206,B22-262,B22-69,B22-81,B22-85,B22-01
+-------------------------------------------
+Processing 297_25.0_105773_f0...
+--- 🏥 Rescuing Patients with Stride 128 ---
+DEBUG: Dataset length: 114
+DEBUG: First patient in dataset: B22-02_1
+DEBUG: Processing B22-206_0 (Size: 769)
+DEBUG: 4 chunks for B22-206_0
+DEBUG: Processing B22-262_0 (Size: 644)
+DEBUG: 3 chunks for B22-262_0
+DEBUG: Processing B22-69_1 (Size: 385)
+DEBUG: 1 chunks for B22-69_1
+DEBUG: Processing B22-81_1 (Size: 134)
+DEBUG: 1 chunks for B22-81_1
+DEBUG: Processing B22-85_0 (Size: 814)
+DEBUG: 4 chunks for B22-85_0
+--- Rescue Completed. Saved to finalResults/rescue_ensemble/rescue_297_25.0_105773_f0.csv ---
+-------------------------------------------
+Processing 298_25.0_105774_f1...
+--- 🏥 Rescuing Patients with Stride 128 ---
+DEBUG: Dataset length: 114
+DEBUG: First patient in dataset: B22-02_1
+DEBUG: Processing B22-206_0 (Size: 769)
+DEBUG: 4 chunks for B22-206_0
+DEBUG: Processing B22-262_0 (Size: 644)
+DEBUG: 3 chunks for B22-262_0
+DEBUG: Processing B22-69_1 (Size: 385)
+DEBUG: 1 chunks for B22-69_1
+DEBUG: Processing B22-81_1 (Size: 134)
+DEBUG: 1 chunks for B22-81_1
+DEBUG: Processing B22-85_0 (Size: 814)
+DEBUG: 4 chunks for B22-85_0
+--- Rescue Completed. Saved to finalResults/rescue_ensemble/rescue_298_25.0_105774_f1.csv ---
+-------------------------------------------
+Processing 299_25.0_105775_f2...
+--- 🏥 Rescuing Patients with Stride 128 ---
+DEBUG: Dataset length: 114
+DEBUG: First patient in dataset: B22-02_1
+DEBUG: Processing B22-206_0 (Size: 769)
+DEBUG: 4 chunks for B22-206_0
+DEBUG: Processing B22-262_0 (Size: 644)
+DEBUG: 3 chunks for B22-262_0
+DEBUG: Processing B22-69_1 (Size: 385)
+DEBUG: 1 chunks for B22-69_1
+DEBUG: Processing B22-81_1 (Size: 134)
+DEBUG: 1 chunks for B22-81_1
+DEBUG: Processing B22-85_0 (Size: 814)
+DEBUG: 4 chunks for B22-85_0
+--- Rescue Completed. Saved to finalResults/rescue_ensemble/rescue_299_25.0_105775_f2.csv ---
+-------------------------------------------
+Processing 300_25.0_105776_f3...
+--- 🏥 Rescuing Patients with Stride 128 ---
+DEBUG: Dataset length: 114
+DEBUG: First patient in dataset: B22-02_1
+DEBUG: Processing B22-206_0 (Size: 769)
+DEBUG: 4 chunks for B22-206_0
+DEBUG: Processing B22-262_0 (Size: 644)
+DEBUG: 3 chunks for B22-262_0
+DEBUG: Processing B22-69_1 (Size: 385)
+DEBUG: 1 chunks for B22-69_1
+DEBUG: Processing B22-81_1 (Size: 134)
+DEBUG: 1 chunks for B22-81_1
+DEBUG: Processing B22-85_0 (Size: 814)
+DEBUG: 4 chunks for B22-85_0
+--- Rescue Completed. Saved to finalResults/rescue_ensemble/rescue_300_25.0_105776_f3.csv ---
+-------------------------------------------
+Processing 301_25.0_105777_f4...
+--- 🏥 Rescuing Patients with Stride 128 ---
+DEBUG: Dataset length: 114
+DEBUG: First patient in dataset: B22-02_1
+DEBUG: Processing B22-206_0 (Size: 769)
+DEBUG: 4 chunks for B22-206_0
+DEBUG: Processing B22-262_0 (Size: 644)
+DEBUG: 3 chunks for B22-262_0
+DEBUG: Processing B22-69_1 (Size: 385)
+DEBUG: 1 chunks for B22-69_1
+DEBUG: Processing B22-81_1 (Size: 134)
+DEBUG: 1 chunks for B22-81_1
+DEBUG: Processing B22-85_0 (Size: 814)
+DEBUG: 4 chunks for B22-85_0
+--- Rescue Completed. Saved to finalResults/rescue_ensemble/rescue_301_25.0_105777_f4.csv ---
+--- 🏁 Rescue Ensemble SLURM Job Completed ---
