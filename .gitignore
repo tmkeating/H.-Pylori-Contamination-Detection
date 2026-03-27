@@ -29,9 +29,11 @@ venv/
 # Whitelist finalResults for the checkpoint release
 !finalResults/
 !finalResults/**/
+!finalResults/*.csv
 !finalResults/**/*.csv
-!finalResults/**/*.png
 !finalResults/**/*.txt
+!finalResults/**/*.sh
+!finalResults/**/*.png
 finalResults/**/*.pth
 finalResults/**/*.pth.tar
 finalResults/**/*.joblib
