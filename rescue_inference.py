@@ -71,22 +71,22 @@ def rescue_inference(model_path, output_csv, target_patients=None, stride=128):
     
     # 16-way Contrast-Boosted TTA
     tta_transforms = [
-        lambda x: x,
-        v2.RandomHorizontalFlip(p=1.0),
-        v2.RandomVerticalFlip(p=1.0),
-        lambda x: torch.rot90(x, 1, [2, 3]),
-        lambda x: torch.rot90(x, 2, [2, 3]),
-        lambda x: torch.rot90(x, 3, [2, 3]),
-        lambda x: v2.RandomHorizontalFlip(p=1.0)(torch.rot90(x, 1, [2, 3])),
-        lambda x: v2.RandomVerticalFlip(p=1.0)(torch.rot90(x, 1, [2, 3])),
-        lambda x: v2.ColorJitter(contrast=(1.1, 1.1))(x),
-        lambda x: v2.ColorJitter(contrast=(1.1, 1.1))(v2.RandomHorizontalFlip(p=1.0)(x)),
-        lambda x: v2.ColorJitter(contrast=(1.1, 1.1))(v2.RandomVerticalFlip(p=1.0)(x)),
-        lambda x: v2.ColorJitter(contrast=(1.1, 1.1))(torch.rot90(x, 1, [2, 3])),
-        lambda x: v2.ColorJitter(contrast=(1.1, 1.1))(torch.rot90(x, 2, [2, 3])),
-        lambda x: v2.ColorJitter(contrast=(1.1, 1.1))(torch.rot90(x, 3, [2, 3])),
-        lambda x: v2.ColorJitter(contrast=(1.1, 1.1))(v2.RandomHorizontalFlip(p=1.0)(torch.rot90(x, 1, [2, 3]))),
-        lambda x: v2.ColorJitter(contrast=(1.1, 1.1))(v2.RandomVerticalFlip(p=1.0)(torch.rot90(x, 1, [2, 3])))
+        lambda x: x,                                                                        # Original image
+        v2.RandomHorizontalFlip(p=1.0),                                                     # Standard horizontal flip
+        v2.RandomVerticalFlip(p=1.0),                                                       # Standard vertical flip
+        lambda x: torch.rot90(x, 1, [2, 3]),                                                # 90-degree rotation
+        lambda x: torch.rot90(x, 2, [2, 3]),                                                # 180-degree rotation
+        lambda x: torch.rot90(x, 3, [2, 3]),                                                # 270-degree rotation
+        lambda x: v2.RandomHorizontalFlip(p=1.0)(torch.rot90(x, 1, [2, 3])),                # 90-deg rotation + Horizontal flip
+        lambda x: v2.RandomVerticalFlip(p=1.0)(torch.rot90(x, 1, [2, 3])),                  # 90-deg rotation + Vertical flip
+        lambda x: v2.ColorJitter(contrast=(1.1, 1.1))(x),                                   # Fixed 1.1x contrast boost (original orientation)
+        lambda x: v2.ColorJitter(contrast=(1.1, 1.1))(v2.RandomHorizontalFlip(p=1.0)(x)),    # Contrast boost + Horizontal flip
+        lambda x: v2.ColorJitter(contrast=(1.1, 1.1))(v2.RandomVerticalFlip(p=1.0)(x)),      # Contrast boost + Vertical flip
+        lambda x: v2.ColorJitter(contrast=(1.1, 1.1))(torch.rot90(x, 1, [2, 3])),           # Contrast boost + 90-deg rotation
+        lambda x: v2.ColorJitter(contrast=(1.1, 1.1))(torch.rot90(x, 2, [2, 3])),           # Contrast boost + 180-deg rotation
+        lambda x: v2.ColorJitter(contrast=(1.1, 1.1))(torch.rot90(x, 3, [2, 3])),           # Contrast boost + 270-deg rotation
+        lambda x: v2.ColorJitter(contrast=(1.1, 1.1))(v2.RandomHorizontalFlip(p=1.0)(torch.rot90(x, 1, [2, 3]))), # Contrast + 90-deg + H-flip
+        lambda x: v2.ColorJitter(contrast=(1.1, 1.1))(v2.RandomVerticalFlip(p=1.0)(torch.rot90(x, 1, [2, 3])))   # Contrast + 90-deg + V-flip
     ]
 
     # Initialize Dataset

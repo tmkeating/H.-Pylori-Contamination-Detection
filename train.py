@@ -374,47 +374,76 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
     patient_csv = os.path.join(base_data_path, "PatientDiagnosis.csv")
     patch_csv = os.path.join(base_data_path, "HP_WSI-CoordAnnotatedAllPatches.xlsx") # Use Excel directly
     train_dir = os.path.join(base_data_path, "CrossValidation/Annotated")
+    # New: Include 'Cropped' folder in the training pool to maximize data availability
+    cropped_dir = os.path.join(base_data_path, "CrossValidation/Cropped")
     # This folder contains patients that the AI has NEVER seen during training.
     holdout_dir = os.path.join(base_data_path, "HoldOut")
 
     # --- Step 3: Define "Study Habits" (Transforms) ---
-    # CPU-bound: Minimal prep to save worker time
-    # Turned off upscaling: patches are original 256x256
-    train_transform = transforms.Compose([
-        transforms.Resize((256, 256)), 
-        transforms.ToTensor(), 
-    ])
-
-    # GPU-bound: Advanced augmentations performed significantly faster on A40
-    # IHC Pivot: Increased Jitter to compensate for removing Macenko
-    # Iteration 21.2 Fix: Ensure v2 is correctly imported/loaded if not already in scope
+    # Global imports ensure v2 is accessible within the function scope
     from torchvision.transforms import v2
-    gpu_augment = v2.Compose([
-        v2.RandomHorizontalFlip(), 
-        v2.RandomVerticalFlip(),
-        v2.RandomRotation(90),
-        v2.ColorJitter(brightness=jitter, contrast=jitter, saturation=jitter*0.6, hue=0.05),
-        v2.RandomGrayscale(p=0.15),
-        v2.GaussianBlur(kernel_size=3, sigma=(0.1, 2.0)),
-    ])
-
-    # Validation habits: No random variety here, just high resolution
-    val_transform = transforms.Compose([
-        transforms.Resize((256, 256)),
-        transforms.ToTensor(),
+    
+    # Standard ImageNet normalization: IHC (Brown/Blue) doesn't use Macenko.
+    train_transform = v2.Compose([
+        v2.ToImage(),
+        v2.ToDtype(torch.float32, scale=True),
+        v2.RandomHorizontalFlip(p=0.5),
+        v2.RandomVerticalFlip(p=0.5),
+        v2.RandomRotation(degrees=15),
+        v2.ColorJitter(brightness=jitter, contrast=jitter),
+        v2.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
     
-    # GPU-based normalization (ImageNet stats)
-    gpu_normalize = v2.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    val_transform = v2.Compose([
+        v2.ToImage(),
+        v2.ToDtype(torch.float32, scale=True),
+        v2.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    ])
 
     # --- Step 4: Load and split the data ---
-    # Create the full dataset object in bag mode for MIL
-    # max_bag_size=500 to keep A40 VRAM consumption manageable
-    full_dataset = HPyloriDataset(train_dir, patient_csv, patch_csv, transform=None, bag_mode=True, max_bag_size=500, train=True)
+    # Create a merged dataset object by passing both training directories as a list
+    # The HPyloriDataset (Iter 22+) supports list of paths for root_dir
+    train_dirs = [train_dir, cropped_dir]
+    full_dataset = HPyloriDataset(train_dirs, patient_csv, patch_csv, transform=None, bag_mode=True, max_bag_size=500, train=True)
     
-    # --- PATIENT-LEVEL SPLIT ---
-    # In bag mode, full_dataset.bags is a list of (paths, label, patient_id)
-    unique_patients = [bag[2] for bag in full_dataset.bags]
+    # Iteration 25.1: Pass the run prefix to the dataset for automated audit logging
+    full_dataset.audit_prefix = os.path.join(results_dir, prefix)
+    
+    # --- RIGOROUS PATIENT-LEVEL SPLIT (Leakage-Proof Iteration) ---
+    # 1. Identify all clinical patient IDs (base IDs) present across all folders
+    all_bag_ids = [bag[2] for bag in full_dataset.bags]
+    all_base_ids = sorted(list(set([bid.split('_')[0] for bid in all_bag_ids])))
+
+    # Cross-Reference with HoldOut to PROVE no patient overlaps (Audit 25.2)
+    holdout_patients = set()
+    if os.path.exists(holdout_dir):
+        holdout_folders = [f for f in os.listdir(holdout_dir) if os.path.isdir(os.path.join(holdout_dir, f))]
+        holdout_patients = set([f.split('_')[0] for f in holdout_folders])
+    
+    # Track leakage status for the audit
+    leakage_log = []
+    patients_in_both_groups = 0
+    for base_id in all_base_ids:
+        is_leaking = base_id in holdout_patients
+        if is_leaking:
+            patients_in_both_groups += 1
+            
+        leakage_log.append({
+            'Clinical_ID': base_id,
+            'In_Training_Pool': True,
+            'In_HoldOut_Test_Set': is_leaking,
+            'Audit_Status': 'REJECTED_LEAKAGE' if is_leaking else 'VERIFIED_UNIQUE'
+        })
+    
+    leakage_df = pd.DataFrame(leakage_log)
+    leakage_df.to_csv(os.path.join(results_dir, f"{prefix}_cross_leakage_audit.csv"), index=False)
+    
+    # Update the summary CSV with the leakage count (Iteration 25.5)
+    summary_csv_path = os.path.join(results_dir, f"{prefix}_data_integrity_summary.csv")
+    if os.path.exists(summary_csv_path):
+        summary_df = pd.read_csv(summary_csv_path)
+        summary_df['PATIENTS_IN_BOTH_GROUPS_LEAKAGE'] = patients_in_both_groups
+        summary_df.to_csv(summary_csv_path, index=False)
     
     # Global Seed Strategy (Iteration 21): Ensure deterministic initialization and splits
     import random
@@ -426,28 +455,28 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
         
     # Data Split reproducibility: Seed 42 for identity across jobs
     split_rng = np.random.RandomState(42)
-    split_rng.shuffle(unique_patients)
+    split_rng.shuffle(all_base_ids)
     
-    # Calculate fold boundaries
-    fold_size = len(unique_patients) // num_folds
+    # Calculate fold boundaries based on UNIQUE CLINICAL PATIENTS
+    fold_size = len(all_base_ids) // num_folds
     val_start = fold_idx * fold_size
-    # Ensure the last fold takes any remainder patients
-    val_end = val_start + fold_size if fold_idx < num_folds - 1 else len(unique_patients)
+    val_end = val_start + fold_size if fold_idx < num_folds - 1 else len(all_base_ids)
     
-    val_patients = set(unique_patients[val_start:val_end])
-    train_patients = set([p for p in unique_patients if p not in val_patients])
+    val_base_ids = set(all_base_ids[val_start:val_end])
+    train_base_ids = set([p for p in all_base_ids if p not in val_base_ids])
     
-    print(f"--- Fold {fold_idx + 1}/{num_folds} Split (MIL Bag Mode) ---")
-    print(f"Total Patients (Bags): {len(unique_patients)}")
-    print(f"Training Patients: {len(train_patients)}")
-    print(f"Validation Patients: {len(val_patients)}")
+    print(f"--- Fold {fold_idx + 1}/{num_folds} Split (Leakage-Proof MIL) ---")
+    print(f"Total Clinical Patients: {len(all_base_ids)}")
+    print(f"Training Clinical IDs: {len(train_base_ids)}")
+    print(f"Validation Clinical IDs: {len(val_base_ids)}")
 
-    train_indices = [i for i, bag in enumerate(full_dataset.bags) if bag[2] in train_patients]
-    val_indices = [i for i, bag in enumerate(full_dataset.bags) if bag[2] in val_patients]
+    # Map all bags (from both folders) to their assigned folds using the clinical IDs
+    train_indices = [i for i, bag in enumerate(full_dataset.bags) if bag[2].split('_')[0] in train_base_ids]
+    val_indices = [i for i, bag in enumerate(full_dataset.bags) if bag[2].split('_')[0] in val_base_ids]
     
     print(f"Independent Patient-level split:")
-    print(f" - Train: {len(train_patients)} bags")
-    print(f" - Val:   {len(val_patients)} bags")
+    print(f" - Train: {len(train_indices)} biopsy bags")
+    print(f" - Val:   {len(val_indices)} biopsy bags")
     
     # Re-apply our study habits for each split
     train_data = Subset(full_dataset, train_indices)
@@ -536,14 +565,14 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
     swa_model = AveragedModel(model)
     swa_scheduler = SWALR(optimizer, swa_lr=1e-5) # Calibration: drastically reduced for stability
 
-    # --- Optimization 5D: Preprocessing & Model Compilation (Kernel Fusion) ---
+    # --- Optimization 5D: Preprocessing & Model Fusion ---
     # We define a fused preprocessing function for deterministic operations.
-    # IHC Pivot: Disabling Macenko Normalization because dataset is IHC (Blue/Brown),
-    # not H&E. Macenko was causing color collapse to black & white.
+    # Standard ImageNet normalization: IHC (Brown/Blue) doesn't use Macenko.
+    gpu_normalize = v2.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+
     def det_preprocess_batch(inputs, training=False):
         # inputs = normalizer.normalize_batch(inputs, jitter=training) # DISABLED for IHC
-        inputs = gpu_normalize(inputs)
-        return inputs
+        return gpu_normalize(inputs)
     
     # Enable torch.compile for Kernel Fusion (Optimization 5D)
     if hasattr(torch, "compile"):

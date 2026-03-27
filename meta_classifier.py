@@ -109,12 +109,13 @@ def load_all_model_features(results_dirs):
     
     for pid, data in patient_data.items():
         feats = data['features']
+        # Padding for patients not found in all folds (ensures consistent vector length for Random Forest)
         if len(feats) < max_features:
             feats.extend([0.0] * (max_features - len(feats)))
         
-        X.append(feats)
-        y.append(data['label'])
-        pids.append(pid)
+        X.append(feats)      # Feature matrix for clinical indicators
+        y.append(data['label']) # Target diagnostic class (Positive/Negative)
+        pids.append(pid)     # Track PatientID for final reporting
         
     return np.array(X), np.array(y), pids
     
@@ -141,12 +142,14 @@ def load_all_model_features(results_dirs):
     return np.array(X), np.array(y), pids
 
 def main():
+    # Argument parsing for multi-expert directory inputs
     parser = argparse.ArgumentParser(description="Meta-Classifier Feature Fusion for H. Pylori")
-    parser.add_argument("--search_dir", required=True)
-    parser.add_argument("--audit_dir", required=True)
-    parser.add_argument("--accuracy_dir", required=True)
+    parser.add_argument("--search_dir", required=True)     # Over-sensitive fold outputs
+    parser.add_argument("--audit_dir", required=True)      # Specificity-focused fold outputs
+    parser.add_argument("--accuracy_dir", required=True)   # Balanced-training fold outputs
     args = parser.parse_args()
     
+    # Map input directories to their respective clinical profile roles
     dirs = {
         'searcher': args.search_dir,
         'auditor': args.audit_dir,
@@ -154,6 +157,7 @@ def main():
     }
     
     print("--- Loading Features from 15 model folds ---")
+    # Aggregates structured data (Max, Mean, Density) across all tri-profile experts
     X, y, pids = load_all_model_features(dirs)
     
     print(f"Feature matrix shape: {X.shape} (Patients x Model-Outputs)")
@@ -180,10 +184,12 @@ def main():
     clf = RandomForestClassifier(n_estimators=100, max_depth=3, random_state=42, class_weight='balanced')
     
     print("--- Training Meta-Classifier (LOO-CV) ---")
+    # Execute Leave-One-Out validation to estimate real-world clinical performance
     for train_index, test_index in loo.split(X):
         X_train, X_test = X[train_index], X[test_index]
         y_train, y_test = y[train_index], y[test_index]
         
+        # Train meta-model on all patients except one and predict for the held-out patient
         clf.fit(X_train, y_train)
         y_pred.append(clf.predict(X_test)[0])
         y_true.append(y_test[0])
@@ -191,23 +197,30 @@ def main():
     print("\n" + "="*40)
     print("      META-CLASSIFIER FUSION REPORT")
     print("="*40)
+    # Generate aggregate metrics (Precision, Recall, F1) across the entire LOO-CV cohort
     print(classification_report(y_true, y_pred, target_names=["Negative", "Positive"]))
     
     acc = accuracy_score(y_true, y_pred)
     print(f"Final Accuracy: {100.0 * acc:.2f}%")
     
+    # Extract specific confusion counts for clinical audit (FP vs FN trade-off)
     cm = confusion_matrix(y_true, y_pred)
     tn, fp, fn, tp = cm.flatten()
     print(f"TN: {tn} | FP: {fp} | FN: {fn} | TP: {tp}")
 
     # Check the "Unreachable Three"
+    # Aggregate cross-validation results into a structured DataFrame for failure analysis
     results_df = pd.DataFrame({'PatientID': pids, 'Actual': y_true, 'Predicted': y_pred})
+    
+    # Identify False Negatives (Target cases where the ensemble failed to detect bacteria)
     missed = results_df[(results_df['Actual'] == 1) & (results_df['Predicted'] == 0)]
     if not missed.empty:
         print(f"\n⚠️ Still Missed: {missed['PatientID'].tolist()}")
     else:
+        # Clinical Milestone: All positive cases correctly identified by the meta-fusion layer
         print(f"\n✅ 100% RECALL ACHIEVED BY FEATURE FUSION.")
 
+    # Persist the fusion results for external documentation and research validation
     results_df.to_csv("meta_fusion_results.csv", index=False)
 
 if __name__ == "__main__":

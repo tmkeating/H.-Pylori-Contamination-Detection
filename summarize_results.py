@@ -110,12 +110,15 @@ def generate_grand_summary(results_dir="results", last_n=None):
     })
     
     # Add Run Range metadata as a column or row
+    # Add Run Range metadata to the summary for experiment tracking
     if all_metrics:
         avg_stds_df['Run_Range'] = f"{min_run}-{max_run}"
 
+    # Save the consolidated averages (Mean ± Std) for iteration benchmarking
     averages_filename = f"grand_cv_averages{run_suffix}.csv"
     avg_stds_df.to_csv(os.path.join(results_dir, averages_filename), index=False)
     
+    # Final console notification for audit trails
     print(f"Grand summary saved to {results_dir}/{summary_filename}")
     print(f"Grand averages with \u00b1 saved to {results_dir}/{averages_filename}")
 

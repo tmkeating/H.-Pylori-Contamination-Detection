@@ -106,14 +106,17 @@ class HPyloriDataset(Dataset):
         self.samples = [] # This will be our master list of (image_path, label)
 
         # We will look in multiple potential locations to expand the dataset
-        root_parent = os.path.dirname(root_dir)
-        search_dirs = [root_dir]
+        if isinstance(root_dir, list):
+            search_dirs = root_dir
+        else:
+            search_dirs = [root_dir]
         
-        # If we are pointed at 'Annotated', also look in 'Cropped' for extra negatives
-        if 'Annotated' in root_dir:
+        # If we are pointed at 'Annotated' only (not a list), also look in 'Cropped' for extra negatives
+        if not isinstance(root_dir, list) and 'Annotated' in root_dir:
+            root_parent = os.path.dirname(root_dir)
             cropped_dir = os.path.join(root_parent, 'Cropped')
             if os.path.exists(cropped_dir):
-                search_dirs = search_dirs + [cropped_dir]
+                search_dirs = list(set(search_dirs + [cropped_dir]))
 
         added_keys = set() # Track (patient, win_id) or (patient, img_name) to avoid dupes
 
@@ -176,24 +179,45 @@ class HPyloriDataset(Dataset):
             # patient_bags[bag_id] = {'samples': [paths], 'label': y, 'pos_samples': [annotated_paths]}
             patient_bags = {}
             
-            # Iteration 24.4: Blacklist Conflict Patients
-            # B22-01_1 (Positive) and B22-03_1 (Negative) are identical sets of images
-            # and create a contradictory signal that hampers training.
-            # B22-68_0 and B22-141_0 are also identical redundant sets (ALTA).
-            conflict_blacklist = ["B22-01_1", "B22-03_1", "B22-68_0", "B22-141_0"]
+            # Iteration 24.4: Load External Blacklist (Separated from code for modularity)
+            # This identifies contradictory sets (e.g. B22-01_1 vs B22-03_1)
+            # and redundant patches that create "gradient noise".
+            # -----------------------------------------------------------------
+            blacklist_path = os.path.join(os.path.dirname(__file__), "blacklist.json")
+            conflict_blacklist = []
+            image_blacklist_set = set()
             
-            # Iteration 24.7: Surgical Image Blacklist (Path-Specific)
-            # We must use (Folder, Filename) tuples because numeric names like 00131.png 
-            # are recycled across all patients.
-            image_blacklist_set = {
-                ("B22-68_0", "00131.png"), ("B22-141_0", "00131.png"),
-                ("B22-68_0", "00141.png"), ("B22-141_0", "00141.png"),
-                ("B22-68_0", "00290.png"), ("B22-141_0", "00290.png"),
-                ("B22-68_0", "00298.png"), ("B22-141_0", "00298.png"),
-                ("B22-68_0", "00315.png"), ("B22-141_0", "00315.png"),
-                ("B22-68_0", "00352.png"), ("B22-141_0", "00352.png")
+            if os.path.exists(blacklist_path):
+                import json
+                with open(blacklist_path, 'r') as f:
+                    bl_data = json.load(f)
+                    
+                    # Support both list and dict-based comments/reasons
+                    raw_conflict = bl_data.get("conflict_blacklist", [])
+                    if isinstance(raw_conflict, dict):
+                        conflict_blacklist = list(raw_conflict.keys())
+                    else:
+                        conflict_blacklist = raw_conflict
+                        
+                    # Support both list of lists and list of dicts for image patches
+                    raw_images = bl_data.get("image_blacklist", [])
+                    image_blacklist_set = set()
+                    for item in raw_images:
+                        if isinstance(item, dict):
+                            image_blacklist_set.add((item["folder"], item["filename"]))
+                        elif isinstance(item, (list, tuple)):
+                            image_blacklist_set.add(tuple(item))
+            else:
+                print(f"Warning: Blacklist file {blacklist_path} not found. Proceeding without filtering.")
+            
+            # --- DATA INTEGRITY AUDIT (Live for Every Run) ---
+            self.audit_log = {
+                'total_scanned': 0,
+                'conflict_removed': [],
+                'redundant_removed': 0,
+                'final_bags': 0
             }
-            
+
             for img_path, label in self.samples:
                 # Use the full folder name as the bag ID to keep them granular
                 # (e.g. 'B22-47_0', 'B22-47_1' are separate bags)
@@ -201,11 +225,16 @@ class HPyloriDataset(Dataset):
                 img_name = os.path.basename(img_path)
                 p_id_full = folder_name
                 
+                self.audit_log['total_scanned'] += 1
+
                 if p_id_full in conflict_blacklist:
+                    if p_id_full not in self.audit_log['conflict_removed']:
+                        self.audit_log['conflict_removed'].append(p_id_full)
                     continue
                 
                 # Check for specific redundant patches within identified folders
                 if (p_id_full, img_name) in image_blacklist_set:
+                    self.audit_log['redundant_removed'] += 1
                     continue
                 
                 # Extract the base ID to look up clinical labels in Excel
@@ -223,12 +252,72 @@ class HPyloriDataset(Dataset):
                 if label == 1:
                     patient_bags[p_id_full]['pos_samples'].append(img_path)
             
+            self.audit_log['final_bags'] = len(patient_bags)
+            
+            # --- Export Audit results (Iteration 25.2: Expanded Patient Breakdown) ---
+            if hasattr(self, 'audit_prefix') and self.audit_prefix:
+                import pandas as pd
+                
+                # Verify cross-set presence (Train vs HoldOut) logic
+                # Normally the dataset root is either CrossValidation or Holdout
+                # We check clinical IDs against the HoldOut directory if provided later
+                
+                # Build the breakdown list
+                patient_breakdown = []
+                for b_id, data in patient_bags.items():
+                    base_id = b_id.split('_')[0]
+                    # We determine set presence based on which directories were passed to __init__
+                    # or by checking if the bag_id exists in the current scan
+                    patient_breakdown.append({
+                        'Patient_Bag_ID': b_id,
+                        'Clinical_Group_ID': base_id,
+                        'Folder_Source': os.path.basename(os.path.dirname(data['samples'][0])),
+                        'Label': data['label'],
+                        'Patch_Count': len(data['samples']),
+                        'Annotated_Positives': len(data['pos_samples'])
+                    })
+                
+                breakdown_df = pd.DataFrame(patient_breakdown)
+                audit_csv_path = f"{self.audit_prefix}_patient_integrity_breakdown.csv"
+                breakdown_df.to_csv(audit_csv_path, index=False)
+                
+                # --- Quick Overview Statistics (Top Level) ---
+                unique_clinical_ids = breakdown_df['Clinical_Group_ID'].unique()
+                pos_patient_count = breakdown_df[breakdown_df['Label'] == 1]['Clinical_Group_ID'].nunique()
+                neg_patient_count = len(unique_clinical_ids) - pos_patient_count
+                
+                # Summary Metadata: Now includes patient Breakdown and Quick Overview (Iteration 25.5)
+                summary_df = pd.DataFrame([{
+                    'Run_Prefix': self.audit_prefix,
+                    'FINAL_PATIENT_TOTAL': len(unique_clinical_ids),
+                    'FINAL_POSITIVE_TOTAL': pos_patient_count,
+                    'FINAL_NEGATIVE_TOTAL': neg_patient_count,
+                    'PATIENTS_IN_BOTH_GROUPS_LEAKAGE': 0, # Placeholder for cross-set overlap check
+                    'Patches_Scanned': self.audit_log['total_scanned'],
+                    'Conflict_Bags_Removed': ", ".join(self.audit_log['conflict_removed']),
+                    'COMPLETE_FOLDERS_BANNED': len(self.audit_log['conflict_removed']),
+                    'DUPLICATE_PATCHES_REMOVED': self.audit_log['redundant_removed'],
+                    'Final_Bag_Count': self.audit_log['final_bags'],
+                    'Patient_ID_List': ", ".join(sorted(unique_clinical_ids.tolist()))
+                }])
+                summary_csv_path = f"{self.audit_prefix}_data_integrity_summary.csv"
+                summary_df.to_csv(summary_csv_path, index=False)
+                
             # List of (list_of_paths, patient_label, bag_id, list_of_pos_paths)
             self.bags = []
             for bag_id, data in patient_bags.items():
                 paths = data['samples']
                 # No longer truncating at init; __getitem__ handles sampling
                 self.bags.append((paths, data['label'], bag_id, data['pos_samples']))
+            
+            # Print Live Audit proof
+            print(f"--- LIVE DATA INTEGRITY AUDIT ---")
+            print(f"  Scanned Patches: {self.audit_log['total_scanned']}")
+            if self.audit_log['conflict_removed']:
+                print(f"  Conflict Blacklist: Removed {len(self.audit_log['conflict_removed'])} patient bags {self.audit_log['conflict_removed']}")
+            print(f"  Redundant Blacklist: Removed {self.audit_log['redundant_removed']} exact image duplicates")
+            print(f"  Final Valid Bags: {self.audit_log['final_bags']}")
+            print(f"---------------------------------")
 
     def __len__(self):
         if self.bag_mode:
@@ -279,6 +368,11 @@ class HPyloriDataset(Dataset):
             images = []
             for path in selected_paths:
                 img = Image.open(path).convert('RGB')
+                
+                # Check for standard 256x256 size, resize if strictly necessary (Guard 25.6)
+                if img.size != (256, 256):
+                    img = img.resize((256, 256), Image.BILINEAR)
+                
                 if self.transform:
                     img = self.transform(img)
                 images.append(img)

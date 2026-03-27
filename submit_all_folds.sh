@@ -25,7 +25,7 @@
 
 MODEL_NAME=${MODEL_NAME:-"convnext_tiny"}
 PROFILE=${PROFILE:-"AUDITOR"}
-ITER=${ITER:-"25.0"}
+ITER=${ITER:-"26.0"}
 
 # 1. Source the Model Profiles (Central Source of Truth)
 if [ -f "profiles.sh" ]; then
@@ -79,12 +79,12 @@ echo "Submitting Global Attention-MIL final summary as dependent job..."
 # This job will only start once all 5 folds have successfully completed
 sbatch --dependency=afterok:$DEPENDENCIES <<EOF
 #!/bin/bash
-#SBATCH -p dcca40
-#SBATCH -t 0-00:30
-#SBATCH --mem=16G
-#SBATCH -c 4
-#SBATCH -J HPy_FinalSummary
-#SBATCH -o results/slurm_summary_%j.txt
+#SBATCH -p dcca40                    # Submit to the dcca40 partition
+#SBATCH -t 0-00:30                   # Set a 30-minute time limit for summarization
+#SBATCH --mem=16G                    # Allocate 16GB of RAM for data aggregation
+#SBATCH -c 4                         # Request 4 CPU cores for parallel processing
+#SBATCH -J HPy_FinalSummary          # Set the SLURM job name for monitoring
+#SBATCH -o results/slurm_summary_%j.txt # Direct output to results folder with Job ID suffix
 
 # Activate virtual environment
 source ../venv/bin/activate
