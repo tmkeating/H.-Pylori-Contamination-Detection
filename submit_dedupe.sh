@@ -18,4 +18,3 @@ echo "Starting Global Deduplication Audit (All images, All folders)..."
 # Using absolute path for accuracy
 python3 /hhome/ricse03/modelTwyla/H.-Pylori-Contamination-Detection/global_duplicates_check.py
 
-echo "Audit Complete. Reports generated: global_image_inventory.csv, global_image_duplicates.csv, dataset_presence_matrix.csv"

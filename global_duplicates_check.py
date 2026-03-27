@@ -90,6 +90,7 @@ def run_global_audit():
     print("\nExporting Global Image Inventory...")
     inventory_df = pd.DataFrame(image_inventory)
     inventory_df.to_csv("global_image_inventory.csv", index=False)
+    print(f"Inventory of {len(inventory_df)} images saved to global_image_inventory.csv")
     
     # --- Step 2: Export Duplicate Image Report ---
     print("Analyzing Global Duplicates...")
@@ -123,15 +124,19 @@ def run_global_audit():
     for img in image_inventory:
         patient_set_map[img["Base_Patient_ID"]].add(img["Set"])
         
-    presence_matrix = []
+    presence_matrix_rows = []
     for p_id, sets in patient_set_map.items():
-        presence_matrix.append({
+        presence_matrix_rows.append({
             "Clinical_Patient_ID": p_id,
             "In_Annotated": "Annotated" in sets,
             "In_Cropped": "Cropped" in sets,
             "In_HoldOut": "HoldOut" in sets,
             "Set_Combination": "+".join(sorted(list(sets)))
         })
+    
+    presence_df = pd.DataFrame(presence_matrix_rows)
+    presence_df.to_csv("dataset_presence_matrix.csv", index=False)
+    print(f"Patient presence matrix saved to dataset_presence_matrix.csv ({len(presence_df)} patients)")
         
     # --- Step 4: Patient-Level Duplicate Summary ---
     print("Generating Patient-Specific Duplicate Summary...")
@@ -373,7 +378,7 @@ def run_global_audit():
         json.dump(blacklist_output, f, indent=4)
     
     print(f"Suggested blacklist generated with {len(suggested_conflict_blacklist)} bags and {len(suggested_image_blacklist)} patches.")
-    print("Audit Complete. Reports generated: global_image_inventory.csv, global_image_duplicates.csv, dataset_presence_matrix.csv, suggested_blacklist.json")
 
 if __name__ == "__main__":
     run_global_audit()
+    print("Audit Complete. Reports generated: global_image_inventory.csv, global_image_duplicates.csv, dataset_presence_matrix.csv, suggested_blacklist.json")

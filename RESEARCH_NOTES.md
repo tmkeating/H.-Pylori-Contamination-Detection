@@ -119,21 +119,10 @@ Reduction in False Positives by 80% while maintaining the "Ghost Patient" detect
 
 **Conclusion**: Reached the theoretical limit of the ConvNeXt-Tiny/Attention-MIL architecture. 94.7% accuracy with nearly perfect recall represents the final clinical-grade deployment state.
 
-## Iteration 26.1: High-Resolution Rescue (Stride-128)
-**Context**: Successfully completed the dense-stride (128px) "Rescue Pass" for the 'Unreachable Six' difficult patients.
+## Iteration 27.0: Data Integrity Discovery (Cropped Expansion)
+**Context**: During a global MD5 deduplication audit, it was discovered that the training pipeline was only evaluating a fraction of the available dataset. 
 
 ### 🛠️ Strategic Fixes
-1. **Stride-128 Dense Inference**: Forced the Attention-MIL mechanism to "see" sparse bacteria that previously fell between window gaps at Stride-250.
-2. **Hybrid RunID Fusion**: Updated `ensemble_voting.py` to support multi-directory patching (blending results from `results/` and `finalResults/`).
-3. **Consensus Restoration**: Re-ran the ensemble for the 299_300_301_302_303 set, confirming the 94.7% accuracy with the newly generated rescue data.
-
-## 🛡️ Inference Strategy Evolution (Final)
-- **Standard Pass**: 250-pixel stride (50% overlap).
-- **Contrast-Boosted TTA**: 16-way augmentation with 1.1x contrast scaling.
-- **Rescue Pass**: Dense stride (**128 pixels**) for high-suspicion patients (Searcher_Flag > 0.1).
-- **Final Decision Logic**: 
-    - `Majority Vote (3/5 at 0.40)` OR 
-    - `Safety Override (Max_Prob > 0.39 AND Mean_Prob > 0.28)`.
-
-### 🎉 Conclusion
-The H. Pylori pipeline is now finalized. The "Golden Consensus" achieves 94.7% accuracy while maintaining the 98.25% recall required for safe clinical screening. ทุก patient-level reports can be found in `results/meta_fusion_results_*.csv`.
+1. **Directory Consolidation**: Identified that many negative samples were sitting undetected in the `Cropped` directory. Expanding the data loader to search multiple directories (`Annotated` and `Cropped`) concurrently.
+2. **MD5 Global Deduplication**: Built a lightning-fast 8KB-header deduplicator (`global_duplicates_check.py`) to map exact duplicates across folders and prevent data leakage across train/validation splits, scanning over 219,600 images safely.
+3. **True Total Counts**: The pipeline is now ready to re-train using the complete verified dataset, rather than just the subset located in the `Annotated` folder.

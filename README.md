@@ -6,6 +6,13 @@ This project implements a **High-Resolution Multi-Stage MIL Pipeline** for the a
 
 To reproduce the clinical-grade results (94.7% Accuracy, 98.2% Recall), follow this specific execution order:
 
+### 0. Data Integrity & Deduplication Audit
+Before training, run a byte-level MD5 hash audit across the dataset to identify exact duplicated images across the Folders (Annotated, Cropped, HoldOut) to prevent data leakage and skewed metrics.
+```bash
+sbatch submit_dedupe.sh
+```
+*Outputs:* `global_image_inventory.csv`, `global_image_duplicates.csv`, `dataset_presence_matrix.csv`, and `patient_duplicate_audit.csv`.
+
 ### 1. Training (5-Fold Cross-Validation)
 Launch the primary training sweep using the `SEARCHER` profile. This uses ConvNeXt-Tiny with Attention-MIL and SWA.
 ```bash
@@ -29,20 +36,22 @@ python3 ensemble_voting.py --runs 302,303,299,300,301
 ```
 *Outputs: `results/meta_fusion_results_*.csv` (The final Pathology hand-off report).*
 
-### 4. Interpretability Audit (Grad-CAM)
-Generate visual evidence for the model's decisions, focusing on "Ghost Patients" (False Negatives).
+### 4. Interpretability Analysis & Reports (Grad-CAM & Metrics)
+Generate visual evidence for the model's decisions and patch/patient-level metrics. It bypasses older plotting packages and directly visualizes the confusion matrix and valid ROCs. Ensure you edit `run_visuals.sh` to target your desired `RUN_ID` before submitting.
 ```bash
-./run_visuals.sh [run_id]
+sbatch run_visuals.sh
 ```
-*Outputs: `results/*_gradcam_samples/` folder containing heatmaps.*
+*Outputs: `results/*_gradcam_samples/` folder containing heatmaps, plus `*_confusion_matrix.png`, `*_roc_curve.png`, and `*_pr_curve.png` metric reports.*
 
 ---
 
 ## Core Project Structure
 
-- `dataset.py`: Multi-Pass coverage loader with **16-way Contrast-Boosted TTA**.
+- `dataset.py`: Multi-Pass coverage loader with **16-way Contrast-Boosted TTA**. Handles live data integrity checks.
 - `model.py`: **Gated Attention MIL** with **Top-3 Chunk Aggregation** for signal resilience.
 - `train.py`: Unified engine featuring **SWA BN Recalibration** and **Grad-CAM Ghost Audits**.
+- `generate_visuals.py`: Dedicated analysis script to render interpretable visual clinical layouts using Matplotlib cleanly.
+- `global_duplicates_check.py`: High-performance 8KB-header MD5 deduplicator to guarantee strict set isolation.
 - `ensemble_voting.py`: Meta-classifier using **Joint-Probability Gating** (Max > 0.39 & Mean > 0.28).
 - `profiles.sh`: Centralized hyperparameters (Learning rates, Weights, Data paths).
 

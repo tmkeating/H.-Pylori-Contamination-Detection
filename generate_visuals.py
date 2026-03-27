@@ -1,24 +1,4 @@
-"""
-# H. Pylori Visual Profiling & Metric Suite
-# ----------------------------------------
-# This script performs high-quality evaluation of the H. Pylori diagnostic models, 
-# generating both quantitative metrics and qualitative Grad-CAM spatial heatmaps.
-#
-# What it does:
-#   1. Metric Generation: Produces ROC curves, PR curves, and Confusion Matrices 
-#      to evaluate model stability across individual folds.
-#   2. Probability Profiling: Generates probability histograms to detect 
-#      "Noise Floor" (low-confidence noise vs. high-confidence bacteria).
-#   3. Spatial Grad-CAM: Reconstructs high-resolution spatial maps of WSI 
-#      regions that the model flags as H. Pylori, allowing clinical experts 
-#      to verify morphological structures.
-#   4. Patient-Level Consensus: Outputs individual patient probabilities 
-#      for ensemble fusion in meta_classifier.py.
-#
-# Usage:
-#   python3 generate_visuals.py --model path/to/model.pth --output_dir results/fold0
-# ----------------------------------------
-"""
+
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Subset
@@ -144,7 +124,20 @@ def full_visual_report(RUN_ID, MODEL_PATH, MODEL_NAME="convnext_tiny", fold_idx=
     # Load Model (Attention-MIL Architecture)
     model = get_model(model_name=MODEL_NAME, num_classes=2).to(DEVICE)
     checkpoint = torch.load(MODEL_PATH, map_location=DEVICE)
-    model.load_state_dict(checkpoint['model_state_dict'])
+    
+    # Handle both checkpoint formats (entire state_dict or dict wrapping it)
+    if 'model_state_dict' in checkpoint:
+        state_dict = checkpoint['model_state_dict']
+    else:
+        state_dict = checkpoint
+        
+    # Remove 'module.' prefix if it exists (from DataParallel)
+    new_state_dict = {}
+    for k, v in state_dict.items():
+        name = k[7:] if k.startswith('module.') else k
+        new_state_dict[name] = v
+        
+    model.load_state_dict(new_state_dict)
     model.eval()
 
     # Determine Target Layer
@@ -180,7 +173,13 @@ def full_visual_report(RUN_ID, MODEL_PATH, MODEL_NAME="convnext_tiny", fold_idx=
         all_pat_attns = []
         
         with torch.no_grad():
-            for bag_imgs, labels in p_loader:
+            for batch_data in p_loader:
+                # Handle both (bag, label) and (bag, label, id) formats
+                if len(batch_data) == 3:
+                    bag_imgs, labels, _ = batch_data
+                else:
+                    bag_imgs, labels = batch_data
+                    
                 bag_imgs = bag_imgs.to(DEVICE)
                 logits, attn = model.forward_bag(bag_imgs)
                 all_pat_logits.append(logits)
@@ -207,17 +206,36 @@ def full_visual_report(RUN_ID, MODEL_PATH, MODEL_NAME="convnext_tiny", fold_idx=
 
     perf_df = pd.DataFrame(patient_performance)
     
+    # Ensure binary labels for metrics (remap -1 to 1 if generic positive)
+    all_labels_bin = [1 if l != 0 else 0 for l in all_labels]
+    
     # --- Step 2: Visualization Plots ---
     # 1. Confusion Matrix
-    cm = confusion_matrix(all_labels, [1 if p >= 0.5 else 0 for p in all_probs])
-    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=['Neg', 'Pos'])
-    disp.plot(cmap='Blues')
+    cm = confusion_matrix(all_labels_bin, [1 if p >= 0.5 else 0 for p in all_probs])
+    plt.figure(figsize=(6, 5))
+    plt.imshow(cm, interpolation='nearest', cmap='Blues')
     plt.title(f"Patient-Level Confusion Matrix (Fold {fold_idx})")
+    plt.colorbar()
+    tick_marks = np.arange(2)
+    plt.xticks(tick_marks, ['Neg', 'Pos'])
+    plt.yticks(tick_marks, ['Neg', 'Pos'])
+    
+    # Labeling the matrix
+    thresh = cm.max() / 2.
+    for i in range(cm.shape[0]):
+        for j in range(cm.shape[1]):
+            plt.text(j, i, format(cm[i, j], 'd'),
+                     horizontalalignment="center",
+                     color="white" if cm[i, j] > thresh else "black")
+    
+    plt.ylabel('True label')
+    plt.xlabel('Predicted label')
+    plt.tight_layout()
     plt.savefig(os.path.join("results", f"{RUN_ID}_confusion_matrix.png"))
     plt.close()
 
     # 2. Patient-Level ROC
-    fpr, tpr, _ = roc_curve(all_labels, all_probs)
+    fpr, tpr, _ = roc_curve(all_labels_bin, all_probs)
     roc_auc = auc(fpr, tpr)
     plt.figure()
     plt.plot(fpr, tpr, label=f'AUC = {roc_auc:.4f}')
@@ -248,7 +266,9 @@ def full_visual_report(RUN_ID, MODEL_PATH, MODEL_NAME="convnext_tiny", fold_idx=
         all_imgs = []
         with torch.no_grad():
             for i in range(len(p_subset)):
-                img, _ = p_subset[i]
+                item_data = p_subset[i]
+                img = item_data[0]
+                
                 img_t = img.unsqueeze(0).to(DEVICE)
                 _, attn = model.forward_bag(img_t)
                 all_attns.append(attn.item())
@@ -303,171 +323,6 @@ if __name__ == "__main__":
     else:
         print(f"Error: Model not found at {model_path}")
 
-        
-        # Save a few Grad-CAMs while we are at it
-        if gradcam_saved < 10:
-            pos_indices = (labels == 1).nonzero(as_tuple=True)[0]
-            for idx in pos_indices:
-                if gradcam_saved >= 10: break
-                img_batch = inputs[idx:idx+1]
-                actual_model = model._orig_mod if hasattr(model, "_orig_mod") else model
-                
-                # Dynamic target layer selection based on architecture
-                if "resnet50" in MODEL_NAME:
-                    target_layer = actual_model.backbone.layer4[-1]
-                elif "convnext" in MODEL_NAME:
-                    target_layer = actual_model.backbone.features[-1]
-                else:
-                    target_layer = None # Fallback
-                
-                if target_layer:
-                    with torch.enable_grad():
-                        cam, prob = generate_gradcam(actual_model, img_batch, target_layer)
-                    
-                    # Plot
-                    img = img_batch.squeeze().permute(1, 2, 0).detach().cpu().numpy()
-                    img = img * np.array([0.229, 0.224, 0.225]) + np.array([0.485, 0.456, 0.406])
-                    img = np.clip(img, 0, 1)
-                    cam_np = cam.squeeze().detach().cpu().numpy()
-                    cam_np = (cam_np - cam_np.min()) / (cam_np.max() - cam_np.min() + 1e-8)
-                    
-                    plt.figure(figsize=(10, 5))
-                    plt.subplot(1, 2, 1)
-                    plt.imshow(img)
-                    plt.title(f"Original (Prob Pos: {prob[0,1]:.2f})")
-                    plt.axis('off')
-                    plt.subplot(1, 2, 2)
-                    plt.imshow(img)
-                    plt.imshow(cam_np, cmap='jet', alpha=0.5)
-                    plt.title(f"Grad-CAM ({MODEL_NAME})")
-                    plt.axis('off')
-                    plt.savefig(f"{OUTPUT_DIR}/sample_{gradcam_saved}.png")
-                    plt.close()
-                    gradcam_saved += 1
-
-    # --- Step 1: Patch-Level Plots ---
-    # 1. Confusion Matrix
-    cm = confusion_matrix(all_labels, all_preds)
-    plt.figure()
-    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=['Negative', 'Positive'])
-    disp.plot(cmap='Blues')
-    plt.title(f"Patch-Level CM (Independent)")
-    plt.savefig(f"results/{RUN_ID}_confusion_matrix.png")
-    plt.close()
-    
-    # 2. ROC/PR Curves
-    fpr_patch, tpr_patch, _ = roc_curve(all_labels, all_probs)
-    roc_auc_patch = auc(fpr_patch, tpr_patch)
-    prec_patch, recall_patch, _ = precision_recall_curve(all_labels, all_probs)
-    pr_auc_patch = average_precision_score(all_labels, all_probs)
-
-    # --- Step 2: Patient-Level Aggregation (Learned or Heuristic) ---
-    print("\nAggregating Patient-Level Results...")
-    pat_ids, pat_labels, pat_probs_max, pat_probs_mean = [], [], [], []
-    consensus_data = []
-
-    for pat_id in val_pats:
-        probs = np.array(patient_probs[pat_id])
-        if len(probs) == 0: continue
-        
-        # Calculate clinical features exactly like train.py
-        avg_prob = np.mean(probs)
-        max_prob = np.max(probs)
-        min_prob = np.min(probs)
-        std_prob = np.std(probs)
-        med_prob = np.median(probs)
-        p10 = np.percentile(probs, 10)
-        p25 = np.percentile(probs, 25)
-        p75 = np.percentile(probs, 75)
-        p90 = np.percentile(probs, 90)
-        skew_val = skew(probs) if len(probs) > 2 else 0
-        kurt_val = kurtosis(probs) if len(probs) > 2 else 0
-        p90_count = sum(1 for p in probs if p > 0.90)
-
-        # Build feature vector
-        pat_ids.append(pat_id)
-        pat_labels.append(patient_gt[pat_id])
-        pat_probs_max.append(max_prob)
-        pat_probs_mean.append(avg_prob)
-        
-        consensus_data.append({
-            "PatientID": pat_id,
-            "Actual": 1 if patient_gt[pat_id] == 1 else 0,
-            "Mean_Prob": avg_prob,
-            "Max_Prob": max_prob,
-            "Min_Prob": min_prob,
-            "Std_Prob": std_prob,
-            "Median_Prob": med_prob,
-            "P10_Prob": p10,
-            "P25_Prob": p25,
-            "P75_Prob": p75,
-            "P90_Prob": p90,
-            "Skew": skew_val,
-            "Kurtosis": kurt_val,
-            "Count_P50": sum(1 for p in probs if p > 0.50),
-            "Count_P60": sum(1 for p in probs if p > 0.60),
-            "Count_P70": sum(1 for p in probs if p > 0.70),
-            "Count_P80": sum(1 for p in probs if p > 0.80),
-            "Count_P90": p90_count,
-            "Patch_Count": len(probs)
-        })
-
-    consensus_df = pd.DataFrame(consensus_data)
-    
-    # Fallback to Max probability aggregation (Meta-classifier deprecated in Iteration 10)
-    pat_probs_final = pat_probs_max
-
-    # --- Step 3: Patient-Level Plots ---
-    # 1. Patient ROC (Comparing Meta-Classifier, Patch-Level, Max Prob, and Suspicious Count)
-    fpr_pat, tpr_pat, _ = roc_curve(pat_labels, pat_probs_final)
-    roc_auc_pat = auc(fpr_pat, tpr_pat)
-    
-    fpr_max, tpr_max, _ = roc_curve(pat_labels, pat_probs_max)
-    roc_auc_max = auc(fpr_max, tpr_max)
-    
-    fpr_susp, tpr_susp, _ = roc_curve(pat_labels, consensus_df["Count_P90"])
-    roc_auc_susp = auc(fpr_susp, tpr_susp)
-    
-    plt.figure()
-    plt.plot(fpr_pat, tpr_pat, color='darkorange', lw=3, label=f'Meta-Classifier (AUC = {roc_auc_pat:.4f})')
-    plt.plot(fpr_max, tpr_max, color='green', linestyle='--', alpha=0.8, label=f'Max Probability (AUC = {roc_auc_max:.4f})')
-    plt.plot(fpr_susp, tpr_susp, color='purple', linestyle=':', alpha=0.8, label=f'Suspicious Count (AUC = {roc_auc_susp:.4f})')
-    plt.plot(fpr_patch, tpr_patch, color='black', linestyle='--', alpha=0.3, label=f'Patch-Level (AUC = {roc_auc_patch:.4f})')
-    
-    plt.plot([0, 1], [0, 1], 'k--', lw=1)
-    plt.xlabel('False Positive Rate')
-    plt.ylabel('True Positive Rate')
-    plt.title('Patient-Level ROC: Clinical Comparison')
-    plt.legend(loc="lower right")
-    plt.savefig(f"results/{RUN_ID}_patient_roc_curve.png")
-    plt.close()
-    
-    # 2. Patient PR
-    prec_pat, recall_pat, _ = precision_recall_curve(pat_labels, pat_probs_final)
-    pr_auc_pat = average_precision_score(pat_labels, pat_probs_final)
-    
-    prec_max, recall_max, _ = precision_recall_curve(pat_labels, pat_probs_max)
-    pr_auc_max = average_precision_score(pat_labels, pat_probs_max)
-    
-    prec_susp, recall_susp, _ = precision_recall_curve(pat_labels, consensus_df["Count_P90"])
-    pr_auc_susp = average_precision_score(pat_labels, consensus_df["Count_P90"])
-    
-    plt.figure()
-    plt.plot(recall_pat, prec_pat, color='blue', lw=3, label=f'Meta-Classifier (AP = {pr_auc_pat:.4f})')
-    plt.plot(recall_max, prec_max, color='green', linestyle='--', alpha=0.8, label=f'Max Probability (AP = {pr_auc_max:.4f})')
-    plt.plot(recall_susp, prec_susp, color='purple', linestyle=':', alpha=0.8, label=f'Suspicious Count (AP = {pr_auc_susp:.4f})')
-    plt.plot(recall_patch, prec_patch, color='black', linestyle='--', alpha=0.3, label=f'Patch-Level (AP = {pr_auc_patch:.4f})')
-    
-    plt.xlabel('Recall')
-    plt.ylabel('Precision')
-    plt.title('Patient-Level Precision-Recall: Clinical Comparison')
-    plt.legend(loc="lower left")
-    plt.savefig(f"results/{RUN_ID}_patient_pr_curve.png")
-    plt.close()
-
-    print(f"Visual report finished. Patient Accuracy: {consensus_df['Actual'].count()} samples analyzed.")
-
-if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="H. Pylori Visual Generation")
     parser.add_argument("--run_id", type=str, required=True, help="Run ID (e.g., 62_102498)")
     parser.add_argument("--fold", type=int, default=0, help="Fold index (matching training)")
