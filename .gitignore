@@ -20,13 +20,18 @@ _archive/
 best_model.pth
 coverage.xml
 env/
-# Whitelist finalResults for the checkpoint release
-!finalResults/
-!finalResults/**
 meta_rf_classifier.joblib
 nosetests.xml
 pip-delete-this-directory.txt
 pip-log.txt
 results/
-finalResults/*.pth
 venv/
+# Whitelist finalResults for the checkpoint release
+!finalResults/
+!finalResults/**/
+!finalResults/**/*.csv
+!finalResults/**/*.png
+!finalResults/**/*.txt
+finalResults/**/*.pth
+finalResults/**/*.pth.tar
+finalResults/**/*.joblib
