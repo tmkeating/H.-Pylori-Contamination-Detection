@@ -90,16 +90,20 @@ def generate_gradcam(backbone, input_batch, target_layer):
     cam = torch.sum(weights * activations[0], dim=1, keepdim=True)
     cam = F.relu(cam) # ReLU to only keep activations that positively impact the score
     
-    # Normalize heatmap
-    cam = cam.detach().cpu().numpy()
-    cam = cam - np.min(cam)
-    if np.max(cam) > 0:
-        cam = cam / np.max(cam)
+    # Normalize heatmap (SAFETY: handle empty gradients)
+    cam = cam.detach().cpu()
+    cam_min = cam.min()
+    cam = cam - cam_min
+    cam_max = cam.max()
+    if cam_max > 0:
+        cam = cam / cam_max
+    cam = cam.numpy()
     
-    # Resize to input size
-    from scipy.ndimage import zoom
+    # Resize to input size using torch interpolation (more stable than scipy zoom)
+    cam_tensor = torch.tensor(cam[0, 0], dtype=torch.float32).unsqueeze(0).unsqueeze(0)
     h, w = input_batch.shape[2], input_batch.shape[3]
-    heatmap = zoom(cam[0, 0], (h / cam.shape[2], w / cam.shape[3]))
+    cam_resized = F.interpolate(cam_tensor, size=(h, w), mode='bilinear', align_corners=False)
+    heatmap = cam_resized.squeeze().numpy()
     
     return heatmap
 
@@ -267,7 +271,7 @@ def full_visual_report(RUN_ID, MODEL_PATH, MODEL_NAME="convnext_tiny", fold_idx=
         with torch.no_grad():
             for i in range(len(p_subset)):
                 item_data = p_subset[i]
-                img = item_data[0]
+                img = item_data[0]  # Dataset returns (image, label, path)
                 
                 img_t = img.unsqueeze(0).to(DEVICE)
                 _, attn = model.forward_bag(img_t)
