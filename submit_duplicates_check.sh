@@ -1,12 +1,12 @@
 #!/bin/bash
-#SBATCH --job-name=global_dedup
+#SBATCH --job-name=global_duplicates_check
 #SBATCH -p dcca40
 #SBATCH -n 1
 #SBATCH -c 4
 #SBATCH -t 0-02:00
 #SBATCH --mem=32G
-#SBATCH -o results/slurm_dedupe_%j.txt
-#SBATCH -e results/slurm_dedupe_error_%j.txt
+#SBATCH -o results/slurm_duplicates_%j.txt
+#SBATCH -e results/slurm_duplicates_error_%j.txt
 
 # Create results folder if it doesn't already exist
 mkdir -p results

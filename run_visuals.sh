@@ -28,4 +28,4 @@ mkdir -p results
 
 # Run the visual generation script
 echo "Generating Visual Report for Fold 0..."
-python3 generate_visuals.py --run_id 312_INTEGRITY_RUN_V6_107840 --fold 0 --model_name convnext_tiny
+python3 generate_visuals.py 

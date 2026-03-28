@@ -214,8 +214,10 @@ class HPyloriDataset(Dataset):
             self.audit_log = {
                 'total_scanned': 0,
                 'conflict_removed': [],
+                'conflict_patches': 0,
                 'redundant_removed': 0,
-                'final_bags': 0
+                'final_bags': 0,
+                'final_patches': 0
             }
 
             for img_path, label in self.samples:
@@ -230,6 +232,7 @@ class HPyloriDataset(Dataset):
                 if p_id_full in conflict_blacklist:
                     if p_id_full not in self.audit_log['conflict_removed']:
                         self.audit_log['conflict_removed'].append(p_id_full)
+                    self.audit_log['conflict_patches'] += 1
                     continue
                 
                 # Check for specific redundant patches within identified folders
@@ -253,6 +256,10 @@ class HPyloriDataset(Dataset):
                     patient_bags[p_id_full]['pos_samples'].append(img_path)
             
             self.audit_log['final_bags'] = len(patient_bags)
+            
+            # Count total patches in final bags
+            for data in patient_bags.values():
+                self.audit_log['final_patches'] += len(data['samples'])
             
             # --- Export Audit results (Iteration 25.2: Expanded Patient Breakdown) ---
             if hasattr(self, 'audit_prefix') and self.audit_prefix:
@@ -316,6 +323,9 @@ class HPyloriDataset(Dataset):
             if self.audit_log['conflict_removed']:
                 print(f"  Conflict Blacklist: Removed {len(self.audit_log['conflict_removed'])} patient bags {self.audit_log['conflict_removed']}")
             print(f"  Redundant Blacklist: Removed {self.audit_log['redundant_removed']} exact image duplicates")
+            total_patches_removed = self.audit_log['conflict_patches'] + self.audit_log['redundant_removed']
+            print(f"  Total Patches Removed: {total_patches_removed}")
+            print(f"  Total Patches Remaining: {self.audit_log['final_patches']}")
             print(f"  Final Valid Bags: {self.audit_log['final_bags']}")
             print(f"---------------------------------")
 

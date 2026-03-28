@@ -1,23 +1,231 @@
 """
-# H. Pylori Detection Model Architecture (HPyNet)
-# -----------------------------------------------
-# Implementation of a Multiple Instance Learning (MIL) framework specifically 
-# designed for sparse bacterial detection in whole-slide histological images.
-#
-# Components:
-#   1. Feature Extractor (Backbone): 
-#      - Supports ConvNeXt-Tiny (Modern kernels for morphology) or ResNet50.
-#      - Frozen Batch Norm to prevent noise floor instability.
-#   2. Gated Attention MIL:
-#      - tanh(Vx): High-dimensional non-linear feature interaction.
-#      - sigmoid(Ux): Noise suppression gate to filter tissue artifacts.
-#      - Temperature Scaling: Optimizes the "sharpness" of the focus.
-#   3. Entropy Regularization:
-#      - Forced focus on multiple patches to prevent 1-patch "Delta Collapse".
-#
-# Usage:
-#   model = get_model(model_name="convnext_tiny", num_classes=2, pool_type="attention")
-# -----------------------------------------------
+H. Pylori Contamination Detection - Neural Network Architecture (HPyNet)
+========================================================================
+
+OVERVIEW
+--------
+This module implements the complete deep learning architecture for H. Pylori detection
+in high-resolution histological whole-slide images (WSI). The pipeline combines:
+  - Modern backbone architectures (ConvNeXt-Tiny or ResNet50) for feature extraction
+  - Gated Attention Multiple Instance Learning (MIL) for patient-level diagnosis
+  - Memory-efficient inference via gradient checkpointing and chunked processing
+  - Temperature-scaled attention for interpretability and clinical deployment
+
+PURPOSE
+-------
+Provides a unified model interface for both training and inference on patch bags.
+Supports:
+  - Patch-level prediction (single images or small batches)
+  - Bag-level aggregation (100s-1000s of patches from a single patient)
+  - Train and eval modes for proper handling of stochastic components
+  - Clinical deployment modes (Searcher vs. Auditor profiles via temperature tuning)
+
+ARCHITECTURE
+------------
+
+TWO-STAGE DESIGN:
+  Stage 1 (Backbone): Feature extraction from individual patches
+    - Input: (B, 3, 448, 448) preprocessed histology images
+    - Output: (B, feature_dim) learned feature vectors
+    - Architectures: ConvNeXt-Tiny (768-dim) or ResNet50 (2048-dim)
+    - Pretrained on ImageNet → fine-tuned for histology domain
+
+  Stage 2 (MIL Head): Learns from patch-level features to make patient-level predictions
+    - Input: (Bag_Size, feature_dim) aggregated features from all patches
+    - Attention: Gated mechanism learns which patches are diagnostically relevant
+    - Classification: Deep head processes attention-weighted features
+    - Output: (1, num_classes) patient-level logits
+
+GATED ATTENTION MECHANISM:
+  Addresses the challenge of sparse bacterial detection in "noisy" backgrounds (stain
+  artifacts, cell debris, tissue mimics).
+
+  Dual-pathway design:
+    V-pathway (tanh): Captures non-linear morphological interactions
+    U-pathway (sigmoid): Noise filtering gate (learned to suppress false signals)
+    Final score: Element-wise multiplication (V ⊙ U) → softmax
+
+  Temperature scaling: Allows tuning of attention entropy
+    - Lower T: Focus on single most-suspicious patch (Searcher mode)
+    - T = 1.0: Balanced attention (standard training)
+    - Higher T: Diffuse attention (Auditor mode for consensus)
+
+HOW IT WORKS
+------------
+
+TRAINING FLOW (patch-level):
+  1. Load mini-batch of patches: (B, 3, 448, 448)
+  2. Backbone forward: Extract features → (B, feature_dim)
+  3. Classification head: Compute patch logits → (B, 2)
+  4. Loss: Focal Loss to handle false negatives
+  5. Backward: Standard SGD/Adam updates
+
+INFERENCE FLOW (bag-level, patient diagnosis):
+  1. Load all patches for patient: (Bag_Size, 3, 448, 448)
+  2. Memory-efficient processing:
+     a. Chunked feature extraction (prevent OOM on 1000-patch bags)
+     b. Gradient checkpointing (recompute activations during backward)
+  3. MIL aggregation:
+     a. Compute attention weights: A ∈ (1, Bag_Size)
+     b. Weighted pooling: M = A @ Features
+  4. Final classification: logits = head(M)
+  5. Patient probability: prob = softmax(logits)[1]
+
+TEMPERATURE SCALING:
+  During inference, adjust attention sharpness:
+    model.attention_gate.temperature = torch.tensor([0.5])  # Searcher (focused)
+    model.attention_gate.temperature = torch.tensor([1.0])  # Standard
+    model.attention_gate.temperature = torch.tensor([2.0])  # Auditor (diffuse)
+
+USAGE
+-----
+
+BASIC USAGE:
+
+  from model import get_model
+
+  # Create model
+  model = get_model(
+      model_name='convnext_tiny',  # or 'resnet50'
+      num_classes=2,
+      pretrained=True,
+      pool_type='attention'         # or 'max' for max-pooling baseline
+  ).to(device)
+
+PATCH-LEVEL INFERENCE:
+
+  # Single forward pass on a batch of images
+  batch_images = torch.randn(32, 3, 448, 448).to(device)
+  logits = model(batch_images)              # (32, 2)
+  probs = F.softmax(logits, dim=1)          # (32, 2) with softmax
+
+  # Get features for gradient computation (e.g., Grad-CAM)
+  logits, features = model(batch_images, return_features=True)
+  # logits: (32, 2), features: (32, feature_dim)
+
+BAG-LEVEL INFERENCE (Patient Diagnosis):
+
+  # MIL forward pass on all patches from a patient
+  patient_patches = torch.randn(847, 3, 448, 448).to(device)
+  logits, attention = model.forward_bag(patient_patches, chunk_size=64)
+  # logits: (1, 2) - patient-level prediction
+  # attention: (1, 847) - which patches matter most
+
+TRAINING MODE:
+
+  model.train()
+  # Mini-batch training on patches (not full bags)
+  for batch_images, batch_labels in train_loader:
+      logits = model(batch_images)
+      loss = focal_loss(logits, batch_labels)
+      loss.backward()
+      optimizer.step()
+
+CLASS REFERENCE
+---------------
+
+AttentionGate(feature_dim=2048, hidden_dim=256)
+  Gated Attention mechanism for MIL pooling.
+  
+  Components:
+    - v_proj: Non-linear projection (tanh) for morphology interaction
+    - u_gate: Learned sigmoid gate for noise filtering
+    - w_score: Final attention score computation
+    - temperature: Learnable parameter for entropy control
+  
+  Forward:
+    Input: (N, feature_dim) patch features
+    Output: (1, N) normalized attention weights (softmax)
+  
+  Attributes:
+    - temperature: nn.Parameter for attention sharpness (tune during inference)
+
+HPyNet(model_name, num_classes, pretrained, pool_type)
+  Main model wrapper combining backbone + MIL head.
+  
+  Parameters:
+    model_name: "resnet50" or "convnext_tiny"
+    num_classes: 2 for binary classification (negative/positive)
+    pretrained: Load ImageNet weights (highly recommended)
+    pool_type: "attention" (learnable) or "max" (baseline)
+  
+  Methods:
+    forward(x, return_features=False)
+      Patch-level forward pass
+      Input: (B, 3, 448, 448)
+      Output: (B, num_classes) logits or (B, num_classes), (B, feature_dim) if return_features
+      
+    forward_bag(x, chunk_size=8)
+      Memory-efficient bag-level aggregation for MIL
+      Input: (Bag_Size, 3, 448, 448)
+      Output: ((1, num_classes), (1, Bag_Size)) logits and attention weights
+      Uses gradient checkpointing for memory efficiency
+  
+  Attributes:
+    backbone: Feature extractor (ResNet50 or ConvNeXt-Tiny)
+    patch_head: Classification head (Linear layers with ReLU/Dropout)
+    attention_gate: AttentionGate instance (None if pool_type="max")
+    feature_dim: Dimensionality of backbone output (768 or 2048)
+    pool_type: Aggregation method used in forward_bag
+
+get_model(model_name, num_classes, pretrained, pool_type)
+  Factory function to instantiate model.
+  Recommended: Use this instead of direct class instantiation.
+  
+  Returns: HPyNet instance ready for training/inference
+
+MODEL VARIANTS
+--------------
+
+CONVNEXT-TINY (Recommended for H. Pylori)
+  - 28M parameters, modern architecture
+  - 7×7 receptive fields → better morphology extraction
+  - Faster training, fewer GPU hours
+  - Default backbone in production
+
+RESNET50 (Classical Baseline)
+  - 25M parameters, extensively tested
+  - Highly optimized for torch.compile
+  - Stable training, good generalization
+  - Useful for cross-architecture validation
+
+POOLING STRATEGIES
+
+ATTENTION (Default)
+  - Learnable: Can adapt to patient cohort
+  - Interpretable: Attention weights provide diagnostic hints
+  - Flexible: Temperature tuning for deployment profiles
+  - Recommended for clinical deployment
+
+MAX-POOLING (Baseline)
+  - Non-learnable: Fixed aggregation strategy
+  - Fast: No attention gate computation
+  - Precision-focused: Routes gradients only to top feature
+  - Use for: Ablation studies, extreme resource constraints
+
+INTEGRATION POINTS
+------------------
+Called from:
+  - train.py: Main training loop, model instantiation and checkpoint saving
+  - generate_visuals.py: Loading trained checkpoint for evaluation reporting
+  - Custom scripts: Inference and model analysis
+
+DEPENDENCIES
+------------
+  - PyTorch: nn.Module, backprop, gradient checkpointing
+  - Torchvision: ResNet50, ConvNeXt-Tiny pretrained weights
+  - CUDA (optional but recommended): GPU acceleration for training/inference
+
+NOTES
+-----
+  - All forward passes expect (B, 3, 448, 448) images (or (Bag_Size, 3, 448, 448) for bags)
+  - Images should be normalized to ImageNet stats: μ=[0.485, 0.456, 0.406], σ=[0.229, 0.224, 0.225]
+  - Gradient checkpointing in forward_bag trades compute for GPU memory (recommended for bags > 500 patches)
+  - Chunk size in forward_bag should be tuned to GPU VRAM (larger chunks = faster, 64-256 typical)
+  - Temperature scaling should be adjusted post-training for clinical deployment (not during training)
+  - Frozen batch norm (if enabled in training) prevents noise floor instability
+  - Max-pooling baseline ignores attention gate (set to None internally)
+  - Output features from backbone are guaranteed to be flattened to 2D before classification head
 """
 import torch # The core Deep Learning library
 import torch.nn as nn # Tools to build layers for our "brain"

@@ -1,24 +1,208 @@
 """
-# H. Pylori Diagnostic Training & Evaluation Executive
-# ---------------------------------------------------
-# This is the primary execution script for training and evaluating the HPyNet 
-# (ConvNeXt/ResNet) models using a Multiple Instance Learning (MIL) framework.
-#
-# What it does:
-#   1. Training Loop: Implements AdamW optimization with high-resolution 
-#      Focal Loss to prioritize sparse bacterial signals over tissue noise.
-#   2. MIL Aggregation: Features Gated Attention pooling with Entropy 
-#      Regularization to prevent fixation on single artifacts (Prop 12).
-#   3. Advanced Inference: Executes 16-way contrast-boosted Test-Time 
-#      Augmentation (TTA) and overlapping sliding window coverage (Prop 24.9).
-#   4. Robust Evaluation: Generates patient-level consensus reports, 
-#      ROC/PR curves, and confusion matrices for clinical validation.
-#   5. Stability Measures: Integrates Stochastic Weight Averaging (SWA) and 
-#      Gradient Clipping to ensure convergence on difficult "Ghost Patients".
-#
-# Usage:
-#   python3 train.py --fold 0 --profile SEARCHER --model_name convnext_tiny
-# ---------------------------------------------------
+H. Pylori Contamination Detection - Model Training and Evaluation
+=================================================================
+
+OVERVIEW
+--------
+This is the primary training and evaluation script for H. Pylori detection models.
+It implements a complete deep learning pipeline including:
+  - Cross-validation training with Focal Loss for imbalanced patch datasets
+  - Gated Attention-based Multiple Instance Learning (MIL) for patient-level predictions
+  - Advanced inference with 16-way Test-Time Augmentation (TTA) and sliding windows
+  - Patient-level consensus voting and comprehensive evaluation metrics
+  - Stochastic Weight Averaging (SWA) for model stability and generalization
+  - Automatic visualization generation: learning curves, ROC/PR curves, Grad-CAM heatmaps
+
+PURPOSE
+-------
+This script handles the complete model lifecycle for a specific cross-validation fold:
+  - Trains the backbone (ConvNeXt-Tiny or ResNet50) on training patches
+  - Validates on held-out validation patients
+  - Generates trained checkpoints (.pth files)
+  - Produces comprehensive evaluation reports and visualizations
+  
+Designed for computational cluster submission (SLURM) with automatic job ID tracking
+to prevent race conditions during multi-fold parallel training.
+
+HOW IT WORKS
+------------
+1. Data Preparation: Loads dataset, splits by patient into K folds
+2. Training Loop: For each epoch...
+   a. Forward pass: Input bags of patches → patch-level logits → MIL aggregation
+   b. Loss computation: Focal Loss (downweights easy negatives, upweights hard positives)
+   c. Backward pass: Computes gradients, applies gradient clipping if enabled
+   d. Optimizer step: AdamW with OneCycleLR scheduler updates model weights
+3. Validation: Runs MIL inference on validation fold, computes patient-level metrics
+4. SWA (optional): After training, averages model weights over final epochs for stability
+5. Test-Time Augmentation: Applies 16 augmentations during final inference (contrast boost)
+6. Patient Consensus: Aggregates multiple instance predictions into final diagnosis
+7. Evaluation: Computes confusion matrix, ROC/PR curves, and generates visualizations
+8. Output: Saves model checkpoint, evaluation metrics, and PNG visualizations
+
+USAGE
+-----
+Run from command line with required arguments:
+
+  python train.py --fold <FOLD> [--num_folds <NUM_FOLDS>] [--model_name <MODEL>] [options...]
+
+ARGUMENTS
+---------
+REQUIRED:
+  --fold <INT>
+    Cross-validation fold index (0 to num_folds-1)
+    Each fold trains on different subset of patients
+    Run once per fold for complete K-fold evaluation
+
+ARCHITECTURE:
+  --model_name {convnext_tiny, resnet50}
+    Default: convnext_tiny
+    Backbone architecture for feature extraction
+    convnext_tiny: 28M params, efficient, high accuracy
+    resnet50: Classical, 25M params, stable training
+
+CROSS-VALIDATION:
+  --num_folds <INT>
+    Default: 5
+    Total number of folds for cross-validation
+    Determines patient split strategy
+
+LOSS FUNCTION:
+  --pos_weight <FLOAT>
+    Default: 7.5
+    Weight for positive class in Focal Loss
+    Higher = penalize false negatives more heavily
+    
+  --neg_weight <FLOAT>
+    Default: 1.0
+    Weight for negative class (background patches)
+    
+  --gamma <FLOAT>
+    Default: 1.0
+    Focal Loss gamma parameter (hardness of focusing)
+    Lower gamma = softer focus on hard examples
+    Higher gamma = harder focus on misclassified examples
+
+TRAINING HYPERPARAMETERS:
+  --num_epochs <INT>
+    Default: 15
+    Number of training epochs
+    
+  --pct_start <FLOAT>
+    Default: 0.1
+    Percentage of epochs for warmup in OneCycleLR scheduler
+    
+  --weight_decay <FLOAT>
+    Default: 0.01
+    L2 regularization coefficient for optimizer
+    
+  --clip_grad <FLOAT>
+    Default: 0.0 (disabled)
+    Gradient clipping norm (prevents exploding gradients)
+    Recommended: 1.0-2.0 for unstable training
+    
+  --jitter <FLOAT>
+    Default: 0.15
+    ColorJitter intensity (brightness/contrast augmentation)
+    Range: [0.0, 1.0], higher = more aggressive augmentation
+
+CHECKPOINT & EVALUATION:
+  --saver_metric {loss, recall, f1}
+    Default: recall
+    Metric used to select best model checkpoint
+    recall: Minimizes false negatives (clinical priority)
+    f1: Balanced metric
+    loss: Training loss
+    
+STOCHASTIC WEIGHT AVERAGING:
+  --use_swa {True, False}
+    Default: True
+    Enable SWA for improved generalization
+    Averages model weights over final epochs
+    
+  --swa_start <INT>
+    Default: 15
+    Epoch to begin SWA averaging
+    Recommended: After most training is complete
+
+ARCHITECTURE OPTIONS:
+  --pool_type {attention, max}
+    Default: attention
+    MIL pooling aggregation type
+    attention: Gated attention mechanism (preferred)
+    max: Simple max pooling (baseline)
+    
+  --freeze_bn {True, False}
+    Default: False
+    Freeze BatchNorm layers during training
+    Use True if training on very small batches
+    
+METADATA:
+  --iter <STR>
+    Default: "24.9"
+    Iteration version tag for output filenames
+    Used for tracking experimental versions
+
+EXAMPLES
+--------
+  # Default ConvNeXt-Tiny, fold 0, 5-fold CV
+  python train.py --fold 0
+  
+  # ResNet50 backbone, fold 2, 10-fold CV
+  python train.py --fold 2 --model_name resnet50 --num_folds 10
+  
+  # Aggressive training: high pos_weight, strong gradient clipping
+  python train.py --fold 0 --pos_weight 15.0 --gamma 2.0 --clip_grad 1.5
+  
+  # Disable SWA, use custom learning rate warmup
+  python train.py --fold 0 --use_swa False --pct_start 0.2
+  
+  # Batch submission (all 5 folds for 5-fold CV):
+  for i in {0..4}; do
+    python train.py --fold $i --model_name convnext_tiny &
+  done
+
+OUTPUT
+------
+All outputs saved in: results/
+
+Model Checkpoints:
+  {RUN_ID}_f{FOLD}_{MODEL}_model_brain.pth
+    Full model state dict for inference
+  {RUN_ID}_f{FOLD}_{MODEL}_swa_model_brain.pth
+    SWA-averaged model (if --use_swa True)
+
+Evaluation Reports:
+  {RUN_ID}_f{FOLD}_{MODEL}_evaluation_report.csv
+    Detailed metrics: accuracy, precision, recall, F1, ROC-AUC, PR-AUC, etc.
+  {RUN_ID}_f{FOLD}_{MODEL}_patient_consensus.csv
+    Patient-level predictions and probabilities
+
+Visualizations (PNG):
+  learning_curves_{RUN_ID}.png - Training/validation loss and accuracy
+  confusion_matrix_{RUN_ID}.png - 2x2 patient-level confusion matrix
+  probability_hist_{RUN_ID}.png - Distribution of predicted probabilities
+  roc_curve_{RUN_ID}.png - ROC curve with AUC score
+  pr_curve_{RUN_ID}.png - Precision-Recall curve with AP score
+  top_patients_*.png - Top-ranked predictions with Grad-CAM heatmaps
+  false_negatives_*.png - Misclassified negatives with attention maps
+
+REQUIREMENTS
+------------
+  - PyTorch with GPU support (CUDA recommended for reasonable training time)
+  - H. Pylori dataset at: /import/fhome/vlia/HelicoDataSet or ../HelicoDataSet
+  - 32GB+ GPU VRAM recommended (adjust batch size if needed)
+  - Models: ConvNeXt-Tiny or ResNet50 from torchvision
+
+NOTES
+-----
+  - Training uses AdamW optimizer with OneCycleLR scheduler
+  - Focal Loss is customized with label smoothing to prevent overconfidence
+  - Test-Time Augmentation (TTA) applies 16 random contrast-boosted versions of each patch
+  - MIL aggregation uses Gated Attention pooling for interpretability
+  - SWA improves generalization by averaging weights over final epochs
+  - Grad-CAM uses input-level gradient saliency (model-agnostic)
+  - All fold indices are 0-based (0 to num_folds-1)
+  - Output file naming automatically avoids collisions using SLURM Job ID if available
 """
 import os                       # Standard library for file path management
 import torch                    # Core library for deep learning
@@ -48,6 +232,10 @@ import re                          # Regexp to handle file numbering
 import gc
 import torch.nn.functional as F
 from normalization import MacenkoNormalizer
+from visualization_utils import (
+    generate_gradcam, plot_learning_curves, plot_confusion_matrix,
+    plot_probability_histogram, plot_roc_curve, plot_pr_curve, plot_gradcam_pair
+)
 
 class FocalLoss(nn.Module):
     """
@@ -86,50 +274,6 @@ class FocalLoss(nn.Module):
         pt = torch.exp(-ce_loss)
         focal_loss = self.alpha * (1 - pt)**self.gamma * ce_loss
         return focal_loss.mean()
-
-def generate_gradcam(model, input_batch, target_layer):
-    """Generates Grad-CAM heatmaps for a batch of images."""
-    model.eval()
-    
-    # Hooks to store activations and gradients
-    activations = []
-    gradients = []
-    
-    def save_activation(module, input, output):
-        activations.append(output)
-    
-    def save_gradient(module, grad_input, grad_output):
-        gradients.append(grad_output[0])
-    
-    # Attach hooks to the target layer
-    handle_a = target_layer.register_forward_hook(save_activation)
-    handle_g = target_layer.register_full_backward_hook(save_gradient)
-    
-    # Forward pass
-    logits = model(input_batch)
-    probs = F.softmax(logits, dim=1)
-    
-    # Use the class with highest probability as target
-    score = logits[:, logits.argmax(dim=1)]
-    model.zero_grad()
-    score.backward(torch.ones_like(score))
-    
-    # Remove hooks
-    handle_a.remove()
-    handle_g.remove()
-    
-    # Pool gradients across width/height
-    weights = torch.mean(gradients[0], dim=(2, 3), keepdim=True)
-    # Weighted sum of activations
-    cam = torch.sum(weights * activations[0], dim=1, keepdim=True)
-    # ReLU to keep only positive influence
-    cam = F.relu(cam)
-    
-    # Normalize
-    cam_min, cam_max = cam.min(), cam.max()
-    cam = (cam - cam_min) / (cam_max - cam_min + 1e-7)
-    
-    return cam.detach().cpu().numpy(), probs.detach().cpu().numpy()
 
 def get_next_run_number(results_dir="results", current_slurm_id=None):
     """
@@ -312,7 +456,24 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
     
     # Get the numeric run ID and the SLURM job ID (if it exists)
     slurm_id = os.environ.get("SLURM_JOB_ID", "local")
-    run_id = f"{get_next_run_number(results_dir, slurm_id):02d}"
+    
+    # Multi-fold experiment consistency: Check if files for this experiment already exist
+    # If so, reuse the same run_id for all folds (instead of incrementing per fold)
+    existing_run_id = None
+    if os.path.exists(results_dir):
+        for filename in os.listdir(results_dir):
+            # Look for files matching pattern: {run_id}_{iter_name}_*_{model_name}*
+            # E.g., "313_IntegrityRunV7_108020_f0_convnext_tiny_model_brain.pth"
+            match = re.match(rf"^(\d+)_{re.escape(iter_name)}_\d+_{model_name}", filename)
+            if match:
+                existing_run_id = match.group(1)
+                break
+    
+    # Use existing run_id if found (for multi-fold consistency), otherwise generate new one
+    if existing_run_id:
+        run_id = existing_run_id
+    else:
+        run_id = f"{get_next_run_number(results_dir, slurm_id):02d}"
     
     # Iteration 25.0: Added iteration name to prefix for better output organization
     prefix = f"{run_id}_{iter_name}_{slurm_id}_f{fold_idx}_{model_name}" 
@@ -909,43 +1070,29 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
 
     # --- Step 7.9: Save Learning Curves (Iteration 14 Clinical Audit) ---
     # Visualizing the convergence behavior is critical for diagnosing 'Recall Oscillations'.
-    # We plot Loss and Accuracy for both Train and Validation sets.
-    plt.figure(figsize=(12, 5))
-    
-    # Loss Plot: Monitor for overfitting or Divergence in the Gated Attention layers.
-    plt.subplot(1, 2, 1)
-    plt.plot(history['train_loss'], label='Train Loss', color='tab:blue', linestyle='--')
-    plt.plot(history['val_loss'], label='Val Loss', color='tab:blue')
-    plt.title('Patient-Level Loss Convergence')
-    plt.xlabel('Epochs')
-    plt.ylabel('Focal Loss')
-    plt.legend()
-    
-    # Accuracy Plot: Monitor for 'Plateauing' or 'Delta Collapse'.
-    plt.subplot(1, 2, 2)
-    plt.plot(history['train_acc'], label='Train Acc', color='tab:orange', linestyle='--')
-    plt.plot(history['val_acc'], label='Val Acc', color='tab:orange')
-    plt.title('Patient-Level Accuracy Hunt')
-    plt.xlabel('Epochs')
-    plt.ylabel('Accuracy')
-    plt.legend()
-    
-    plt.tight_layout()
-    plt.savefig(history_path)
-    plt.close() # Critical: Prevent RAM/Backend accumulation during 5-fold CV
+    plot_learning_curves(history, history_path)
     print(f"Saved clinical learning curves to {history_path}")
 
     # Step 7.11: Use Best Metric Model for final validation if SWA degraded performance
+    model_selection_metadata = {"use_swa": True, "best_recall": best_recall, "last_val_recall": val_recall}
+    
     if use_swa:
         # Check if Best Recall from loop is higher than SWA's current state
         # We load the weights from 'best_model_path' (saved during training) back into model
         if best_recall > val_recall:
             print(f"SWA performance ({val_recall:.4f}) is below Best Recall ({best_recall:.4f}). Loading best metric model...")
             model.load_state_dict(torch.load(best_model_path))
+            model_selection_metadata["use_swa"] = False
         else:
             # If SWA is at least equal in recall, use it
             model = swa_model.module
         
+    # Save metadata about which model was selected for later reference
+    import json
+    model_metadata_path = os.path.join(results_dir, f"{prefix}_model_selection.json")
+    with open(model_metadata_path, 'w') as f:
+        json.dump(model_selection_metadata, f, indent=2)
+    
     model.to(device)
     model.eval()
 
@@ -1208,36 +1355,13 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
     print("\nGenerating final metrics and interpretability maps...")
     
     # 1. Confusion Matrix
-    cm = confusion_matrix(all_labels_pat, all_preds_pat)
-    plt.figure(figsize=(8, 6))
-    ConfusionMatrixDisplay(cm, display_labels=['Negative', 'Positive']).plot(cmap='Blues')
-    plt.title('Patient-Level Confusion Matrix')
-    plt.savefig(patient_cm_path)
-    plt.close()
+    plot_confusion_matrix(all_labels_pat, all_preds_pat, patient_cm_path)
 
     # 2. Probability Histogram
-    plt.figure(figsize=(8, 6))
-    plt.hist(all_probs_pat[all_labels_pat == 0], bins=20, alpha=0.5, label='Actual Negative', color='blue')
-    plt.hist(all_probs_pat[all_labels_pat == 1], bins=20, alpha=0.5, label='Actual Positive', color='red')
-    plt.axvline(x=0.5, color='black', linestyle='--', label='Threshold (0.5)')
-    plt.xlabel('Predicted Probability (Positive Class)')
-    plt.ylabel('Patient Count')
-    plt.title('Patient-Level Probability Distribution')
-    plt.legend()
-    plt.savefig(hist_path)
-    plt.close()
+    plot_probability_histogram(all_probs_pat, all_labels_pat, hist_path)
 
     # 3. Precision-Recall Curve
-    precision, recall, _ = precision_recall_curve(all_labels_pat, all_probs_pat)
-    avg_prec = average_precision_score(all_labels_pat, all_probs_pat)
-    plt.figure()
-    plt.plot(recall, precision, color='green', lw=2, label=f'PR (AP = {avg_prec:0.2f})')
-    plt.xlabel('Recall')
-    plt.ylabel('Precision')
-    plt.title('Patient-Level PR Curve')
-    plt.legend()
-    plt.savefig(patient_pr_path)
-    plt.close()
+    plot_pr_curve(all_labels_pat, all_probs_pat, patient_pr_path)
 
     # 4. Grad-CAM Samples from Hold-Out
     print(f"Generating Grad-CAM for most suspicious patient bags in {gradcam_dir}...")
@@ -1245,13 +1369,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
     # top_indices: highest probability, fn_indices: highest prob among actual positive that were pred 0
     top_indices = np.argsort(all_probs_pat)[-5:] 
     
-    # Target the last conv layer for Grad-CAM
-    # For ConvNeXt-Tiny, it's typically the last block of the last stage
-    if "convnext" in model_name:
-        # ConvNeXt Features Stage 4 Block 3
-        target_layer = model.backbone.features[7][2].block[5]
-    else:
-        target_layer = model.backbone.layer4[2]
+    # Note: Target layer no longer needed with new input-gradient based Grad-CAM implementation
 
     # Free up memory before visualization
     # Iteration 24.9: Clear all training/evaluation gradients and model temporary buffers
@@ -1300,27 +1418,14 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
             
             # Context to enable gradients for Grad-CAM on this specific patch
             with torch.enable_grad():
-                heatmap, p_probs = generate_gradcam(model.backbone, patch_input, target_layer)
+                heatmap, p_probs = generate_gradcam(model.backbone, patch_input)
             
-            # Plotting logic
-            plt.figure(figsize=(10, 5))
-            # Original Patch
-            plt.subplot(1, 2, 1)
-            orig_img = patch_img[0].cpu().permute(1, 2, 0).numpy()
-            plt.imshow(orig_img)
-            plt.title(f"Patch {p_idx} (Attn: {top_patch_vals[rank]:.4f})")
-            plt.axis('off')
-            
-            # Heatmap
-            plt.subplot(1, 2, 2)
-            plt.imshow(orig_img)
-            plt.imshow(heatmap[0, 0], cmap='jet', alpha=0.5)
-            plt.title(f"Grad-CAM (Pos Prob: {p_probs[0, 1]:.4f})")
-            plt.axis('off')
-            
-            out_path = os.path.join(gradcam_dir, f"{p_id}_rank{rank}_patch{p_idx}.png")
-            plt.savefig(out_path, bbox_inches='tight')
-            plt.close()
+            # Plot side-by-side visualization (original + heatmap overlay)
+            plot_gradcam_pair(
+                patch_img, heatmap[0, 0], p_id, rank, p_idx,
+                top_patch_vals[rank].item(), p_probs[0, 1],
+                is_false_negative=False, output_dir=gradcam_dir
+            )
             
             # Cleanup per patch
             del patch_img, patch_input, heatmap
@@ -1385,24 +1490,14 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
                 # backbone and see which pixels "confused" the model or were 
                 # deemed insufficient for a positive diagnosis.
                 with torch.enable_grad():
-                    heatmap, p_probs = generate_gradcam(model.backbone, patch_input, target_layer)
+                    heatmap, p_probs = generate_gradcam(model.backbone, patch_input)
                 
-                plt.figure(figsize=(10, 5))
-                plt.subplot(1, 2, 1)
-                orig_img = patch_img[0].cpu().permute(1, 2, 0).numpy()
-                plt.imshow(orig_img)
-                plt.title(f"FN Patch {p_idx} (Attn: {top_patch_vals[rank]:.4f})")
-                plt.axis('off')
-                
-                plt.subplot(1, 2, 2)
-                plt.imshow(orig_img)
-                plt.imshow(heatmap[0, 0], cmap='jet', alpha=0.5)
-                plt.title(f"FN Grad-CAM (Pos Prob: {p_probs[0, 1]:.4f})")
-                plt.axis('off')
-                
-                out_path = os.path.join(gradcam_dir, f"FN_{p_id}_rank{rank}_patch{p_idx}.png")
-                plt.savefig(out_path, bbox_inches='tight')
-                plt.close()
+                # Plot side-by-side visualization for false negative (ghost patient)
+                plot_gradcam_pair(
+                    patch_img, heatmap[0, 0], p_id, rank, p_idx,
+                    top_patch_vals[rank].item(), p_probs[0, 1],
+                    is_false_negative=True, output_dir=gradcam_dir
+                )
                 
                 # Full memory sweep between patches to avoid VRAM fragmentation
                 del patch_img, patch_input, heatmap
