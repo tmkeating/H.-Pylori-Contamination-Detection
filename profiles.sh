@@ -38,7 +38,7 @@ function set_profile_SEARCHER() {
     # Higher WD to prevent 100% Training Accuracy (Overfitting)
     export WEIGHT_DECAY=0.05
     # Reduced epochs with early stopping potential
-    export NUM_EPOCHS=1
+    export NUM_EPOCHS=20
     export SAVER_METRIC="f1"
     export FREEZE_BN="True"
     export CLIP_GRAD=1.0

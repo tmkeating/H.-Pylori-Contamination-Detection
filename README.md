@@ -16,7 +16,7 @@ sbatch submit_dedupe.sh
 ### 1. Training (5-Fold Cross-Validation)
 Launch the primary training sweep using the `SEARCHER` profile. This uses ConvNeXt-Tiny with Attention-MIL and SWA.
 ```bash
-sbatch submit_all_folds.sh
+PROFILE=SEARCHER MODEL_NAME=convnext_tiny ITER=27.0 ./submit_all_folds.sh
 ```
 *Outputs: `results/*_model_brain.pth` and `results/*_patient_consensus.csv`.*
 

@@ -96,6 +96,7 @@ import matplotlib.pyplot as plt
 import os
 import sys
 import argparse
+import gc
 from tqdm import tqdm
 from dataset import HPyloriDataset
 from model import get_model
@@ -153,11 +154,11 @@ def full_visual_report(RUN_ID, MODEL_PATH, MODEL_NAME="convnext_tiny", fold_idx=
     OUTPUT_DIR = os.path.join("results", f"{full_prefix}_gradcam_samples")
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    # Initialize Dataset (Hold-out / Unseen Test Set) with full bags
+    # Initialize Dataset (Hold-out / Unseen Test Set) with manageable bag size
     full_dataset = HPyloriDataset(
         HOLDOUT_DIR, PATIENT_CSV, PATCH_CSV, 
         transform=VAL_TRANSFORM, bag_mode=True, 
-        max_bag_size=10000, train=False
+        max_bag_size=1000, train=False  # Reduced from 10000 to save memory
     )
     
     print(f"Evaluating on complete holdout set: {len(full_dataset)} patients")
@@ -165,7 +166,7 @@ def full_visual_report(RUN_ID, MODEL_PATH, MODEL_NAME="convnext_tiny", fold_idx=
     # Create DataLoader: one patient (bag) per batch
     val_loader = DataLoader(
         full_dataset, batch_size=1, shuffle=False, 
-        num_workers=0, pin_memory=True
+        num_workers=0, pin_memory=False  # Reduced VRAM usage
     )
     
     # Load Model (Attention-MIL Architecture)
@@ -204,9 +205,10 @@ def full_visual_report(RUN_ID, MODEL_PATH, MODEL_NAME="convnext_tiny", fold_idx=
     pat_to_dataset_idx = {}  # Map patient_id to dataset index for reloading
     
     patient_performance = []
-    vram_bag_limit = 500
+    vram_bag_limit = 250  # Reduced from 500 to save VRAM, process smaller chunks
     
     print(f"Running Inference on {len(full_dataset)} Validation Patients...")
+    print(f"(Using smaller chunks: max_bag_size=1000, vram_limit={vram_bag_limit}, max_patches_for_gradcam=100)")
     
     with torch.no_grad():
         # Also need to track the index in the dataset
@@ -238,8 +240,10 @@ def full_visual_report(RUN_ID, MODEL_PATH, MODEL_NAME="convnext_tiny", fold_idx=
                 prob = torch.softmax(logits, dim=1)[0, 1].item()
                 bag_probs_list.append(prob)
                 
-                # Free chunk memory immediately
+                # Free chunk memory immediately and aggressively clear cache
                 del chunk
+                torch.cuda.empty_cache()
+                gc.collect()
             
             # Average across chunks
             prob = np.mean(bag_probs_list)
@@ -259,6 +263,9 @@ def full_visual_report(RUN_ID, MODEL_PATH, MODEL_NAME="convnext_tiny", fold_idx=
             del bags
             torch.cuda.empty_cache()
     all_labels_bin = [1 if l != 0 else 0 for l in all_labels]
+    
+    # Create performance dataframe for Grad-CAM selection
+    perf_df = pd.DataFrame(patient_performance)
     
     # --- Step 2: Visualization Plots ---
     # 1. Confusion Matrix
@@ -296,7 +303,7 @@ def full_visual_report(RUN_ID, MODEL_PATH, MODEL_NAME="convnext_tiny", fold_idx=
         
         # Get attention weights to pick the most important patches
         all_attns = []
-        max_patches_to_check = min(bags_tensor.size(0), 500)
+        max_patches_to_check = min(bags_tensor.size(0), 100)  # Reduced from 500 for speed
         
         with torch.no_grad():
             for i in range(max_patches_to_check):

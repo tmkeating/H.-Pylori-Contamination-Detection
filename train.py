@@ -830,9 +830,10 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
                 if attention is not None:
                     # entropy = -sum(p * log(p))
                     att_entropy = -torch.sum(attention * torch.log(attention + 1e-8))
-                    # Minimize -entropy == Maximize entropy
-                    # coefficient 0.001 is a safe starting point
-                    loss = loss - 0.001 * att_entropy 
+                    # We want HIGH entropy (distributed attention)
+                    # Low entropy (delta collapse) should increase loss
+                    entropy_penalty = -att_entropy  # Flip sign: rewards high entropy
+                    loss = loss + 0.01 * entropy_penalty  # Increased coefficient: 0.001 → 0.01 
                 
                 loss = loss / accumulation_steps
             
