@@ -121,17 +121,28 @@ class DatasetAuditor:
         
         self.totals = {}
         self.scratch_totals = {}
-        self.blacklist = self._load_blacklist()
+        self.blacklist = set()
+        self.image_blacklist = []
+        self.blacklisted_patches_count = 0
+        self._load_blacklist()
         
     def _load_blacklist(self):
-        """Load the blacklist of duplicate bags to exclude from count."""
+        """Load the blacklist of duplicate bags and images to exclude from sync."""
         blacklist_path = Path('blacklist.json')
         try:
             with open(blacklist_path, 'r') as f:
                 blacklist_data = json.load(f)
-                return set(blacklist_data.get('conflict_blacklist', {}).keys())
+                self.blacklist = set(blacklist_data.get('conflict_blacklist', {}).keys())
+                
+                # Load image_blacklist, but filter out entries in already-blacklisted bags
+                all_image_blacklist = blacklist_data.get('image_blacklist', [])
+                self.image_blacklist = [
+                    item for item in all_image_blacklist 
+                    if item.get('folder') not in self.blacklist
+                ]
         except:
-            return set()
+            self.blacklist = set()
+            self.image_blacklist = []
     
     def count_png_files(self):
         """Recursively count PNG files in permanent dataset directory."""
@@ -165,9 +176,10 @@ class DatasetAuditor:
                     if len(path_parts) >= 1:
                         bag_folder = path_parts[0]  # e.g., "B22-01_0"
                         
-                        # Skip blacklisted bags
+                        # Skip blacklisted bags, but count them
                         if bag_folder in self.blacklist:
                             print(f"  ⊘ SKIPPED (blacklisted): {bag_folder} ({len(png_files)} files)")
+                            self.blacklisted_patches_count += len(png_files)
                             continue
                         
                         # Extract patient ID (e.g., "B22-01" from "B22-01_0")
@@ -331,8 +343,8 @@ class DatasetAuditor:
         
         print(f"\n💡 NOTES:")
         print(f"  - Blacklisted bags (duplicates/conflicts): {len(self.blacklist)}")
-        print(f"  - These bags were excluded from counts")
-        print(f"  - Check blacklist.json for details on excluded bags")
+        print(f"  - Included in permanent count, excluded from scratch sync")
+        print(f"  - Check blacklist.json for details on blacklisted bags")
         
         print("\n" + "="*80)
     
@@ -388,6 +400,19 @@ class DatasetAuditor:
                 header_rows.append({'Directory': 'Status', 'Patient': f'EXTRA: {abs(sync_discrepancy):,} extra patches in scratch', 'Bags': '', 'Total_Patches': '', 'Bag_Details': ''})
             else:
                 header_rows.append({'Directory': 'Status', 'Patient': 'FULLY SYNCED: All patches accounted for', 'Bags': '', 'Total_Patches': '', 'Bag_Details': ''})
+        
+        # Add blacklist summary right after sync status
+        expected_difference = self.blacklisted_patches_count + len(self.image_blacklist)
+        actual_difference = grand_total - scratch_grand_total
+        
+        header_rows.append({'Directory': '', 'Patient': '', 'Bags': '', 'Total_Patches': '', 'Bag_Details': ''})
+        header_rows.append({'Directory': 'BLACKLIST SUMMARY', 'Patient': '', 'Bags': '', 'Total_Patches': '', 'Bag_Details': ''})
+        header_rows.append({'Directory': '-' * 70, 'Patient': '', 'Bags': '', 'Total_Patches': '', 'Bag_Details': ''})
+        header_rows.append({'Directory': '  Blacklisted bags (conflict_blacklist)', 'Patient': f'{len(self.blacklist)} bags', 'Bags': '', 'Total_Patches': f'{self.blacklisted_patches_count:,} patches', 'Bag_Details': 'Excluded from scratch sync'})
+        header_rows.append({'Directory': '  Blacklisted images (image_blacklist)', 'Patient': f'{len(self.image_blacklist)} images', 'Bags': '', 'Total_Patches': '', 'Bag_Details': 'Individual duplicates'})
+        header_rows.append({'Directory': '  Total blacklisted items', 'Patient': f'{len(self.blacklist) + len(self.image_blacklist)} items', 'Bags': '', 'Total_Patches': f'{expected_difference:,} approx patches', 'Bag_Details': 'Conflict bags + individual images'})
+        header_rows.append({'Directory': '  Expected Permanent vs Scratch difference', 'Patient': '', 'Bags': '', 'Total_Patches': f'{expected_difference:,} patches', 'Bag_Details': 'Based on blacklist removals'})
+        header_rows.append({'Directory': '  Actual Permanent vs Scratch difference', 'Patient': '', 'Bags': '', 'Total_Patches': f'{actual_difference:,} patches', 'Bag_Details': 'Observed from counts'})
         
         header_rows.append({'Directory': '', 'Patient': '', 'Bags': '', 'Total_Patches': '', 'Bag_Details': ''})
         header_rows.append({'Directory': 'PATIENT-BY-PATIENT BREAKDOWN', 'Patient': '', 'Bags': '', 'Total_Patches': '', 'Bag_Details': ''})
@@ -471,12 +496,11 @@ class DatasetAuditor:
             'Bag_Details': ''
         }])], ignore_index=True)
         
-        # Add metadata footer
+        # Add remaining metadata footer (blacklist summary now in header section)
         footer_rows = [
             {'Directory': '', 'Patient': '', 'Bags': '', 'Total_Patches': '', 'Bag_Details': ''},
             {'Directory': 'METADATA', 'Patient': '', 'Bags': '', 'Total_Patches': '', 'Bag_Details': ''},
             {'Directory': '-' * 70, 'Patient': '', 'Bags': '', 'Total_Patches': '', 'Bag_Details': ''},
-            {'Directory': 'Blacklisted bags (excluded from count)', 'Patient': f'{len(self.blacklist)} bags', 'Bags': '', 'Total_Patches': '', 'Bag_Details': 'See blacklist.json for details'},
             {'Directory': 'Permanent Dataset Root', 'Patient': str(self.dataset_root), 'Bags': '', 'Total_Patches': '', 'Bag_Details': ''},
             {'Directory': 'Scratch Directory Root', 'Patient': str(self.scratch_root), 'Bags': '', 'Total_Patches': '', 'Bag_Details': ''},
         ]

@@ -21,7 +21,7 @@ PROFILE=SEARCHER MODEL_NAME=convnext_tiny ITER=27.0 ./submit_all_folds.sh
 *Outputs: `results/*_model_brain.pth` and `results/*_patient_consensus.csv`.*
 
 ### 2. Data Integrity and Blacklist Removal Check
-Run the .png audit count to ensure the blacklisted files are being properly removed/excluded from the scratch directory.
+After it has been synced, run the .png audit count to ensure the blacklisted files are being properly removed/excluded from the scratch directory.
 ```bash
 python3 audit_png_count.py
 ```
