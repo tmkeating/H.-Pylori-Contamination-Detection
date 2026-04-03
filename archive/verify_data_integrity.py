@@ -19,9 +19,15 @@
 # patches only, not all raw PNG files on disk. Here's why they differ:
 #
 # RAW PNG COUNT vs CLINICAL-VALIDATED COUNT:
-#   - Raw PNG files on disk:        ~216,865 patches (from png_audit_report.csv)
-#   - Clinical-validated count:     ~214,644 patches (from this script)
-#   - Difference (~2,221 patches):  Unmatched/orphaned images without clinical context
+#   - Raw PNG files on disk:           ~216,865 patches (all physical files)
+#   - Orphaned/unmatched patches:      -2,221 patches (no clinical patient metadata)
+#   - Clinically-validated patches:    ~214,644 patches (have patient metadata)
+#     ├─ Of which are blacklisted:     -3,283 patches (conflicting or duplicate items)
+#     └─ Non-blacklisted clinical:     ~211,361 patches (final training set)
+#
+#   KEY INSIGHT: Blacklist removes items FROM the clinical set, not from orphaned set
+#   The conflict bags have diagnoses in the patient database (they're "conflicting")
+#   so they're included in the 214,644 clinical count and must be subtracted from it
 #
 # FILTERING SYSTEM (4-Priority, Applied by HPyloriDataset):
 #   1. Priority 1: Patches WITH specific spot annotations in Excel
@@ -41,9 +47,11 @@
 #   - The 214,644 patches are the TRUE training set size (all clinically valid)
 #
 # BLACKLIST IMPACT:
-#   - Blacklist.json removes ~317 specific duplicate images (cross-folder leakage)
-#   - Removes ~5 entire bags (redundant or conflicting diagnoses)
-#   - This filtering is applied AFTER the 4-priority system
+#   - Component 1 - Conflict Bags: 5 bags = 2,744 patches (conflicting diagnoses)
+#   - Component 2 - Individual Duplicates: 539 images = ~539 patches (cross-folder/intra-folder duplicates)
+#   - Total Blacklist: 3,283 patches from the clinical-validated set
+#   - Note: Image files in conflict bags are not double-counted
+#   - Effect: These clinically-valid but problematic patches must be excluded from training
 #
 # OUTPUT INTERPRETATION:
 #   - Patches_Scanned = Total patches that passed ALL filters (clinical + blacklist)

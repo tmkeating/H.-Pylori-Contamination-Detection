@@ -32,36 +32,50 @@
 #      - Count:     ~216,865 patches
 #      - Source:    This script's permanent scan (png_audit_report.csv)
 #      - Includes:  All PNG files physically present in dataset directories
-#      - Excludes:  Blacklist bags (5 bags, ~2,744 patches)
+#      - Excludes:  Complete blacklist (5 conflict bags + 539 individual images)
 #      - Purpose:   Raw inventory of available files
 #
 #   B) SYNCED TO SCRATCH (local NVMe SSD):
-#      - Count:     ~214,121 patches (after cleanup removes blacklist bags)
+#      - Count:     ~213,582 patches (after cleanup removes complete blacklist)
 #      - Source:    This script's scratch scan (png_audit_report.csv)
-#      - Includes:  Only files synced via rsync --exclude filters
-#      - Excludes:  Blacklist bags (prevented from syncing)
-#      - Purpose:   Confirms training data is available locally
-#      - Note:      Should be same as A minus blacklist bags
+#      - Includes:  Only files synced via rsync --exclude filters (raw PNG files minus blacklist)
+#      - Excludes:  Complete blacklist (3,283 patches) prevented from syncing
+#      - Purpose:   Raw files available locally for clinical validation filtering
+#      - Note:      Both clinically-valid and orphaned patches are included in this count
 #
 #   C) CLINICAL-VALIDATED TRAINING PATCHES:
 #      - Count:     ~214,644 patches
 #      - Source:    data_integrity_summary.csv (from verify_data_integrity.py)
-#      - Includes:  Patches with clinical patient metadata only
-#      - Excludes:  Orphaned/unmatched patches (Priority 4 filter)
-#      - Purpose:   Actual training set size used by HPyloriDataset
-#      - Note:      Slightly different from B due to clinical validation filtering
+#      - Includes:  Patches with clinical patient metadata only (4-priority filtering)
+#      - Excludes:  Orphaned/unmatched patches (Priority 4 filter, ~2,221 patches)
+#      - Purpose:   Clinically-valid patches available in permanent dataset
+#      - Note:      Includes BOTH blacklisted and non-blacklisted clinically-valid items
 #
-# COUNT RECONCILIATION:
-#   - Have on permanent disk:                       ~216,865 patches
-#   - After removing blacklist from permanent:      ~214,121 patches (-2,744 blacklist)
-#   - Clinically-validated patches for training:    ~214,644 patches
+#   D) FINAL TRAINING SET (after all filters):
+#      - Count:     ~211,361 patches
+#      - Calculation: 214,644 (clinical) - 3,283 (blacklisted clinical items)
+#      - Source:    Intersection of C and permanent dataset after blacklist removal
+#      - Includes:  Clinically-valid patches that are NOT blacklisted
+#      - Excludes:  Orphaned patches + blacklisted patches
+#      - Purpose:   True dataset available for training with clinical validation
+#
+# COUNT RECONCILIATION (sequential filtering order):
+#   - Raw PNG files on disk:                       ~216,865 patches
+#   - Orphaned/unmatched (no clinical metadata):   -2,221 patches
+#   - Clinically-valid patches:                    ~214,644 patches
+#   - Blacklisted items (in clinical dataset):     -3,283 patches
+#   - Final training set (clinical + safe):        ~211,361 patches
 #
 # BLACKLIST IMPACT:
 #   - Location: blacklist.json at project root
-#   - Conflict Bags: 5 bags excluded entirely (conflicting diagnoses)
-#   - Duplicate Images: ~317 specific files marked as cross-folder duplicates
-#   - Effect: rsync skip via --exclude prevents these from syncing to scratch
-#   - Verification: This script confirms they were actually removed
+#   - Component 1 - Conflict Bags: 5 bags = 2,744 patches (conflicting diagnoses in clinical DB)
+#   - Component 2 - Individual Duplicates: 539 images = ~539 patches (cross-folder/intra-folder duplicates)
+#   - Component 3 - Note: Items in conflict bags are NOT double-counted with individual images
+#   - Total Blacklist: 3,283 patches
+#   - SOURCE OF BLACKLISTED PATCHES: These are SUBSET OF clinically-valid patches (214,644)
+#   - Effect at sync: rsync --exclude prevents these from syncing to scratch (213,582 available)
+#   - Effect at training: HPyloriDataset loads from scratch and applies clinical validation
+#   - Verification: Blacklist removal reduces training set from 214,644 to 211,361
 #
 # SYNC STATUS INTERPRETATION:
 #   - FULLY SYNCED: Scratch has all permanent patches (permanent = scratch)
