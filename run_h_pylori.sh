@@ -47,13 +47,92 @@ mkdir -p "$LOCAL_SCRATCH"
 cp "$REMOTE_DATA"/*.xlsx "$LOCAL_SCRATCH/"
 cp "$REMOTE_DATA"/*.csv "$LOCAL_SCRATCH/"
 
-# Sync folders (rsync is efficient - only copies missing/changed files)
-mkdir -p "$LOCAL_SCRATCH/CrossValidation"
-rsync -aq "$REMOTE_DATA/CrossValidation/Annotated" "$LOCAL_SCRATCH/CrossValidation/"
-rsync -aq "$REMOTE_DATA/CrossValidation/Cropped" "$LOCAL_SCRATCH/CrossValidation/"
-rsync -aq "$REMOTE_DATA/HoldOut" "$LOCAL_SCRATCH/"
+# Clean up any previously synced blacklisted items from scratch before re-syncing
+# This ensures we don't accumulate old blacklisted files across runs
+BLACKLIST_FILE="./blacklist.json"
 
-echo "Data synchronization complete."
+# Pre-rsync cleanup: Remove any existing blacklisted bags
+python3 << CLEANUP_EOF
+import json
+import shutil
+from pathlib import Path
+import sys
+
+blacklist_path = Path("$BLACKLIST_FILE")
+scratch_path = Path("$LOCAL_SCRATCH")
+
+print(f"[CLEANUP] Checking for blacklisted items to remove...")
+print(f"[CLEANUP] Blacklist file: {blacklist_path}")
+print(f"[CLEANUP] Scratch path: {scratch_path}")
+
+if not blacklist_path.exists():
+    print(f"[CLEANUP] WARNING: Blacklist file not found at {blacklist_path}")
+    # Not fatal - just continue without cleaning up
+else:
+    if scratch_path.exists():
+        with open(blacklist_path, 'r') as f:
+            data = json.load(f)
+            conflict_bags = list(data.get('conflict_blacklist', {}).keys())
+            
+            if conflict_bags:
+                print(f"[CLEANUP] Found {len(conflict_bags)} blacklisted bags to remove")
+                removed_count = 0
+                
+                # Remove entire bag folders if they exist in scratch
+                for bag_id in conflict_bags:
+                    # Blacklisted bags could be in any of these directories
+                    for dir_name in ['CrossValidation/Annotated', 'CrossValidation/Cropped', 'HoldOut']:
+                        bag_path = scratch_path / dir_name / bag_id
+                        if bag_path.exists():
+                            print(f"[CLEANUP] Removing: {bag_path}")
+                            shutil.rmtree(bag_path)
+                            removed_count += 1
+                
+                print(f"[CLEANUP] Removed {removed_count} blacklisted bags from scratch")
+            else:
+                print(f"[CLEANUP] No blacklisted bags found in blacklist.json")
+    else:
+        print(f"[CLEANUP] Scratch path doesn't exist yet - no cleanup needed")
+CLEANUP_EOF
+
+# Generate rsync exclude filters from blacklist.json to skip all blacklisted items
+EXCLUDE_FILTERS=$(python3 << PYTHON_EOF
+import json
+from pathlib import Path
+
+blacklist_path = Path("./blacklist.json")
+
+if blacklist_path.exists():
+    with open(blacklist_path, 'r') as f:
+        data = json.load(f)
+        conflict_bags = list(data.get('conflict_blacklist', {}).keys())
+        
+        excludes = []
+        # Exclude entire blacklisted bags (folders)
+        for bag_id in conflict_bags:
+            excludes.append(f"--exclude={bag_id}")
+        
+        if excludes:
+            print(' '.join(excludes))
+PYTHON_EOF
+)
+
+# Sync folders (rsync is efficient - only copies missing/changed files)
+# Skip all blacklisted bags listed in blacklist.json
+mkdir -p "$LOCAL_SCRATCH/CrossValidation"
+if [ -n "$EXCLUDE_FILTERS" ]; then
+    echo "[RSYNC] Syncing with ${EXCLUDE_FILTERS}"
+    eval "rsync -aq $EXCLUDE_FILTERS '$REMOTE_DATA/CrossValidation/Annotated' '$LOCAL_SCRATCH/CrossValidation/'"
+    eval "rsync -aq $EXCLUDE_FILTERS '$REMOTE_DATA/CrossValidation/Cropped' '$LOCAL_SCRATCH/CrossValidation/'"
+    eval "rsync -aq $EXCLUDE_FILTERS '$REMOTE_DATA/HoldOut' '$LOCAL_SCRATCH/'"
+else
+    echo "[RSYNC] No exclude filters found - syncing all files"
+    rsync -aq "$REMOTE_DATA/CrossValidation/Annotated" "$LOCAL_SCRATCH/CrossValidation/"
+    rsync -aq "$REMOTE_DATA/CrossValidation/Cropped" "$LOCAL_SCRATCH/CrossValidation/"
+    rsync -aq "$REMOTE_DATA/HoldOut" "$LOCAL_SCRATCH/"
+fi
+
+echo "Data synchronization complete (blacklisted items removed before sync, rsync excludes prevent re-sync)."
 
 # 1. Load necessary modules (Common on clusters)
 # module load python/3.8

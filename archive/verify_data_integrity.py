@@ -11,7 +11,43 @@
 #      contamination labels as recorded in the master diagnosis CSV.
 #   2. Sensitivity Analysis: identifies "sparse" bags with very few patches,
 #      which might be more prone to false negatives.
-#   3. Automation: Exports a 'data_hygiene_report.csv' for project verification.
+#   3. Automation: Exports a 'data_integrity_summary.csv' for project verification.
+#
+# IMPORTANT: Understanding Patch Count Discrepancies
+# ==================================================
+# The reported patch count (Patches_Scanned in output) reflects CLINICAL-VALIDATED
+# patches only, not all raw PNG files on disk. Here's why they differ:
+#
+# RAW PNG COUNT vs CLINICAL-VALIDATED COUNT:
+#   - Raw PNG files on disk:        ~216,865 patches (from png_audit_report.csv)
+#   - Clinical-validated count:     ~214,644 patches (from this script)
+#   - Difference (~2,221 patches):  Unmatched/orphaned images without clinical context
+#
+# FILTERING SYSTEM (4-Priority, Applied by HPyloriDataset):
+#   1. Priority 1: Patches WITH specific spot annotations in Excel
+#      - Exact bacterial locations from pathologist review (best quality)
+#   2. Priority 2: Patches from NEGATIVE patients
+#      - Patient diagnosis is 'NEGATIVA' in PatientDiagnosis.csv
+#   3. Priority 3: Patches from POSITIVE patients (no spot annotations)
+#      - Patient diagnosis is 'BAIXA' or 'ALTA' in PatientDiagnosis.csv
+#      - Marked as generic positives (-1) if no exact annotations
+#   4. Priority 4: SKIP everything else
+#      - PNG files with no matching patient in clinical database
+#      - Orphaned/unclassified files with no clinical metadata
+#
+# WHY THIS IS CORRECT:
+#   - Patches without clinical patient data are unusable for supervised learning
+#   - MPT requires each patch to be associated with a clinically confirmed diagnosis
+#   - The 214,644 patches are the TRUE training set size (all clinically valid)
+#
+# BLACKLIST IMPACT:
+#   - Blacklist.json removes ~317 specific duplicate images (cross-folder leakage)
+#   - Removes ~5 entire bags (redundant or conflicting diagnoses)
+#   - This filtering is applied AFTER the 4-priority system
+#
+# OUTPUT INTERPRETATION:
+#   - Patches_Scanned = Total patches that passed ALL filters (clinical + blacklist)
+#   - This is the accurate count for model training and evaluation
 # -----------------------------------------------
 """
 import os
@@ -38,8 +74,14 @@ try:
         'HoldOut': os.path.join(root, 'HoldOut')
     }
     
-    all_bags_audit = []
+    # Use a dictionary to deduplicate bags found in multiple directories
+    # Key: bag_id, Value: bag info (prefer more complete versions like Cropped)
+    all_bags_audit = {}
     patient_to_sets = {} # Track which sets each patient appears in
+    
+    # Directory priority (in case a bag appears in multiple directories)
+    # Higher priority = keep this version if there's a conflict
+    dir_priority = {'HoldOut': 3, 'Cropped': 2, 'Annotated': 1}
     
     for set_name, set_dir in dataset_configs.items():
         if not os.path.exists(set_dir):
@@ -53,15 +95,25 @@ try:
             paths, label, b_id, pos_paths = bag
             base_id = b_id.split('_')[0]
             
-            # Record for global audit
-            all_bags_audit.append({
+            bag_info = {
                 'Patient_Bag_ID': b_id,
                 'Base_Patient_ID': base_id,
                 'Dataset_Source': set_name,
                 'Label': label,
                 'Patch_Count': len(paths),
                 'Annotated_Positive_Count': len(pos_paths)
-            })
+            }
+            
+            # Deduplication logic: keep the version with higher priority
+            # (prefer Cropped > Annotated, HoldOut is separate set so no conflict expected)
+            if b_id not in all_bags_audit:
+                all_bags_audit[b_id] = bag_info
+            else:
+                # If same bag in multiple dirs, keep the one with higher priority
+                existing_priority = dir_priority.get(all_bags_audit[b_id]['Dataset_Source'], 0)
+                new_priority = dir_priority.get(set_name, 0)
+                if new_priority > existing_priority:
+                    all_bags_audit[b_id] = bag_info
             
             # Map clinical ID to its dataset locations
             if base_id not in patient_to_sets:
@@ -87,6 +139,7 @@ try:
     total_unique_patients = len(patient_to_sets)
     print(f'\n--- GLOBAL DATA INTEGRITY AUDIT ---')
     print(f'Total Unique Patients (Global): {total_unique_patients}')
+    print(f'Total Unique Bags (after deduplication): {len(all_bags_audit)}')
     
     if leakage_issues:
         print(f'[!] CRITICAL LEAKAGE DETECTED: {len(leakage_issues)} violations found.')
@@ -97,7 +150,7 @@ try:
     # --- Step 3.1: Generate Patient Integrity Breakdown ---
     # This matches the training pipeline format precisely but adds custom booleans
     patient_breakdown = []
-    for bag in all_bags_audit:
+    for bag in all_bags_audit.values():  # Use .values() since all_bags_audit is now a dict
         b_id = bag['Patient_Bag_ID']
         base_id = bag['Base_Patient_ID']
         sets_for_patient = patient_to_sets.get(base_id, set())

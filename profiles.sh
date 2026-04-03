@@ -31,8 +31,7 @@ function set_profile_AUDITOR() {
 # Using Max-MIL + Stabilized Weighted Training + ReduceLROnPlateau
 function set_profile_SEARCHER() {
     export NEG_WEIGHT=1.0
-    # Iteration 24.9: Balanced the PosWeight to 5.0 to prevent gradient saturation
-    export POS_WEIGHT=5.0 
+    export POS_WEIGHT=1.0 
     # Maintained 3.0 to focus gradients on 'Hard' sparse bacterial targets
     export GAMMA=3.0
     # Higher WD to prevent 100% Training Accuracy (Overfitting)

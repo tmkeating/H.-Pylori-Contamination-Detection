@@ -16,5 +16,5 @@ source ../venv/bin/activate
 
 echo "Starting Global Deduplication Audit (All images, All folders)..."
 # Using absolute path for accuracy
-python3 /hhome/ricse03/modelTwyla/H.-Pylori-Contamination-Detection/global_duplicates_check.py
+python3 /hhome/ricse03/modelTwyla/H.-Pylori-Contamination-Detection/check_global_duplicates.py
 

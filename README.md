@@ -20,7 +20,14 @@ PROFILE=SEARCHER MODEL_NAME=convnext_tiny ITER=27.0 ./submit_all_folds.sh
 ```
 *Outputs: `results/*_model_brain.pth` and `results/*_patient_consensus.csv`.*
 
-### 2. High-Resolution Rescue (Dense Inference Pass)
+### 2. Data Integrity and Blacklist Removal Check
+Run the .png audit count to ensure the blacklisted files are being properly removed/excluded from the scratch directory.
+```bash
+python3 audit_png_count.py
+```
+*Outputs: `audit_png_count_report.csv`.*
+
+### 3. High-Resolution Rescue (Dense Inference Pass)
 Specifically target difficult "Ghost Patients" using the dense Stride-128 rescue scan. This recovers signals from sparse biopsies that were missed by the default Stride-512/Stride-250 sampling. 
 ```bash
 # Update submit_rescue.sh with the correct Searcher Run IDs
@@ -28,7 +35,7 @@ sbatch submit_rescue.sh
 ```
 *Outputs: `results/rescue_ensemble/rescue_*.csv`.*
 
-### 3. Final Meta-Ensemble & Hybrid Fusion
+### 4. Final Meta-Ensemble & Hybrid Fusion
 Fuse the newer high-precision results (302-306) with the sensitive historic models (299-301) to produce the "Golden Consensus" (94.7% Accuracy).
 ```bash
 # Generate the 94.7% Hybrid Ensemble
@@ -36,7 +43,7 @@ python3 ensemble_voting.py --runs 302,303,299,300,301
 ```
 *Outputs: `results/meta_fusion_results_*.csv` (The final Pathology hand-off report).*
 
-### 4. Interpretability Analysis & Reports (Grad-CAM & Metrics)
+### 5. (Optional). Interpretability Analysis & Reports (Grad-CAM & Metrics)
 Generate visual evidence for the model's decisions and patch/patient-level metrics. It bypasses older plotting packages and directly visualizes the confusion matrix and valid ROCs. Ensure you edit `run_visuals.sh` to target your desired `RUN_ID` before submitting.
 ```bash
 sbatch run_visuals.sh
@@ -51,7 +58,8 @@ sbatch run_visuals.sh
 - `model.py`: **Gated Attention MIL** with **Top-3 Chunk Aggregation** for signal resilience.
 - `train.py`: Unified engine featuring **SWA BN Recalibration** and **Grad-CAM Ghost Audits**.
 - `generate_visuals.py`: Dedicated analysis script to render interpretable visual clinical layouts using Matplotlib cleanly.
-- `global_duplicates_check.py`: High-performance 8KB-header MD5 deduplicator to guarantee strict set isolation.
+- `global_duplicates_check.py`: A high-performance byte-level image duplication checker that checks the first 8kb and compares file size for high confidence in results.
+- `audit_png_count_report.csv`: Ensures that the blacklist is being adhered to.
 - `ensemble_voting.py`: Meta-classifier using **Joint-Probability Gating** (Max > 0.39 & Mean > 0.28).
 - `profiles.sh`: Centralized hyperparameters (Learning rates, Weights, Data paths).
 
