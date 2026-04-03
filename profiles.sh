@@ -31,7 +31,7 @@ function set_profile_AUDITOR() {
 # Using Max-MIL + Stabilized Weighted Training + ReduceLROnPlateau
 function set_profile_SEARCHER() {
     export NEG_WEIGHT=1.0
-    export POS_WEIGHT=1.0 
+    export POS_WEIGHT=1.5 
     # Maintained 3.0 to focus gradients on 'Hard' sparse bacterial targets
     export GAMMA=3.0
     # Higher WD to prevent 100% Training Accuracy (Overfitting)
@@ -55,4 +55,13 @@ function set_profile_EXTREME() {
     export GAMMA=5.0
     export SAVER_METRIC="recall"
     export POOL_TYPE="max"
+}
+
+function set_profile_TEST() {
+    export NEG_WEIGHT=1.0
+    export POS_WEIGHT=1.0 
+    export GAMMA=3.0
+    export NUM_EPOCHS=1
+    export SAVER_METRIC="f1"
+    export POOL_TYPE="attention"
 }

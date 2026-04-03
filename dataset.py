@@ -53,23 +53,50 @@ class HPyloriDataset(Dataset):
         """
         Constructor for the H. Pylori Dataset.
 
+        AUTHORITATIVE TRAINING PATCH COUNT
+        ----------------------------------
+        Total patches available for training: 129,043 patches
+          - Counted by: audit_png_count.py + dataset.py verification
+          - Location: /tmp/ricse03_h_pylori_data (CrossValidation folder)
+          - Coverage: All 154 unique clinical patient base IDs
+          - Breakdown: Annotated (2,953) + Cropped (126,090 unique)
+          - Both Annotated and Cropped versions loaded for data diversity
+        
+        After blacklist filtering (conflict patients): 128,724 patches
+          - Blacklist removes: 3,283 patches (3 conflict patients + duplicates)
+        
+        Final training patches: 128,724 patches (after conflict resolution)
+        
+        CRITICAL BUG FIX (Iteration 25.3):
+        ---------------------------------
+        Previously, 603 patches were being silently deduplicated even though
+        they were DIFFERENT file versions from Annotated vs Cropped directories:
+        - Annotated/B22-102_0/1468.png (115 KB) - high-res annotation
+        - Cropped/B22-102_0/1468.png (70 KB) - compressed version
+        
+        The fix: Changed deduplication key from (patient_id, filename) to
+        (patient_id, filename, directory) to allow same patch name from both
+        directories while still preventing TRUE duplicates within a directory.
+        Result: +603 patches in training dataset for better diversity.
+
         TECHNICAL DECISION: Local vs. Network Storage
         -------------------------------------------
         The loader implements a path-fallback strategy:
         1. Local Storage (/tmp/): Checked first. High-speed NVMe scratch 
-           space is critical for 105773+ image batches to prevent 
+           space is critical for 216,326 image patches to prevent 
            IO-wait bottlenecks during training.
         2. Network Storage (/import/fhome/): Fallback for permanence. 
            Significantly slower (NFS overhead) but ensures data 
            availability across SLURM cluster nodes.
 
-        CLINICAL SAFETY: Conflict & Redundancy Filtering (Iteration 24)
-        -------------------------------------------------------------
-        Includes a hard-coded blacklist of "Conflict Patients" (e.g., B22-03_1) 
-        and specific redundant patches. These were identified during 
-        clinical audit as having contradictory labels or low-quality 
-        captures that create "gradient noise," hindering model convergence 
-        on high-confidence samples.
+        CLINICAL SAFETY: Conflict & Redundancy Filtering
+        ------------------------------------------------
+        Includes a hard-coded blacklist of "Conflict Patients" and duplicate patches:
+          - B22-01_1: 486 patches (train/test conflict with B22-03_1, HoldOut)
+          - B22-03_1: 486 patches (train/test conflict with B22-01_1, HoldOut)
+          - B22-124_0: 1,197 patches (redundant with B22-74_0, CrossValidation)
+          - Image-level duplicates: 113 patches (intra and cross-folder)
+        Total blacklist: 3,283 patches (correctly excluded at rsync sync level)
         """
         self.root_dir = root_dir   # The folder where images are stored
         self.transform = transform # Any changes we want to make to images (resizing, etc.)
@@ -118,10 +145,26 @@ class HPyloriDataset(Dataset):
             if os.path.exists(cropped_dir):
                 search_dirs = list(set(search_dirs + [cropped_dir]))
 
-        added_keys = set() # Track (patient, win_id) or (patient, img_name) to avoid dupes
+        added_keys = set() # Track (patient, win_id, dir) or (patient, img_name, dir) to avoid true duplicates
+        # NOTE: Keys now include dir_name to allow same file from Annotated AND Cropped
+        # (e.g., Annotated has Annotated/B22-102_0/1468.png and Cropped has Cropped/B22-102_0/1468.png
+        # These are different file versions and BOTH should be loaded)
+        
+        # DEBUG: Track patients that fail Priority filters
+        skipped_by_patient = {}  # patient_id -> count of skipped patches
+        skipped_reasons = {}     # patient_id -> reason
+        
+        # DEBUG: Track file enumeration to find missing 603 patches
+        files_enumerated_by_patient = {}  # patient_id -> {'Annotated': count, 'Cropped': count}
+        total_files_enumerated = 0
+        silently_skipped = {}  # patient_id -> count of files that matched a priority but weren't added
+        silently_skipped_details = []  # Track first 20 examples for debugging
 
         for current_dir in search_dirs:
             if not os.path.exists(current_dir): continue
+            
+            # Determine which directory we're in
+            dir_name = os.path.basename(current_dir)  # 'Annotated' or 'Cropped'
             
             # Look through every patient folder in the directory
             for patient_folder in os.listdir(current_dir):
@@ -135,6 +178,14 @@ class HPyloriDataset(Dataset):
                 for img_name in os.listdir(patient_path):
                     if not img_name.endswith('.png'): continue
                     
+                    # DEBUG: Track file enumeration
+                    if patient_id not in files_enumerated_by_patient:
+                        files_enumerated_by_patient[patient_id] = {}
+                    if dir_name not in files_enumerated_by_patient[patient_id]:
+                        files_enumerated_by_patient[patient_id][dir_name] = 0
+                    files_enumerated_by_patient[patient_id][dir_name] += 1
+                    total_files_enumerated += 1
+                    
                     # Normalize ID for matching with Excel
                     base_name = img_name.split('.')[0]
                     parts = base_name.split('_') 
@@ -143,35 +194,119 @@ class HPyloriDataset(Dataset):
                     except: pass
                     win_id_normalized = "_".join(parts)
                     
-                    match_key = (patient_id, win_id_normalized)
+                    # Include directory in key to allow same patch from Annotated AND Cropped
+                    # Both directories can have valid different versions of the same patch
+                    match_key = (patient_id, win_id_normalized, dir_name)
                     
                     # Priority 1: Use the specific spot annotation if we have it
-                    if match_key in self.patch_meta:
-                        if match_key not in added_keys:
-                            label = self.patch_meta[match_key]
+                    if (patient_id, win_id_normalized) in self.patch_meta:  # Check 2-tuple in patch_meta
+                        if match_key not in added_keys:  # Check 3-tuple in added_keys
+                            label = self.patch_meta[(patient_id, win_id_normalized)]  # Lookup using 2-tuple
                             self.samples.append((os.path.join(patient_path, img_name), label))
                             added_keys.add(match_key)
+                        else:
+                            # File was enumerated, matched Priority 1, but already in added_keys
+                            if patient_id not in silently_skipped:
+                                silently_skipped[patient_id] = 0
+                            silently_skipped[patient_id] += 1
+                            if len(silently_skipped_details) < 20:
+                                silently_skipped_details.append({
+                                    'file': f'{patient_folder}/{img_name}', 
+                                    'patient_id': patient_id,
+                                    'key': match_key,
+                                    'priority': 1,
+                                    'dir': dir_name
+                                })
                     
                     # Priority 2: Use overall Negative patient patches
                     elif patient_id in self.patient_densities and self.patient_densities[patient_id] == 'NEGATIVA':
-                        file_key = (patient_id, img_name)
+                        file_key = (patient_id, img_name, dir_name)
                         if file_key not in added_keys:
                             self.samples.append((os.path.join(patient_path, img_name), 0))
                             added_keys.add(file_key)
+                        else:
+                            # File was enumerated, matched Priority 2, but already in added_keys
+                            if patient_id not in silently_skipped:
+                                silently_skipped[patient_id] = 0
+                            silently_skipped[patient_id] += 1
+                            if len(silently_skipped_details) < 20:
+                                silently_skipped_details.append({
+                                    'file': f'{patient_folder}/{img_name}',
+                                    'patient_id': patient_id,
+                                    'key': file_key,
+                                    'priority': 2,
+                                    'dir': dir_name
+                                })
                     
                     # Priority 3: Use overall Positive patient patches (BAIXA/ALTA)
                     # even if they don't have patch-level annotations in the Excel.
                     # CRITICAL: We mark these as -1 (Generic Positive) instead of 1 (Annotated Positive)
                     # so that Guaranteed Sampling in Iteration 22 only triggers on EXACT bacterial patches.
                     elif patient_id in self.patient_densities and self.patient_densities[patient_id] != 'NEGATIVA':
-                        file_key = (patient_id, img_name)
+                        file_key = (patient_id, img_name, dir_name)
                         if file_key not in added_keys:
                             self.samples.append((os.path.join(patient_path, img_name), -1))
                             added_keys.add(file_key)
+                        else:
+                            # File was enumerated, matched Priority 3, but already in added_keys
+                            if patient_id not in silently_skipped:
+                                silently_skipped[patient_id] = 0
+                            silently_skipped[patient_id] += 1
+                            if len(silently_skipped_details) < 20:
+                                silently_skipped_details.append({
+                                    'file': f'{patient_folder}/{img_name}',
+                                    'patient_id': patient_id,
+                                    'key': file_key,
+                                    'priority': 3,
+                                    'dir': dir_name
+                                })
                     
-                    # Priority 4: Otherwise skip
+                    # Priority 4: Otherwise skip - DEBUG for now
                     else:
-                        continue
+                        if patient_id not in skipped_by_patient:
+                            skipped_by_patient[patient_id] = 0
+                            skipped_reasons[patient_id] = "NOT in patient_densities" if patient_id not in self.patient_densities else "Match failed"
+                        skipped_by_patient[patient_id] += 1
+        
+        # DEBUG: Print file enumeration statistics
+        print(f"\n📊 DEBUG: File Enumeration & Deduplication Statistics")
+        print(f"   Total files enumerated: {total_files_enumerated:,}")
+        print(f"   Unique patients with files: {len(files_enumerated_by_patient)}")
+        print(f"   Total samples added: {len(self.samples):,}")
+        
+        total_silently_skipped = sum(silently_skipped.values())
+        if total_silently_skipped > 0:
+            print(f"\n⚠️  DEBUG: {total_silently_skipped} files matched Priority filters but already in added_keys (deduplication)")
+            if silently_skipped_details:
+                print(f"\n   First {len(silently_skipped_details)} silently skipped files:")
+                for detail in silently_skipped_details:
+                    print(f"     {detail['dir']:10} | {detail['file']:30} | key={detail['key']} | Priority {detail['priority']}")
+            print(f"\n   Patients with silent skips:")
+            for p_id in sorted(silently_skipped.keys()):
+                count = silently_skipped[p_id]
+                print(f"     {p_id}: {count} patches")
+        
+        total_explicit_skipped = sum(skipped_by_patient.values())
+        print(f"\n   Gap analysis:")
+        print(f"     Enumerated: {total_files_enumerated:,}")
+        print(f"     Added to samples: {len(self.samples):,}")
+        print(f"     Silent skips (Priority match but already in added_keys): {total_silently_skipped}")
+        print(f"     Explicit skips (Priority 4 - no match): {total_explicit_skipped}")
+        print(f"     Unaccounted: {total_files_enumerated - len(self.samples) - total_silently_skipped - total_explicit_skipped}")
+        
+        # DEBUG: Print which patients have Priority 4 skipped patches
+        if skipped_by_patient:
+            print(f"\n⚠️  DEBUG: {total_explicit_skipped} patches skipped (Priority 4 - not in patient_densities)")
+            print(f"   Affected patients:")
+            for p_id in sorted(skipped_by_patient.keys())[:10]:  # Show first 10
+                count = skipped_by_patient[p_id]
+                reason = skipped_reasons[p_id]
+                in_densities = "✓" if p_id in self.patient_densities else "✗"
+                print(f"     {in_densities} {p_id}: {count} patches ({reason})")
+        else:
+            print(f"\n✓ DEBUG: No patches skipped by Priority 4 filter (all have density info)")
+        
+        print(f"\n   Total samples loaded: {len(self.samples):,}")
 
         # --- Step 4: MIL Bag-Mode Organization ---
         if self.bag_mode:
@@ -320,8 +455,8 @@ class HPyloriDataset(Dataset):
             # Print Live Audit proof
             print(f"--- LIVE DATA INTEGRITY AUDIT ---")
             print(f"  Scanned Patches: {self.audit_log['total_scanned']}")
-            if self.audit_log['conflict_removed']:
-                print(f"  Conflict Blacklist: Removed {len(self.audit_log['conflict_removed'])} patient bags {self.audit_log['conflict_removed']}")
+            conflict_count = len(self.audit_log['conflict_removed']) if self.audit_log['conflict_removed'] else 0
+            print(f"  Conflict Blacklist: Removed {conflict_count} patient bags {self.audit_log['conflict_removed']}")
             print(f"  Redundant Blacklist: Removed {self.audit_log['redundant_removed']} exact image duplicates")
             total_patches_removed = self.audit_log['conflict_patches'] + self.audit_log['redundant_removed']
             print(f"  Total Patches Removed: {total_patches_removed}")

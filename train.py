@@ -205,6 +205,7 @@ NOTES
   - Output file naming automatically avoids collisions using SLURM Job ID if available
 """
 import os                       # Standard library for file path management
+import sys                      # Standard library for system utilities (stdout flushing)
 import torch                    # Core library for deep learning
 import torch.nn as nn           # Tools for building neural network layers
 import torch.optim as optim     # Mathematical tools to "teach" the model
@@ -1301,6 +1302,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
     # --- Step 9: Detailed Reporting (Patient Level Focused) ---
     print("\nPatient-Level Classification Report (MIL):")
     print(classification_report(all_labels_pat, all_preds_pat, target_names=['Negative', 'Positive'], zero_division=0))
+    sys.stdout.flush()
     
     # --- Step 9: Clinical Consensus Reporting ---
     # We aggregate all patient-level predictions and confidence scores into a structured CSV.
@@ -1325,6 +1327,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
     consensus_df = pd.DataFrame(consensus_data)
     consensus_df.to_csv(os.path.join(results_dir, f"{prefix}_patient_consensus.csv"), index=False)
     print(f"Clinical consensus report saved to {prefix}_patient_consensus.csv")
+    sys.stdout.flush()
 
     # --- Step 11: Patient-Level Performance Audit ---
     # We visualize the Receiver Operating Characteristic (ROC) curve to evaluate
@@ -1337,6 +1340,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
     report = classification_report(all_labels_pat, all_preds_pat, target_names=['Negative', 'Positive'], output_dict=True, zero_division=0)
     pd.DataFrame(report).transpose().to_csv(results_csv_path)
     print(f"Evaluation report saved to {results_csv_path}")
+    sys.stdout.flush()
 
     plt.figure()
     plt.plot(fpr_meta, tpr_meta, color='darkorange', lw=3, label=f'Attention-MIL (AUC = {roc_auc_meta:0.2f})')
@@ -1351,9 +1355,11 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
     # Calculate Patient-Level Accuracy
     pat_acc = (all_preds_pat == all_labels_pat).mean() * 100
     print(f"\nFinal Patient-Level Accuracy (MIL): {pat_acc:.2f}%")
+    sys.stdout.flush()
 
     # --- Step 12: Extra Visuals (Metrics & Interpretability) ---
     print("\nGenerating final metrics and interpretability maps...")
+    sys.stdout.flush()
     
     # 1. Confusion Matrix
     plot_confusion_matrix(all_labels_pat, all_preds_pat, patient_cm_path)
@@ -1366,6 +1372,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
 
     # 4. Grad-CAM Samples from Hold-Out
     print(f"Generating Grad-CAM for most suspicious patient bags in {gradcam_dir}...")
+    sys.stdout.flush()
     # Get top 5 most positive and top 5 most ghostly (FN)
     # top_indices: highest probability, fn_indices: highest prob among actual positive that were pred 0
     top_indices = np.argsort(all_probs_pat)[-5:] 
@@ -1453,6 +1460,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
     # but the model failed to cross the clinical threshold (prob < 0.5).
     if fn_indices:
         print(f"Generating Grad-CAM for {len(fn_indices)} False Negative (Ghost) bags...")
+        sys.stdout.flush()
         for bag_idx in fn_indices:
             p_id = patient_ids_list[bag_idx]
             bag_imgs, label, _ = holdout_dataset[bag_idx]
@@ -1505,6 +1513,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
                 torch.cuda.empty_cache()
                 
     print(f"Iteration reporting and metrics complete.")
+    sys.stdout.flush()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="H. Pylori K-Fold Training")

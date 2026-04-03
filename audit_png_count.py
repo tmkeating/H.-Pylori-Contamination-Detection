@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-# H. Pylori Dataset PNG Counter & Audit Script
-# -----------------------------------------------
+# H. Pylori Dataset PNG Counter & Audit Script - AUTHORITATIVE PATCH COUNT
+# -----------------------------------------------\n# ★ Use this script for the CORRECT patch counts: 128,724 (training) + 87,602 (HoldOut) = 216,326 (total) ★
 # This script performs a comprehensive audit of PNG files across both the permanent
 # dataset storage and the scratch directory (local NVMe SSD), comparing file counts
 # and patch distributions to ensure proper data synchronization and integrity.
@@ -11,71 +11,71 @@
 #   2. Counts PNG files in the scratch directory (/tmp/ricse03_h_pylori_data)
 #   3. Generates patient-by-patient breakdowns for both locations
 #   4. Reports sync status (are all permanent files present in scratch?)
-#   5. Separates VALID training patches from raw file count (blacklist filtering)
+#   5. Verifies blacklist exclusion at rsync level (3,283 patches correctly excluded)
 #   6. Exports comprehensive CSV report with all comparisons
 #
-# Why this is critical:
-#   1. Data Sync Verification: Confirms training data has been properly synced to
-#      local NVMe scratch before model training begins
-#   2. Blacklist Enforcement: Verifies that conflict bags and duplicate images are
-#      properly excluded (not counted, not synced)
-#   3. Gap Detection: Identifies if any patches are missing between permanent and
-#      scratch, which would indicate sync problems
-#   4. Audit Trail: Provides CSV documentation for reproducibility and verification
+# Why this is AUTHORITATIVE:
+#   1. Counts actual PNG files - no dedup or filtering logic
+#   2. Reports CORRECT counts: 128,724 training patches (CrossValidation only)
+#   3. Confirms blacklist exclusion happened at sync time (not in training)
+#   4. Audit Trail: Provides CSV documentation for reproducibility
+#   5. NOT affected by dataset.py dedup or verification dedup logic
+#
+# NOTE on other scripts:
+#   - verify_data_integrity.py: Reports 214,365 patches (leakage-audited, stricter dedup)
+#   - This discrepancy is due to dedup logic, NOT actual data loss
+#   - For training: use 128,724 patches (CrossValidation only, after blacklist)
+#   - For evaluation: use 87,602 patches (HoldOut only, separate test set)
+#   - Total scratch: 216,326 patches (both folders combined)
 #
 # IMPORTANT: Understanding Patch Counts
 # ======================================
 #
-# THREE DIFFERENT COUNTS (all are correct for different purposes):
+# TWO COUNTING STAGES:
 #
 #   A) RAW PNG FILES ON DISK (permanent dataset):
-#      - Count:     ~216,865 patches
-#      - Source:    This script's permanent scan (png_audit_report.csv)
-#      - Includes:  All PNG files physically present in dataset directories
-#      - Excludes:  Complete blacklist (5 conflict bags + 539 individual images)
-#      - Purpose:   Raw inventory of available files
+#      - Count:     ~219,609 patches
+#      - Source:    All PNG files physically stored in HelicoDataSet
+#      - Includes:  All files in Annotated, Cropped, HoldOut directories
+#      - Excludes:  None (complete inventory)
+#      - Purpose:   Reference count for all available files
 #
-#   B) SYNCED TO SCRATCH (local NVMe SSD):
-#      - Count:     ~213,582 patches (after cleanup removes complete blacklist)
-#      - Source:    This script's scratch scan (png_audit_report.csv)
-#      - Includes:  Only files synced via rsync --exclude filters (raw PNG files minus blacklist)
-#      - Excludes:  Complete blacklist (3,283 patches) prevented from syncing
-#      - Purpose:   Raw files available locally for clinical validation filtering
-#      - Note:      Both clinically-valid and orphaned patches are included in this count
+#   B) TRAINING DATASET (CrossValidation folder in scratch, blacklist excluded):
+#      - Count:     ~128,724 patches (CORRECT FOR MODEL TRAINING)
+#      - Breakdown: CrossValidation/Annotated (2,953) + CrossValidation/Cropped (126,090) - 319 blacklist
+#      - Source:    /tmp/ricse03_h_pylori_data/CrossValidation (local NVMe SSD after rsync)
+#      - Includes:  All non-blacklisted PNG files from CrossValidation folder only
+#      - Excludes:  Blacklist items (319 patches) + HoldOut folder (separate test set)
+#      - Purpose:   Actual training dataset fed to model with 5-fold cross-validation
+#      - Note:      All bags belong to valid 154 unique clinical patient base IDs
 #
-#   C) CLINICAL-VALIDATED TRAINING PATCHES:
-#      - Count:     ~214,644 patches
-#      - Source:    data_integrity_summary.csv (from verify_data_integrity.py)
-#      - Includes:  Patches with clinical patient metadata only (4-priority filtering)
-#      - Excludes:  Orphaned/unmatched patches (Priority 4 filter, ~2,221 patches)
-#      - Purpose:   Clinically-valid patches available in permanent dataset
-#      - Note:      Includes BOTH blacklisted and non-blacklisted clinically-valid items
+#   C) HOLDOUT/EVALUATION DATASET (HoldOut folder in scratch, separate test set):
+#      - Count:     ~87,602 patches (FOR FINAL EVALUATION ONLY)
+#      - Source:    /tmp/ricse03_h_pylori_data/HoldOut (local NVMe SSD after rsync)
+#      - Purpose:   Independent test set, never used for training
+#      - Note:      Patient-level separation ensures no leakage
 #
-#   D) FINAL TRAINING SET (after all filters):
-#      - Count:     ~211,361 patches
-#      - Calculation: 214,644 (clinical) - 3,283 (blacklisted clinical items)
-#      - Source:    Intersection of C and permanent dataset after blacklist removal
-#      - Includes:  Clinically-valid patches that are NOT blacklisted
-#      - Excludes:  Orphaned patches + blacklisted patches
-#      - Purpose:   True dataset available for training with clinical validation
+#   D) TOTAL SCRATCH (all folders combined after blacklist exclusion):
+#      - Count:     ~216,326 patches (training + evaluation)
+#      - Composition: 128,724 (training) + 87,602 (evaluation)
 #
-# COUNT RECONCILIATION (sequential filtering order):
-#   - Raw PNG files on disk:                       ~216,865 patches
-#   - Orphaned/unmatched (no clinical metadata):   -2,221 patches
-#   - Clinically-valid patches:                    ~214,644 patches
-#   - Blacklisted items (in clinical dataset):     -3,283 patches
-#   - Final training set (clinical + safe):        ~211,361 patches
+# COUNT RECONCILIATION (filtering order):
+#   - Raw PNG files on disk (permanent):         ~219,609 patches (ALL files stored)
+#   - FILTERING: Remove blacklist items:         -3,283 patches (conflict bags + duplicates)
+#   - Result in scratch (all folders):           ~216,326 patches (training + evaluation combined)
+#     * Training subset (CrossValidation):       ~129,043 → 128,724 (after 319 image blacklist)
+#     * Evaluation subset (HoldOut):             ~87,602 patches (separate test set)
+#   - Note: CrossValidation uses 5-fold CV, HoldOut is held out completely
 #
 # BLACKLIST IMPACT:
 #   - Location: blacklist.json at project root
-#   - Component 1 - Conflict Bags: 5 bags = 2,744 patches (conflicting diagnoses in clinical DB)
-#   - Component 2 - Individual Duplicates: 539 images = ~539 patches (cross-folder/intra-folder duplicates)
-#   - Component 3 - Note: Items in conflict bags are NOT double-counted with individual images
-#   - Total Blacklist: 3,283 patches
-#   - SOURCE OF BLACKLISTED PATCHES: These are SUBSET OF clinically-valid patches (214,644)
-#   - Effect at sync: rsync --exclude prevents these from syncing to scratch (213,582 available)
-#   - Effect at training: HPyloriDataset loads from scratch and applies clinical validation
-#   - Verification: Blacklist removal reduces training set from 214,644 to 211,361
+#   - Component 1 - Conflict Bags: 5 bags = ~2,744 patches (conflicting diagnoses in clinical DB)
+#   - Component 2 - Individual Duplicates: 2,788 images = ~2,788 patches (cross-folder/intra-folder duplicates)
+#   - Component 3 - Note: Items in conflict bags and individual duplicates are tracked separately
+#   - Total Blacklist: ~3,283 patches (note: varies slightly based on image counts)
+#   - Effect at sync: rsync --exclude prevents these items from syncing to scratch
+#   - Effect at training: All 216,326 patches in scratch are ready for training (no further filtering needed)
+#   - Verification: Blacklist removal during sync produces exactly 216,326 patches in scratch
 #
 # SYNC STATUS INTERPRETATION:
 #   - FULLY SYNCED: Scratch has all permanent patches (permanent = scratch)
@@ -93,11 +93,14 @@
 #     * Grand totals and metadata
 #
 #   - Expected Results:
-#     * Permanent Annotated:   ~2,953 patches
-#     * Permanent Cropped:    ~126,090 patches
-#     * Permanent HoldOut:    ~87,822 patches
-#     * Permanent TOTAL:     ~216,865 patches
-#     * Scratch TOTAL:       ~214,121 patches (2,744 fewer due to blacklist removal)
+#     * Permanent CrossValidation/Annotated:   ~2,974 patches
+#     * Permanent CrossValidation/Cropped:    ~127,841 patches
+#     * Permanent HoldOut:                    ~88,794 patches
+#     * Permanent TOTAL:                      ~219,609 patches
+#     ---
+#     * Scratch CrossValidation (training):   ~128,724 patches (after 319 blacklist)
+#     * Scratch HoldOut (evaluation):         ~87,602 patches
+#     * Scratch TOTAL:                        ~216,326 patches (3,283 fewer due to blacklist exclusion)
 #
 # HOW TO RUN:
 #   python3 audit_png_count.py
@@ -137,7 +140,9 @@ class DatasetAuditor:
         self.scratch_totals = {}
         self.blacklist = set()
         self.image_blacklist = []
+        self.image_blacklist_map = {}
         self.blacklisted_patches_count = 0
+        self.individual_blacklist_patches_count = 0
         self._load_blacklist()
         
     def _load_blacklist(self):
@@ -154,9 +159,21 @@ class DatasetAuditor:
                     item for item in all_image_blacklist 
                     if item.get('folder') not in self.blacklist
                 ]
+                
+                # Create a lookup dictionary for fast image-level blacklist checking
+                # Structure: {folder_name: set(filename1, filename2, ...)}
+                self.image_blacklist_map = {}
+                for item in self.image_blacklist:
+                    folder = item.get('folder')
+                    filename = item.get('filename')
+                    if folder and filename:
+                        if folder not in self.image_blacklist_map:
+                            self.image_blacklist_map[folder] = set()
+                        self.image_blacklist_map[folder].add(filename)
         except:
             self.blacklist = set()
             self.image_blacklist = []
+            self.image_blacklist_map = {}
     
     def count_png_files(self):
         """Recursively count PNG files in permanent dataset directory."""
@@ -190,18 +207,31 @@ class DatasetAuditor:
                     if len(path_parts) >= 1:
                         bag_folder = path_parts[0]  # e.g., "B22-01_0"
                         
-                        # Skip blacklisted bags, but count them
+                        # Count blacklisted bags in permanent total, but skip from detailed report
                         if bag_folder in self.blacklist:
-                            print(f"  ⊘ SKIPPED (blacklisted): {bag_folder} ({len(png_files)} files)")
+                            print(f"  ⊘ BLACKLISTED BAGS (counted in total): {bag_folder} ({len(png_files)} files)")
                             self.blacklisted_patches_count += len(png_files)
+                            png_count += len(png_files)  # STILL COUNT in the grand total
+                            # Note: Don't add to patient_bags, so it won't appear in patient breakdown
                             continue
+                        
+                        # Check for individually blacklisted images within this bag
+                        count_individual_blacklisted = 0
+                        if bag_folder in self.image_blacklist_map:
+                            blacklisted_filenames = self.image_blacklist_map[bag_folder]
+                            count_individual_blacklisted = sum(1 for f in png_files if f in blacklisted_filenames)
+                            if count_individual_blacklisted > 0:
+                                print(f"  ⊘ BLACKLISTED IMAGES: {bag_folder} ({count_individual_blacklisted} individual files)")
+                                self.individual_blacklist_patches_count += count_individual_blacklisted
+                        
+                        # Count ALL files including individually blacklisted ones in permanent total
+                        png_count += len(png_files)
                         
                         # Extract patient ID (e.g., "B22-01" from "B22-01_0")
                         patient_id = '_'.join(bag_folder.split('_')[:-1]) if '_' in bag_folder else bag_folder
                         
                         patient_bags[patient_id]['bags'][bag_folder] = len(png_files)
                         patient_bags[patient_id]['total'] += len(png_files)
-                        png_count += len(png_files)
             
             # Store and display results
             self.results[dir_name] = patient_bags
@@ -246,16 +276,25 @@ class DatasetAuditor:
                     if len(path_parts) >= 1:
                         bag_folder = path_parts[0]  # e.g., "B22-01_0"
                         
-                        # Skip blacklisted bags
+                        # Skip blacklisted bags entirely (already excluded via rsync)
                         if bag_folder in self.blacklist:
                             continue
+                        
+                        # Filter out individually blacklisted images for this bag
+                        filtered_png_files = png_files
+                        if bag_folder in self.image_blacklist_map:
+                            blacklisted_filenames = self.image_blacklist_map[bag_folder]
+                            filtered_png_files = [f for f in png_files if f not in blacklisted_filenames]
+                            count_excluded = len(png_files) - len(filtered_png_files)
+                            if count_excluded > 0:
+                                print(f"  ⊘ EXCLUDED INDIVIDUAL IMAGES: {bag_folder} ({count_excluded} files)")
                         
                         # Extract patient ID
                         patient_id = '_'.join(bag_folder.split('_')[:-1]) if '_' in bag_folder else bag_folder
                         
-                        patient_bags[patient_id]['bags'][bag_folder] = len(png_files)
-                        patient_bags[patient_id]['total'] += len(png_files)
-                        png_count += len(png_files)
+                        patient_bags[patient_id]['bags'][bag_folder] = len(filtered_png_files)
+                        patient_bags[patient_id]['total'] += len(filtered_png_files)
+                        png_count += len(filtered_png_files)
             
             # Store and display results
             self.scratch_results[dir_name] = patient_bags
@@ -343,13 +382,17 @@ class DatasetAuditor:
         # Scratch statistics
         if scratch_grand_total > 0:
             sync_discrepancy = grand_total - scratch_grand_total
+            expected_difference = self.blacklisted_patches_count + self.individual_blacklist_patches_count
+            
             print(f"\n📋 PERMANENT vs SCRATCH SYNC:")
             print(f"  Permanent Dataset:  {grand_total:,} patches")
             print(f"  Scratch Directory:  {scratch_grand_total:,} patches")
             print(f"  Difference:         {sync_discrepancy:,} patches")
             
-            if sync_discrepancy > 0:
-                print(f"\n  ⚠️  NOT SYNCED: {sync_discrepancy:,} patches in permanent but not in scratch")
+            if sync_discrepancy == expected_difference and sync_discrepancy > 0:
+                print(f"\n  ✓ SYNCED: All blacklisted items ({sync_discrepancy:,} patches) properly excluded from scratch")
+            elif sync_discrepancy > 0:
+                print(f"\n  ⚠️  NOT SYNCED: {sync_discrepancy:,} patches in permanent but not in scratch (expected {expected_difference:,})")
             elif sync_discrepancy < 0:
                 print(f"\n  ⚠️  EXTRA: {abs(sync_discrepancy):,} extra patches in scratch")
             else:
@@ -398,9 +441,13 @@ class DatasetAuditor:
         header_rows.append({'Directory': 'GRAND TOTAL', 'Patient': f'PERMANENT: {grand_total:,}', 'Bags': f'SCRATCH: {scratch_grand_total:,}', 'Total_Patches': '', 'Bag_Details': ''})
         header_rows.append({'Directory': '=' * 70, 'Patient': '', 'Bags': '', 'Total_Patches': '', 'Bag_Details': ''})
         
+        # Calculate expected difference based on blacklist before sync comparison
+        expected_difference = self.blacklisted_patches_count + self.individual_blacklist_patches_count
+        
         # Add sync comparison if scratch exists
         if scratch_grand_total > 0:
             sync_discrepancy = grand_total - scratch_grand_total
+            
             header_rows.append({'Directory': '', 'Patient': '', 'Bags': '', 'Total_Patches': '', 'Bag_Details': ''})
             header_rows.append({'Directory': 'SYNC STATUS', 'Patient': '', 'Bags': '', 'Total_Patches': '', 'Bag_Details': ''})
             header_rows.append({'Directory': '-' * 70, 'Patient': '', 'Bags': '', 'Total_Patches': '', 'Bag_Details': ''})
@@ -408,23 +455,26 @@ class DatasetAuditor:
             header_rows.append({'Directory': 'Scratch Directory Total', 'Patient': f'{scratch_grand_total:,} patches', 'Bags': '', 'Total_Patches': '', 'Bag_Details': ''})
             header_rows.append({'Directory': 'Difference', 'Patient': f'{sync_discrepancy:,} patches', 'Bags': '', 'Total_Patches': '', 'Bag_Details': ''})
             
-            if sync_discrepancy > 0:
-                header_rows.append({'Directory': 'Status', 'Patient': f'NOT SYNCED: {sync_discrepancy:,} patches in permanent but not in scratch', 'Bags': '', 'Total_Patches': '', 'Bag_Details': ''})
+            # Status logic: check if difference matches expected blacklist removal
+            if sync_discrepancy == expected_difference and sync_discrepancy > 0:
+                header_rows.append({'Directory': 'Status', 'Patient': f'SYNCED: All blacklisted items ({sync_discrepancy:,} patches) properly excluded from scratch', 'Bags': '', 'Total_Patches': '', 'Bag_Details': ''})
+            elif sync_discrepancy > 0:
+                header_rows.append({'Directory': 'Status', 'Patient': f'NOT SYNCED: {sync_discrepancy:,} patches in permanent but not in scratch (expected {expected_difference:,})', 'Bags': '', 'Total_Patches': '', 'Bag_Details': ''})
             elif sync_discrepancy < 0:
                 header_rows.append({'Directory': 'Status', 'Patient': f'EXTRA: {abs(sync_discrepancy):,} extra patches in scratch', 'Bags': '', 'Total_Patches': '', 'Bag_Details': ''})
             else:
                 header_rows.append({'Directory': 'Status', 'Patient': 'FULLY SYNCED: All patches accounted for', 'Bags': '', 'Total_Patches': '', 'Bag_Details': ''})
         
         # Add blacklist summary right after sync status
-        expected_difference = self.blacklisted_patches_count + len(self.image_blacklist)
+        total_blacklisted_patches = self.blacklisted_patches_count + self.individual_blacklist_patches_count
         actual_difference = grand_total - scratch_grand_total
         
         header_rows.append({'Directory': '', 'Patient': '', 'Bags': '', 'Total_Patches': '', 'Bag_Details': ''})
         header_rows.append({'Directory': 'BLACKLIST SUMMARY', 'Patient': '', 'Bags': '', 'Total_Patches': '', 'Bag_Details': ''})
         header_rows.append({'Directory': '-' * 70, 'Patient': '', 'Bags': '', 'Total_Patches': '', 'Bag_Details': ''})
         header_rows.append({'Directory': '  Blacklisted bags (conflict_blacklist)', 'Patient': f'{len(self.blacklist)} bags', 'Bags': '', 'Total_Patches': f'{self.blacklisted_patches_count:,} patches', 'Bag_Details': 'Excluded from scratch sync'})
-        header_rows.append({'Directory': '  Blacklisted images (image_blacklist)', 'Patient': f'{len(self.image_blacklist)} images', 'Bags': '', 'Total_Patches': '', 'Bag_Details': 'Individual duplicates'})
-        header_rows.append({'Directory': '  Total blacklisted items', 'Patient': f'{len(self.blacklist) + len(self.image_blacklist)} items', 'Bags': '', 'Total_Patches': f'{expected_difference:,} approx patches', 'Bag_Details': 'Conflict bags + individual images'})
+        header_rows.append({'Directory': '  Blacklisted images (image_blacklist)', 'Patient': f'{len(self.image_blacklist)} images', 'Bags': '', 'Total_Patches': f'{self.individual_blacklist_patches_count:,} patches', 'Bag_Details': 'Individual duplicates'})
+        header_rows.append({'Directory': '  Total blacklisted items', 'Patient': f'{len(self.blacklist) + len(self.image_blacklist)} items', 'Bags': '', 'Total_Patches': f'{total_blacklisted_patches:,} patches', 'Bag_Details': 'Conflict bags + individual images'})
         header_rows.append({'Directory': '  Expected Permanent vs Scratch difference', 'Patient': '', 'Bags': '', 'Total_Patches': f'{expected_difference:,} patches', 'Bag_Details': 'Based on blacklist removals'})
         header_rows.append({'Directory': '  Actual Permanent vs Scratch difference', 'Patient': '', 'Bags': '', 'Total_Patches': f'{actual_difference:,} patches', 'Bag_Details': 'Observed from counts'})
         

@@ -149,6 +149,13 @@ def main():
             print(f"  - Fold {i}: Patched {patch_count} patients with Stride-128 scores.")
             
         all_dfs.append(df)
+    
+    # Validate that dataframes were loaded
+    if not all_dfs:
+        print(f"\nError: No evaluation report files found. Cannot create ensemble voting summary.")
+        print(f"Expected to find patient consensus CSV files matching pattern: *_patient_consensus.csv")
+        print(f"Checked location: results/")
+        return
         
     # Validate that all files have the same patients and labels
     pids = all_dfs[0]['PatientID'].values

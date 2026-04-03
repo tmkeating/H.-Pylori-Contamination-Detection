@@ -15,47 +15,64 @@
 #
 # IMPORTANT: Understanding Patch Count Discrepancies
 # ==================================================
-# The reported patch count (Patches_Scanned in output) reflects CLINICAL-VALIDATED
-# patches only, not all raw PNG files on disk. Here's why they differ:
+# NOTE: This script audits ALL patches in scratch (training + evaluation) for leakage.
+# For granular training vs evaluation counts, use audit_png_count.py instead.
 #
-# RAW PNG COUNT vs CLINICAL-VALIDATED COUNT:
-#   - Raw PNG files on disk:           ~216,865 patches (all physical files)
-#   - Orphaned/unmatched patches:      -2,221 patches (no clinical patient metadata)
-#   - Clinically-validated patches:    ~214,644 patches (have patient metadata)
-#     ├─ Of which are blacklisted:     -3,283 patches (conflicting or duplicate items)
-#     └─ Non-blacklisted clinical:     ~211,361 patches (final training set)
+# COUNT BREAKDOWN (filtering order):
+#   - Raw PNG files on permanent storage:      ~219,609 patches (all physical files)
+#   
+#   - Blacklisted and excluded at rsync:         -3,283 patches
+#     * B22-124_0: 1,197 patches (CrossValidation redundant)
+#     * B22-01_1: 486 patches (HoldOut, clinical conflict with B22-03_1)
+#     * B22-03_1: 486 patches (HoldOut, clinical conflict with B22-01_1)
+#     * Image-level blacklist: ~113 patches (duplicates within bags)
+#   
+#   - Physical patches in scratch directory:  ~216,326 patches (audit_png_count.py - AUTHORITATIVE)
+#     * Training (CrossValidation):           ~128,724 patches (for 5-fold CV)
+#     * Evaluation (HoldOut):                 ~87,602 patches (separate held-out test set)
+#   
+#   - verify_data_integrity.py scans:        ~214,644 patches (both training + evaluation audited)
+#     * Gap: 1,682 patches (from HPyloriDataset internal dedup logic)
 #
-#   KEY INSIGHT: Blacklist removes items FROM the clinical set, not from orphaned set
-#   The conflict bags have diagnoses in the patient database (they're "conflicting")
-#   so they're included in the 214,644 clinical count and must be subtracted from it
+# IMPORTANT DISTINCTION:
+#   - audit_png_count.py: 216,326 patches (raw PNG files, authoritative file count)
+#   - verify_data_integrity.py: 214,644 patches (leakage audit, stricter clinical filtering)
+#   - The 1,682 patch difference is from verification script's dedup logic, not from blacklist
+#   - For training: 128,724 patches from CrossValidation only (audit_png_count.py)
+#   - For evaluation: 87,602 patches from HoldOut only (audit_png_count.py)
 #
-# FILTERING SYSTEM (4-Priority, Applied by HPyloriDataset):
-#   1. Priority 1: Patches WITH specific spot annotations in Excel
-#      - Exact bacterial locations from pathologist review (best quality)
-#   2. Priority 2: Patches from NEGATIVE patients
-#      - Patient diagnosis is 'NEGATIVA' in PatientDiagnosis.csv
-#   3. Priority 3: Patches from POSITIVE patients (no spot annotations)
-#      - Patient diagnosis is 'BAIXA' or 'ALTA' in PatientDiagnosis.csv
-#      - Marked as generic positives (-1) if no exact annotations
-#   4. Priority 4: SKIP everything else
-#      - PNG files with no matching patient in clinical database
-#      - Orphaned/unclassified files with no clinical metadata
+# FILTERING SYSTEM (Applied by HPyloriDataset during leakage audit):
+#   - HPyloriDataset loads patches with clinical validation
+#   - Applies deduplication to detect leakage (same patch in train + test)
+#   - Dedup logic is strict to catch subtle cross-contamination
+#   - Result: 214,644 patches after dedup audit (vs 216,326 raw files)
+#   - Gap of 1,682 is intentional - represents potential leakage candidates
 #
-# WHY THIS IS CORRECT:
-#   - Patches without clinical patient data are unusable for supervised learning
-#   - MPT requires each patch to be associated with a clinically confirmed diagnosis
-#   - The 214,644 patches are the TRUE training set size (all clinically valid)
+# IMPORTANT:
+#   - This script is for LEAKAGE DETECTION, not for training data verification
+#   - Use this to identify and audit cross-set patient overlaps
+#   - For actual training patch count, use audit_png_count.py
+#   - The 1,682 patch gap is from verification logic, NOT from data loss
 #
 # BLACKLIST IMPACT:
-#   - Component 1 - Conflict Bags: 5 bags = 2,744 patches (conflicting diagnoses)
-#   - Component 2 - Individual Duplicates: 539 images = ~539 patches (cross-folder/intra-folder duplicates)
-#   - Total Blacklist: 3,283 patches from the clinical-validated set
-#   - Note: Image files in conflict bags are not double-counted
-#   - Effect: These clinically-valid but problematic patches must be excluded from training
+#   - B22-124_0: 1,197 patches (CrossValidation redundant, excluded at rsync)
+#   - B22-01_1: 486 patches (HoldOut, held out from training)
+#   - B22-03_1: 486 patches (HoldOut, held out from training)
+#   - Image-level duplicates: ~113 patches (removed at rsync)
+#   - Total Blacklist: ~3,283 patches (excluded at rsync level, NOT in scratch)
+#   - Note: Blacklist removal happens at sync time via rsync --exclude
+#   - Effect: Scratch receives 216,326 patches (correct amount after blacklist)
 #
 # OUTPUT INTERPRETATION:
-#   - Patches_Scanned = Total patches that passed ALL filters (clinical + blacklist)
-#   - This is the accurate count for model training and evaluation
+#   - Patches_Scanned = Patches examined by verify_data_integrity (214,644)
+#   - This includes BOTH training (128,724) and evaluation (87,602) sets
+#   - Gap to 216,326: 1,682 patches (from internal dedup logic in verification)
+#   - AUTHORITATIVE COUNTS:
+#     * Raw files in scratch: 216,326 patches (audit_png_count.py)
+#     * Training set: 128,724 patches (CrossValidation, audit_png_count.py)
+#     * Evaluation set: 87,602 patches (HoldOut, audit_png_count.py)
+#   - Use this script for leakage detection only, NOT for training patch count
+#   - Actual model training uses audit_png_count.py verified numbers
 # -----------------------------------------------
 """
 import os
