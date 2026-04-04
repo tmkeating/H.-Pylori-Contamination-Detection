@@ -457,7 +457,10 @@ class HPyloriDataset(Dataset):
             print(f"  Scanned Patches: {self.audit_log['total_scanned']}")
             conflict_count = len(self.audit_log['conflict_removed']) if self.audit_log['conflict_removed'] else 0
             print(f"  Conflict Blacklist: Removed {conflict_count} patient bags {self.audit_log['conflict_removed']}")
-            print(f"  Redundant Blacklist: Removed {self.audit_log['redundant_removed']} exact image duplicates")
+            if conflict_count == 0:
+                print(f"    (Note: Conflict bags were excluded at rsync level - not in scratch)")
+            print(f"  Image-Level Blacklist: Removed {self.audit_log['redundant_removed']} cross-folder duplicate images")
+            print(f"    (Note: These images appear in multiple bags; removing from non-primary locations)")
             total_patches_removed = self.audit_log['conflict_patches'] + self.audit_log['redundant_removed']
             print(f"  Total Patches Removed: {total_patches_removed}")
             print(f"  Total Patches Remaining: {self.audit_log['final_patches']}")

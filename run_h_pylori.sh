@@ -79,24 +79,45 @@ else:
         with open(blacklist_path, 'r') as f:
             data = json.load(f)
             conflict_bags = list(data.get('conflict_blacklist', {}).keys())
+            image_blacklist = data.get('image_blacklist', [])
             
+            bag_removed = 0
+            image_removed = 0
+            
+            # Remove entire bag folders if they exist in scratch
             if conflict_bags:
                 print(f"[CLEANUP] Found {len(conflict_bags)} blacklisted bags to remove")
-                removed_count = 0
-                
-                # Remove entire bag folders if they exist in scratch
                 for bag_id in conflict_bags:
-                    # Blacklisted bags could be in any of these directories
                     for dir_name in ['CrossValidation/Annotated', 'CrossValidation/Cropped', 'HoldOut']:
                         bag_path = scratch_path / dir_name / bag_id
                         if bag_path.exists():
-                            print(f"[CLEANUP] Removing: {bag_path}")
+                            print(f"[CLEANUP] Removing bag: {bag_path}")
                             shutil.rmtree(bag_path)
-                            removed_count += 1
-                
-                print(f"[CLEANUP] Removed {removed_count} blacklisted bags from scratch")
+                            bag_removed += 1
+                print(f"[CLEANUP] Removed {bag_removed} blacklisted bags from scratch")
+            
+            # Remove individual image-level blacklist items that appear in multiple bags
+            if image_blacklist:
+                print(f"[CLEANUP] Found {len(image_blacklist)} image-level blacklist items to clean")
+                for item in image_blacklist:
+                    if isinstance(item, dict):
+                        folder = item.get('folder')
+                        filename = item.get('filename')
+                        # These files appear in multiple bags; remove from non-primary locations
+                        for dir_name in ['CrossValidation/Annotated', 'CrossValidation/Cropped', 'HoldOut']:
+                            bag_path = scratch_path / dir_name / folder
+                            if bag_path.exists():
+                                file_path = bag_path / filename
+                                if file_path.exists():
+                                    file_path.unlink()
+                                    image_removed += 1
+                print(f"[CLEANUP] Removed {image_removed} image-level blacklist files from scratch")
+            
+            total_removed = bag_removed + image_removed
+            if total_removed > 0:
+                print(f"[CLEANUP] Total removed: {total_removed} items")
             else:
-                print(f"[CLEANUP] No blacklisted bags found in blacklist.json")
+                print(f"[CLEANUP] No blacklisted items found in scratch to remove")
     else:
         print(f"[CLEANUP] Scratch path doesn't exist yet - no cleanup needed")
 CLEANUP_EOF
@@ -114,8 +135,6 @@ if command -v jq &> /dev/null; then
         jq -r '.conflict_blacklist | keys[]' blacklist.json | sed 's/^/- /'
         jq -r '.image_blacklist[]? | "- \(.folder)/\(.filename)"' blacklist.json
         echo "+ */"
-        echo "- *"
-        echo "+ *.png"
         echo "- *"
     } > "$EXCLUDE_FILTER_FILE"
     echo "[DEBUG] Created filter file with jq" >&2
@@ -191,9 +210,8 @@ except Exception as e:
 with open(exclude_filter_file, 'w') as out:
     for exclude in excludes:
         out.write(exclude + "\n")
+    # Allow directories to be traversed, then exclude individual files not explicitly allowed
     out.write("+ */\n")
-    out.write("- *\n")
-    out.write("+ *.png\n")
     out.write("- *\n")
 
 print(f"[DEBUG] Wrote {len(excludes)} total exclusion rules to filter file")
