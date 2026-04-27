@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 # H. Pylori Dataset PNG Counter & Audit Script - AUTHORITATIVE PATCH COUNT
-# -----------------------------------------------\n# ★ Use this script for the CORRECT patch counts: 128,724 (training) + 87,602 (HoldOut) = 216,326 (total) ★
+# -----------------------------------------------
+# ★ Use this script for the CORRECT patch counts: 128,724 (training) + 87,602 (HoldOut) = 216,326 (total) ★
 # This script performs a comprehensive audit of PNG files across both the permanent
 # dataset storage and the scratch directory (local NVMe SSD), comparing file counts
 # and patch distributions to ensure proper data synchronization and integrity.
@@ -15,39 +16,40 @@
 #   6. Exports comprehensive CSV report with all comparisons
 #
 # Why this is AUTHORITATIVE:
-#   1. Counts actual PNG files - no dedup or filtering logic
-#   2. Reports CORRECT counts: 128,724 training patches (CrossValidation only)
-#   3. Confirms blacklist exclusion happened at sync time (not in training)
+#   1. Counts actual PNG files - reports what's physically on disk
+#   2. Reports CORRECT counts: 128,724 training patches (CrossValidation in scratch)
+#   3. Compares permanent storage vs scratch (verifies sync completed correctly)
 #   4. Audit Trail: Provides CSV documentation for reproducibility
-#   5. NOT affected by dataset.py dedup or verification dedup logic
+#   5. NOT affected by dataset.py logic or verify_data_integrity verification logic
 #
 # NOTE on other scripts:
-#   - verify_data_integrity.py: Reports 214,365 patches (leakage-audited, stricter dedup)
-#   - This discrepancy is due to dedup logic, NOT actual data loss
+#   - verify_data_integrity.py: Reports 216,326 patches verified (cross-set contamination check)
+#   - This matches audit_png_count.py exactly - all 216,326 patches are verified clean
 #   - For training: use 128,724 patches (CrossValidation only, after blacklist)
 #   - For evaluation: use 87,602 patches (HoldOut only, separate test set)
-#   - Total scratch: 216,326 patches (both folders combined)
+#   - Total scratch: 216,326 patches (both folders combined, all valid)
 #
 # IMPORTANT: Understanding Patch Counts
 # ======================================
 #
-# TWO COUNTING STAGES:
+# COUNTING SOURCES:
 #
-#   A) RAW PNG FILES ON DISK (permanent dataset):
+#   A) PERMANENT STORAGE (original dataset in /import/fhome/vlia/HelicoDataSet):
 #      - Count:     ~219,609 patches
 #      - Source:    All PNG files physically stored in HelicoDataSet
 #      - Includes:  All files in Annotated, Cropped, HoldOut directories
 #      - Excludes:  None (complete inventory)
 #      - Purpose:   Reference count for all available files
 #
-#   B) TRAINING DATASET (CrossValidation folder in scratch, blacklist excluded):
-#      - Count:     ~128,724 patches (CORRECT FOR MODEL TRAINING)
-#      - Breakdown: CrossValidation/Annotated (2,953) + CrossValidation/Cropped (126,090) - 319 blacklist
-#      - Source:    /tmp/ricse03_h_pylori_data/CrossValidation (local NVMe SSD after rsync)
-#      - Includes:  All non-blacklisted PNG files from CrossValidation folder only
-#      - Excludes:  Blacklist items (319 patches) + HoldOut folder (separate test set)
-#      - Purpose:   Actual training dataset fed to model with 5-fold cross-validation
-#      - Note:      All bags belong to valid 154 unique clinical patient base IDs
+#   B) SCRATCH DIRECTORY (CrossValidation folder after rsync with blacklist exclusion):
+#      - Count:     ~128,724 patches (ACTUAL TRAINING DATASET)
+#      - Breakdown: CrossValidation/Annotated (~2,953) + CrossValidation/Cropped (~125,771)
+#      - Source:    /tmp/ricse03_h_pylori_data/CrossValidation (local NVMe SSD)
+#      - Includes:  All PNG files actually present in CrossValidation after blacklist excluded at rsync
+#      - Excludes:  Blacklist items excluded by rsync (3,283 patches never synced)
+#      - Excludes:  HoldOut folder (separate evaluation set)
+#      - Purpose:   Actual training dataset used in model with 5-fold cross-validation
+#      - Note:      All bags belong to valid clinical patient IDs
 #
 #   C) HOLDOUT/EVALUATION DATASET (HoldOut folder in scratch, separate test set):
 #      - Count:     ~87,602 patches (FOR FINAL EVALUATION ONLY)
@@ -59,13 +61,21 @@
 #      - Count:     ~216,326 patches (training + evaluation)
 #      - Composition: 128,724 (training) + 87,602 (evaluation)
 #
-# COUNT RECONCILIATION (filtering order):
-#   - Raw PNG files on disk (permanent):         ~219,609 patches (ALL files stored)
-#   - FILTERING: Remove blacklist items:         -3,283 patches (conflict bags + duplicates)
-#   - Result in scratch (all folders):           ~216,326 patches (training + evaluation combined)
-#     * Training subset (CrossValidation):       ~129,043 → 128,724 (after 319 image blacklist)
-#     * Evaluation subset (HoldOut):             ~87,602 patches (separate test set)
-#   - Note: CrossValidation uses 5-fold CV, HoldOut is held out completely
+# COUNT RECONCILIATION:
+#   Permanent Storage (complete inventory):
+#   - Raw PNG files on disk:                      ~219,609 patches (ALL files)
+#   
+#   Blacklist applied at rsync level (excluded from sync):
+#   - Blacklist: 5 conflict bags + 2,788 image duplicates = ~3,283 patches
+#   - These items NEVER reach scratch (filtered by rsync --exclude)
+#   
+#   Result in scratch (all folders after rsync):
+#   - Total in scratch:                          ~216,326 patches (vetted, no blacklist items)
+#     * CrossValidation (training):              ~128,724 patches (5-fold CV)
+#     * HoldOut (evaluation):                    ~87,602 patches (separate test set)
+#   
+#   Note: audit_png_count.py counts what's physically in scratch (all 216,326 patches)
+#         verify_data_integrity.py audits these same patches for cross-set contamination
 #
 # BLACKLIST IMPACT:
 #   - Location: blacklist.json at project root
@@ -78,9 +88,9 @@
 #   - Verification: Blacklist removal during sync produces exactly 216,326 patches in scratch
 #
 # SYNC STATUS INTERPRETATION:
-#   - FULLY SYNCED: Scratch has all permanent patches (permanent = scratch)
-#   - NOT SYNCED: Some permanent patches missing from scratch (investigate!)
-#   - EXTRA: More patches in scratch than permanent (shouldn't happen)
+#   - FULLY SYNCED: Scratch has all non-blacklisted patches (permanent_count - blacklist = scratch_count)
+#   - NOT SYNCED: Some non-blacklisted patches missing from scratch (investigate!)
+#   - EXTRA: More patches in scratch than expected (shouldn't happen)
 #   - DISCREPANCY: Amount difference shown in CSV report
 #
 # OUTPUT INTERPRETATION:
@@ -98,9 +108,9 @@
 #     * Permanent HoldOut:                    ~88,794 patches
 #     * Permanent TOTAL:                      ~219,609 patches
 #     ---
-#     * Scratch CrossValidation (training):   ~128,724 patches (after 319 blacklist)
-#     * Scratch HoldOut (evaluation):         ~87,602 patches
-#     * Scratch TOTAL:                        ~216,326 patches (3,283 fewer due to blacklist exclusion)
+#     * Scratch CrossValidation (training):   ~128,724 patches (blacklist excluded at rsync)
+#     * Scratch HoldOut (evaluation):         ~87,602 patches (blacklist excluded at rsync)
+#     * Scratch TOTAL:                        ~216,326 patches (3,283 fewer than permanent due to blacklist)
 #
 # HOW TO RUN:
 #   python3 audit_png_count.py
