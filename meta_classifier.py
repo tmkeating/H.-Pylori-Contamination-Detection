@@ -319,7 +319,7 @@ import os
 import glob
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import LeaveOneOut
-from sklearn.metrics import classification_report, accuracy_score, confusion_matrix
+from sklearn.metrics import classification_report, accuracy_score, confusion_matrix, precision_score, recall_score, f1_score
 
 def load_all_model_features(results_dirs):
     """
@@ -497,6 +497,11 @@ def main():
     cm = confusion_matrix(y_true, y_pred)
     tn, fp, fn, tp = cm.flatten()
     print(f"TN: {tn} | FP: {fp} | FN: {fn} | TP: {tp}")
+    
+    # Calculate additional metrics for summary file
+    rec = recall_score(y_true, y_pred, zero_division=0)
+    prec = precision_score(y_true, y_pred, zero_division=0)
+    f1 = f1_score(y_true, y_pred, zero_division=0)
 
     # Check the "Unreachable Three"
     # Aggregate cross-validation results into a structured DataFrame for failure analysis
@@ -512,6 +517,14 @@ def main():
 
     # Persist the fusion results for external documentation and research validation
     results_df.to_csv("meta_fusion_results.csv", index=False)
+    
+    # Save a concise summary for easy automated consumption (matching ensemble_voting.py format)
+    summary_data = {
+        "Metric": ["Recall", "Precision", "Accuracy", "F1_Score", "TP", "FP", "FN", "TN"],
+        "Value": [rec, prec, acc, f1, tp, fp, fn, tn]
+    }
+    pd.DataFrame(summary_data).to_csv("meta_classifier_summary.csv", index=False)
+    print(f"\nSummary metrics saved to [meta_classifier_summary.csv](meta_classifier_summary.csv)")
 
 if __name__ == "__main__":
     main()

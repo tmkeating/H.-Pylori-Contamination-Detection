@@ -213,6 +213,52 @@ Verification applies strict deduplication to detect if specimens were processed 
 
 ---
 
+## Data Integrity Report Files (Three-Layer Structure)
+
+Three separate CSV reports are generated, each serving different analytical purposes. They intentionally have different row counts—this is **by design**, not a data discrepancy.
+
+### File Comparison
+
+| File | Patient Count | What It Represents | Purpose | Use Case |
+|------|---|---|---|---|
+| **dataset_presence_matrix.csv** | **268** | All patients with image data (complete roster) | Inventory of which dataset sets contain each patient | Understanding complete patient coverage in storage |
+| **patient_duplicate_audit.csv** | **201** | Patients WITH detected duplicate images | Quality control / duplicate detection report | Identifying data redundancy and cross-folder issues |
+| **patient_integrity_breakdown.csv** | **337** | Same 268 patients split into CV bags/folds | Cross-validation fold structure for training | Understanding how patients are partitioned for 5-fold CV |
+
+### Why the Counts Differ (All Intentional)
+
+#### 268 vs 201 (dataset_presence_matrix vs patient_duplicate_audit)
+- **Difference:** 67 patients
+- **Reason:** Duplicate audit only includes patients WITH detected duplicates
+- **67 patients have NO duplicates** and are intentionally excluded from the audit report
+- **This is correct:** The audit focuses on data quality issues (duplicates), not complete inventory
+
+#### 201 vs 337 (patient_duplicate_audit vs patient_integrity_breakdown)
+- **Difference:** 136 extra rows in integrity breakdown
+- **Reason:** 268 unique patients split into multiple CV bags for cross-validation
+- **Multiplier:** 337 bags ÷ 268 patients = 1.26x (some patients appear in multiple folds)
+- **This is correct:** CV structure requires listing each bag separately
+
+#### 268 vs 337 (dataset_presence_matrix vs patient_integrity_breakdown)
+- **Difference:** 69 extra rows  
+- **Reason:** Same 268 patients with image data, but broken down by CV bags
+- **This is correct:** Data inventory vs. training fold structure use different granularity
+
+#### Context: PatientDiagnosis.csv has 309 patients
+- **With image data:** 268 ✓ (in dataset_presence_matrix)
+- **Without image data:** 41 orphaned clinical records (no image folders in storage)
+- **This is expected:** Clinical database has broader scope than imaging dataset
+
+### Which File to Use For What
+
+- **Understanding patient coverage** → Use `dataset_presence_matrix.csv` (268 patients)
+- **Finding duplicate images** → Use `patient_duplicate_audit.csv` (201 patients with duplicates)
+- **Understanding cross-validation structure** → Use `patient_integrity_breakdown.csv` (337 bags from 268 patients)
+- **Training data loading** → Use `dataset.py` which loads 128,724 patches from CrossValidation
+- **Verifying no cross-contamination** → Use `verify_data_integrity.py` which audits both sets
+
+---
+
 ## Conclusion
 
 ✅ **All data integrity checks pass**
