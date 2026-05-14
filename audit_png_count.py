@@ -8,7 +8,7 @@
 # and patch distributions to ensure proper data synchronization and integrity.
 #
 # What it does:
-#   1. Counts PNG files in the permanent dataset (/import/fhome/vlia/HelicoDataSet)
+#   1. Counts PNG files in the permanent dataset (/export/hhome/ricse03/HelicoDataSet)
 #   2. Counts PNG files in the scratch directory (/tmp/ricse03_h_pylori_data)
 #   3. Generates patient-by-patient breakdowns for both locations
 #   4. Reports sync status (are all permanent files present in scratch?)
@@ -34,7 +34,7 @@
 #
 # COUNTING SOURCES:
 #
-#   A) PERMANENT STORAGE (original dataset in /import/fhome/vlia/HelicoDataSet):
+#   A) PERMANENT STORAGE (original dataset in /export/hhome/ricse03/HelicoDataSet):
 #      - Count:     ~219,609 patches
 #      - Source:    All PNG files physically stored in HelicoDataSet
 #      - Includes:  All files in Annotated, Cropped, HoldOut directories
@@ -588,8 +588,8 @@ class DatasetAuditor:
 
 def main():
     # Configuration
-    dataset_root = Path('/import/fhome/vlia/HelicoDataSet')
-    scratch_root = Path('/tmp/ricse03_h_pylori_data')
+    dataset_root = Path(DATASET_ROOT)
+    scratch_root = Path(SCRATCH_ROOT)
     output_csv = Path('audit_png_count_report.csv')
     
     # Run audit

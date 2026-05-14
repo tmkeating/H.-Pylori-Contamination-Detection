@@ -4,7 +4,7 @@ This project implements a **High-Resolution Multi-Stage MIL Pipeline** for the a
 
 ## Execution Workflow (Step-by-Step)
 
-To reproduce the clinical-grade results (94.7% Accuracy, 98.2% Recall), follow this specific execution order:
+To reproduce the results, follow this specific execution order:
 
 ### 0. Data Integrity & Deduplication Audit
 Before training, run a byte-level MD5 hash audit across the dataset to identify exact duplicated images across the Folders (Annotated, Cropped, HoldOut) to prevent data leakage and skewed metrics.

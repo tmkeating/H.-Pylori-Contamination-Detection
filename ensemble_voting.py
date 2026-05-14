@@ -33,11 +33,50 @@ def calculate_metrics(y_true, y_pred):
     fn = np.sum((y_true == 1) & (y_pred == 0))
     tn = np.sum((y_true == 0) & (y_pred == 0))
     
+    # Basic Metrics
     recall = tp / (tp + fn) if (tp + fn) > 0 else 0
     precision = tp / (tp + fp) if (tp + fp) > 0 else 0
     accuracy = (tp + tn) / (tp + tn + fp + fn) if (tp + tn + fp + fn) > 0 else 0
+    f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
     
-    return recall, precision, accuracy, tp, fp, fn, tn
+    # Clinical Metrics
+    sensitivity = recall
+    specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
+    balanced_accuracy = (sensitivity + specificity) / 2
+    ppv = precision
+    npv = tn / (tn + fn) if (tn + fn) > 0 else 0
+    fpr = fp / (fp + tn) if (fp + tn) > 0 else 0
+    fnr = fn / (fn + tp) if (fn + tp) > 0 else 0
+    
+    # Matthews Correlation Coefficient
+    mcc_denom = np.sqrt((tp + fp) * (tp + fn) * (tn + fp) * (tn + fn))
+    mcc = ((tp * tn) - (fp * fn)) / mcc_denom if mcc_denom > 0 else 0
+    
+    # Cohen's Kappa
+    n = tp + tn + fp + fn
+    po = (tp + tn) / n if n > 0 else 0
+    pe = ((tp + fp) * (tp + fn) + (tn + fp) * (tn + fn)) / (n * n) if n > 0 else 0
+    kappa = (po - pe) / (1 - pe) if (1 - pe) != 0 else 0
+    
+    return {
+        'recall': recall,
+        'precision': precision,
+        'accuracy': accuracy,
+        'f1': f1,
+        'sensitivity': sensitivity,
+        'specificity': specificity,
+        'balanced_accuracy': balanced_accuracy,
+        'ppv': ppv,
+        'npv': npv,
+        'fpr': fpr,
+        'fnr': fnr,
+        'mcc': mcc,
+        'kappa': kappa,
+        'tp': tp,
+        'fp': fp,
+        'fn': fn,
+        'tn': tn
+    }
 
 def main():
     parser = argparse.ArgumentParser(description="Ensemble Voting for H. Pylori")
@@ -201,7 +240,15 @@ def main():
     ensemble_pred = ensemble_pred.astype(int)
     
     # Calculate metrics
-    rec, prec, acc, tp, fp, fn, tn = calculate_metrics(labels, ensemble_pred)
+    metrics = calculate_metrics(labels, ensemble_pred)
+    rec = metrics['recall']
+    prec = metrics['precision']
+    acc = metrics['accuracy']
+    f1 = metrics['f1']
+    tp = metrics['tp']
+    fp = metrics['fp']
+    fn = metrics['fn']
+    tn = metrics['tn']
     
     # Identify missed patients (Ultimate Ghost Patients)
     missed_indices = np.where((labels == 1) & (ensemble_pred == 0))[0]
@@ -222,7 +269,11 @@ def main():
 
     print("\n--- Individual Folds ---")
     for i, df in enumerate(all_dfs):
-        r, p, a, _, _, _, _ = calculate_metrics(df['Actual'].values, df['Predicted'].values)
+        fold_metrics = calculate_metrics(df['Actual'].values, df['Predicted'].values)
+        r = fold_metrics['recall']
+        p = fold_metrics['precision']
+        a = fold_metrics['accuracy']
+        f = fold_metrics['f1']
         print(f"Fold {i} (Job {files[i].split('_')[1]}): Recall={r:.4f}, Prec={p:.4f}, Acc={a:.4f}")
 
     # Create detailed CSV for inspection
@@ -254,14 +305,29 @@ def main():
     ensemble_df.to_csv(out_name, index=False)
     print(f"\nDetailed report saved to [{out_name}]({out_name})")
 
+
     # Iteration 24.9: Save a concise summary for easy automated consumption
     summary_name = f"results/ensemble_voting_summary_{run_label}.csv"
     summary_data = {
-        "Metric": ["Recall", "Precision", "Accuracy", "TP", "FP", "FN", "TN", "Ultimate_Ghost_Count"],
-        "Value": [rec, prec, acc, tp, fp, fn, tn, len(missed_indices)]
+        "Metric": [
+            "Recall", "Precision", "Accuracy", "F1_Score",
+            "Sensitivity", "Specificity", "Balanced_Accuracy",
+            "PPV_(Positive_Predictive_Value)", "NPV_(Negative_Predictive_Value)", 
+            "FPR_(False_Positive_Rate)", "FNR_(False_Negative_Rate)",
+            "Matthews_Correlation_Coefficient", "Cohen_Kappa",
+            "TP_(True_Positives)", "FP_(False_Positives)", "FN_(False_Negatives)", 
+            "TN_(True_Negatives)", "Ultimate_Ghost_Count"
+        ],
+        "Value": [
+            rec, prec, acc, f1,
+            metrics['sensitivity'], metrics['specificity'], metrics['balanced_accuracy'],
+            metrics['ppv'], metrics['npv'], metrics['fpr'], metrics['fnr'],
+            metrics['mcc'], metrics['kappa'],
+            tp, fp, fn, tn, len(missed_indices)
+        ]
     }
     pd.DataFrame(summary_data).to_csv(summary_name, index=False)
-    print(f"Concise summary saved to [{summary_name}]({summary_name})")
+    print(f"Comprehensive summary saved to [{summary_name}]({summary_name})")
 
     # Production Fusion: meta_fusion_results.csv with run numbers
     fusion_name = f"results/meta_fusion_results_{run_label}.csv"
@@ -270,6 +336,29 @@ def main():
     fusion_df.columns = ['ID', 'Pathology', 'AI_Decision', 'Confidence']
     fusion_df.to_csv(fusion_name, index=False)
     print(f"Pathology hand-off report saved to [{fusion_name}]({fusion_name})")
+
+    # Meta Fusion Summary: meta_fusion_summary.csv with run numbers
+    fusion_summary_name = f"results/meta_fusion_summary_{run_label}.csv"
+    fusion_summary_data = {
+        "Metric": [
+            "Recall", "Precision", "Accuracy", "F1_Score",
+            "Sensitivity", "Specificity", "Balanced_Accuracy",
+            "PPV_(Positive_Predictive_Value)", "NPV_(Negative_Predictive_Value)", 
+            "FPR_(False_Positive_Rate)", "FNR_(False_Negative_Rate)",
+            "Matthews_Correlation_Coefficient", "Cohen_Kappa",
+            "TP_(True_Positives)", "FP_(False_Positives)", "FN_(False_Negatives)", 
+            "TN_(True_Negatives)"
+        ],
+        "Value": [
+            rec, prec, acc, f1,
+            metrics['sensitivity'], metrics['specificity'], metrics['balanced_accuracy'],
+            metrics['ppv'], metrics['npv'], metrics['fpr'], metrics['fnr'],
+            metrics['mcc'], metrics['kappa'],
+            tp, fp, fn, tn
+        ]
+    }
+    pd.DataFrame(fusion_summary_data).to_csv(fusion_summary_name, index=False)
+    print(f"Meta fusion summary saved to [{fusion_summary_name}]({fusion_summary_name})")
 
 if __name__ == "__main__":
     main()

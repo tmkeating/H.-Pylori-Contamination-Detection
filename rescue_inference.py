@@ -21,6 +21,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 import numpy as np
 from tqdm import tqdm
+from config import SCRATCH_ROOT, DATASET_ROOT, PATIENT_CSV, PATCH_XLSX
 from dataset import HPyloriDataset
 from model import get_model
 from torchvision.transforms import v2
@@ -58,13 +59,13 @@ def rescue_inference(model_path, output_csv, target_patients=None, stride=128):
     model.eval()
     
     # Data Paths
-    base_data_path = "/tmp/ricse03_h_pylori_data"
+    base_data_path = SCRATCH_ROOT
     if not os.path.exists(base_data_path):
-        base_data_path = "/import/fhome/vlia/HelicoDataSet"
+        base_data_path = DATASET_ROOT
     
-    patient_csv = os.path.join(base_data_path, "PatientDiagnosis.csv")
-    patch_xlsx = os.path.join(base_data_path, "HP_WSI-CoordAnnotatedAllPatches.xlsx")
-    holdout_dir = os.path.join(base_data_path, "HoldOut")
+    patient_csv = PATIENT_CSV
+    patch_xlsx = PATCH_XLSX
+    holdout_dir = HOLDOUT
     
     # Normalization
     gpu_normalize = v2.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])

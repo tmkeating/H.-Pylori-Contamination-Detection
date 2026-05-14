@@ -77,7 +77,7 @@ REQUIREMENTS
 ------------
   - PyTorch with GPU support (CUDA recommended)
   - Trained model checkpoint at: results/{RUN_ID}_f{FOLD}_{MODEL_NAME}_model_brain.pth
-  - H. Pylori dataset at: /import/fhome/vlia/HelicoDataSet or ../HelicoDataSet
+  - H. Pylori dataset at: /export/hhome/ricse03/HelicoDataSet or ../HelicoDataSet
 
 NOTES
 -----
@@ -98,6 +98,7 @@ import sys
 import argparse
 import gc
 from tqdm import tqdm
+from config import DATASET_ROOT, PATIENT_CSV, PATCH_XLSX, CV_ANNOTATED, HOLDOUT
 from dataset import HPyloriDataset
 from model import get_model
 import torch.nn.functional as F
@@ -117,14 +118,11 @@ from visualization_utils import (
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Data Paths
-BASE_PATH = "/import/fhome/vlia/HelicoDataSet"
+BASE_PATH = DATASET_ROOT
 if not os.path.exists(BASE_PATH):
     BASE_PATH = os.path.abspath(os.path.join(os.getcwd(), "..", "HelicoDataSet"))
-
-PATIENT_CSV = os.path.join(BASE_PATH, "PatientDiagnosis.csv")
-PATCH_CSV = os.path.join(BASE_PATH, "HP_WSI-CoordAnnotatedAllPatches.xlsx")
-TRAIN_DIR = os.path.join(BASE_PATH, "CrossValidation/Annotated")
-HOLDOUT_DIR = os.path.join(BASE_PATH, "HoldOut")
+TRAIN_DIR = CV_ANNOTATED
+HOLDOUT_DIR = HOLDOUT
 
 # Preprocessing (Deterministic for validation)
 def det_preprocess_batch(batch, training=False):
@@ -156,7 +154,7 @@ def full_visual_report(RUN_ID, MODEL_PATH, MODEL_NAME="convnext_tiny", fold_idx=
 
     # Initialize Dataset (Hold-out / Unseen Test Set) with manageable bag size
     full_dataset = HPyloriDataset(
-        HOLDOUT_DIR, PATIENT_CSV, PATCH_CSV, 
+        HOLDOUT_DIR, PATIENT_CSV, PATCH_XLSX, 
         transform=VAL_TRANSFORM, bag_mode=True, 
         max_bag_size=1000, train=False  # Reduced from 10000 to save memory
     )

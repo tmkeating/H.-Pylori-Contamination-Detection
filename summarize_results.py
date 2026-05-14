@@ -51,12 +51,31 @@ def generate_grand_summary(results_dir="results", last_n=None):
         
         df = pd.read_csv(file, index_col=0)
         
-        # Extract key metrics
-        acc = df.loc['accuracy', 'precision'] # Accuracy is stored as precision/recall/f1 in the accuracy row
-        pos_recall = df.loc['Positive', 'recall']
-        pos_precision = df.loc['Positive', 'precision']
-        neg_recall = df.loc['Negative', 'recall']
-        f1_macro = df.loc['macro avg', 'f1-score']
+        # Extract key metrics from classification report
+        try:
+            acc = df.loc['accuracy', df.columns[0]]
+            pos_recall = df.loc['Positive', 'recall']
+            pos_precision = df.loc['Positive', 'precision']
+            neg_recall = df.loc['Negative', 'recall']
+            f1_macro = df.loc['macro avg', 'f1-score']
+        except (KeyError, IndexError):
+            print(f"Warning: Could not parse standard metrics from {file}")
+            continue
+        
+        # Extract clinical metrics (added as additional rows)
+        clinical_metrics_dict = {}
+        clinical_metric_names = [
+            'Sensitivity_(Recall)', 'Specificity', 'Balanced_Accuracy',
+            'PPV_(Positive_Predictive_Value)', 'NPV_(Negative_Predictive_Value)',
+            'FPR_(False_Positive_Rate)', 'FNR_(False_Negative_Rate)',
+            'Matthews_Correlation_Coefficient', 'Cohen_Kappa'
+        ]
+        
+        for metric_name in clinical_metric_names:
+            try:
+                clinical_metrics_dict[metric_name] = df.loc[metric_name, df.columns[0]]
+            except KeyError:
+                clinical_metrics_dict[metric_name] = None
         
         metrics = {
             'RunID': run_id,
@@ -67,14 +86,31 @@ def generate_grand_summary(results_dir="results", last_n=None):
             'Recall(-)': neg_recall,
             'F1_Macro': f1_macro
         }
+        
+        # Add clinical metrics to the metrics dict
+        metrics.update(clinical_metrics_dict)
         all_metrics.append(metrics)
         
         print(f"[{run_id} {fold_name}] Acc: {acc:.4f} | Prec(+): {pos_precision:.4f} | Rec(+): {pos_recall:.4f} | Rec(-): {neg_recall:.4f}")
 
     # 2. Calculate Averages
     summary_df = pd.DataFrame(all_metrics)
+    
+    # Drop columns that are completely empty (no clinical metrics in old reports)
+    summary_df = summary_df.dropna(axis=1, how='all')
+    
     # Ensure only numeric columns are selected for mean/std
-    numeric_cols = ['Accuracy', 'Precision(+)', 'Recall(+)', 'Recall(-)', 'F1_Macro']
+    numeric_cols = [
+        'Accuracy', 'Precision(+)', 'Recall(+)', 'Recall(-)', 'F1_Macro',
+        'Sensitivity_(Recall)', 'Specificity', 'Balanced_Accuracy',
+        'PPV_(Positive_Predictive_Value)', 'NPV_(Negative_Predictive_Value)',
+        'FPR_(False_Positive_Rate)', 'FNR_(False_Negative_Rate)',
+        'Matthews_Correlation_Coefficient', 'Cohen_Kappa'
+    ]
+    
+    # Filter to only columns that exist in the dataframe and have data
+    numeric_cols = [col for col in numeric_cols if col in summary_df.columns]
+    
     averages = summary_df[numeric_cols].mean()
     stds = summary_df[numeric_cols].std()
 

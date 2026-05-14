@@ -23,6 +23,7 @@ import pandas as pd
 from tqdm import tqdm
 from collections import defaultdict
 import json
+from config import DATASET_ROOT, CV_ANNOTATED, CV_CROPPED, HOLDOUT, PATIENT_CSV
 
 def get_file_hash(path):
     """Calculates MD5 hash of a single image file."""
@@ -40,9 +41,9 @@ def get_file_hash(path):
 
 def run_global_audit():
     sets_to_check = {
-        "Annotated": "/import/fhome/vlia/HelicoDataSet/CrossValidation/Annotated",
-        "Cropped": "/import/fhome/vlia/HelicoDataSet/CrossValidation/Cropped",
-        "HoldOut": "/import/fhome/vlia/HelicoDataSet/HoldOut"
+        "Annotated": CV_ANNOTATED,
+        "Cropped": CV_CROPPED,
+        "HoldOut": HOLDOUT
     }
 
     image_inventory = [] # List of every single image scanned
@@ -168,7 +169,7 @@ def run_global_audit():
             folders_and_sets = []
             for p in paths:
                 # Extract folder and set from the path
-                # Path format example: /import/fhome/vlia/HelicoDataSet/CrossValidation/Annotated/123/img.png
+                # Path format example: /export/hhome/ricse03/HelicoDataSet/CrossValidation/Annotated/123/img.png
                 parts = p.split('/')
                 set_name = ""
                 folder_name = ""
@@ -235,7 +236,7 @@ def run_global_audit():
 # Load clinical labels for exact conflict matching
     patient_labels = {}
     try:
-        label_file = "/import/fhome/vlia/HelicoDataSet/PatientDiagnosis.csv"
+        label_file = PATIENT_CSV
         if os.path.exists(label_file):
             df = pd.read_csv(label_file)
             clean_id = lambda x: str(int(float(x))) if str(x).replace('.','',1).isdigit() else str(x)

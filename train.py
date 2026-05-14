@@ -189,7 +189,7 @@ Visualizations (PNG):
 REQUIREMENTS
 ------------
   - PyTorch with GPU support (CUDA recommended for reasonable training time)
-  - H. Pylori dataset at: /import/fhome/vlia/HelicoDataSet or ../HelicoDataSet
+  - H. Pylori dataset at: /export/hhome/ricse03/HelicoDataSet or ../HelicoDataSet
   - 32GB+ GPU VRAM recommended (adjust batch size if needed)
   - Models: ConvNeXt-Tiny or ResNet50 from torchvision
 
@@ -224,10 +224,12 @@ from torchvision.transforms import v2 # Faster, optimized transforms
 from sklearn.metrics import (
     roc_curve, auc, confusion_matrix, ConfusionMatrixDisplay, 
     classification_report, precision_recall_curve, 
-    average_precision_score, PrecisionRecallDisplay
+    average_precision_score, PrecisionRecallDisplay,
+    matthews_corrcoef, cohen_kappa_score
 ) 
 from dataset import HPyloriDataset # Our custom code that finds images/labels
 from model import get_model        # Our custom code that builds the AI brain
+from config import DATASET_ROOT, SCRATCH_ROOT
 from tqdm import tqdm              # A library that shows a "progress bar"
 import re                          # Regexp to handle file numbering
 import gc
@@ -505,11 +507,11 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
         print("Set float32 matmul precision to 'high' for A40 hardware optimization.")
     
     # --- Step 2: Set the paths to our data ---
-    # We prioritize local scratch space for speed, then fallback to network path
-    base_data_path = "/tmp/ricse03_h_pylori_data"
+    # We prioritize local scratch space for speed, then fallback to permanent storage
+    base_data_path = SCRATCH_ROOT
     
     if not os.path.exists(base_data_path):
-        base_data_path = "/import/fhome/vlia/HelicoDataSet"
+        base_data_path = DATASET_ROOT
 
     if not os.path.exists(base_data_path):
         # Fallback for local development or different environments
@@ -1338,7 +1340,44 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
     
     # Save evaluation report EARLY to ensure it is generated even if Grad-CAM hangs
     report = classification_report(all_labels_pat, all_preds_pat, target_names=['Negative', 'Positive'], output_dict=True, zero_division=0)
-    pd.DataFrame(report).transpose().to_csv(results_csv_path)
+    report_df = pd.DataFrame(report).transpose()
+    
+    # Calculate clinical metrics for thesis reporting
+    tn, fp, fn, tp = confusion_matrix(all_labels_pat, all_preds_pat, labels=[0, 1]).ravel()
+    sensitivity = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+    specificity = tn / (tn + fp) if (tn + fp) > 0 else 0.0
+    ppv = tp / (tp + fp) if (tp + fp) > 0 else 0.0  # Precision
+    npv = tn / (tn + fn) if (tn + fn) > 0 else 0.0
+    fpr = fp / (fp + tn) if (fp + tn) > 0 else 0.0
+    fnr = fn / (fn + tp) if (fn + tp) > 0 else 0.0
+    mcc = matthews_corrcoef(all_labels_pat, all_preds_pat)
+    kappa = cohen_kappa_score(all_labels_pat, all_preds_pat)
+    accuracy = (tp + tn) / (tp + tn + fp + fn) if (tp + tn + fp + fn) > 0 else 0.0
+    balanced_accuracy = (sensitivity + specificity) / 2.0
+    
+    # Create dataframe with clinical metrics as additional rows
+    # Use only the first column for simplicity (clinical metrics are single values)
+    first_col = report_df.columns[0]
+    clinical_metrics_data = {
+        'Sensitivity_(Recall)': {first_col: sensitivity},
+        'Specificity': {first_col: specificity},
+        'Balanced_Accuracy': {first_col: balanced_accuracy},
+        'PPV_(Positive_Predictive_Value)': {first_col: ppv},
+        'NPV_(Negative_Predictive_Value)': {first_col: npv},
+        'FPR_(False_Positive_Rate)': {first_col: fpr},
+        'FNR_(False_Negative_Rate)': {first_col: fnr},
+        'Matthews_Correlation_Coefficient': {first_col: mcc},
+        'Cohen_Kappa': {first_col: kappa},
+        'TP_(True_Positives)': {first_col: float(tp)},
+        'FP_(False_Positives)': {first_col: float(fp)},
+        'FN_(False_Negatives)': {first_col: float(fn)},
+        'TN_(True_Negatives)': {first_col: float(tn)}
+    }
+    
+    clinical_df = pd.DataFrame(clinical_metrics_data).T
+    report_df = pd.concat([report_df, clinical_df])
+    
+    report_df.to_csv(results_csv_path)
     print(f"Evaluation report saved to {results_csv_path}")
     sys.stdout.flush()
 

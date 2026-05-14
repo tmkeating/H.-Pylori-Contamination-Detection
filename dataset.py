@@ -538,13 +538,13 @@ class HPyloriDataset(Dataset):
 
 if __name__ == "__main__":
     # Test dataset
-    base_data_path = "/import/fhome/vlia/HelicoDataSet"
+    base_data_path = DATASET_ROOT
     if not os.path.exists(base_data_path):
         base_data_path = "../HelicoDataSet"
 
-    patient_csv = os.path.join(base_data_path, "PatientDiagnosis.csv")
-    patch_csv = os.path.join(base_data_path, "HP_WSI-CoordAnnotatedAllPatches.csv")
-    train_dir = os.path.join(base_data_path, "CrossValidation/Annotated")
+    patient_csv = PATIENT_CSV
+    patch_csv = PATCH_CSV
+    train_dir = CV_ANNOTATED
     
     transform = transforms.Compose([
         transforms.Resize((256, 256)),

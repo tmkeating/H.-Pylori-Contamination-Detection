@@ -502,6 +502,25 @@ def main():
     rec = recall_score(y_true, y_pred, zero_division=0)
     prec = precision_score(y_true, y_pred, zero_division=0)
     f1 = f1_score(y_true, y_pred, zero_division=0)
+    
+    # Clinical Metrics
+    sensitivity = rec
+    specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
+    balanced_accuracy = (sensitivity + specificity) / 2
+    ppv = prec
+    npv = tn / (tn + fn) if (tn + fn) > 0 else 0
+    fpr = fp / (fp + tn) if (fp + tn) > 0 else 0
+    fnr = fn / (fn + tp) if (fn + tp) > 0 else 0
+    
+    # Matthews Correlation Coefficient
+    mcc_denom = np.sqrt((tp + fp) * (tp + fn) * (tn + fp) * (tn + fn))
+    mcc = ((tp * tn) - (fp * fn)) / mcc_denom if mcc_denom > 0 else 0
+    
+    # Cohen's Kappa
+    n = tp + tn + fp + fn
+    po = (tp + tn) / n if n > 0 else 0
+    pe = ((tp + fp) * (tp + fn) + (tn + fp) * (tn + fn)) / (n * n) if n > 0 else 0
+    kappa = (po - pe) / (1 - pe) if (1 - pe) != 0 else 0
 
     # Check the "Unreachable Three"
     # Aggregate cross-validation results into a structured DataFrame for failure analysis
@@ -520,8 +539,22 @@ def main():
     
     # Save a concise summary for easy automated consumption (matching ensemble_voting.py format)
     summary_data = {
-        "Metric": ["Recall", "Precision", "Accuracy", "F1_Score", "TP", "FP", "FN", "TN"],
-        "Value": [rec, prec, acc, f1, tp, fp, fn, tn]
+        "Metric": [
+            "Recall", "Precision", "Accuracy", "F1_Score",
+            "Sensitivity", "Specificity", "Balanced_Accuracy",
+            "PPV_(Positive_Predictive_Value)", "NPV_(Negative_Predictive_Value)", 
+            "FPR_(False_Positive_Rate)", "FNR_(False_Negative_Rate)",
+            "Matthews_Correlation_Coefficient", "Cohen_Kappa",
+            "TP_(True_Positives)", "FP_(False_Positives)", "FN_(False_Negatives)", 
+            "TN_(True_Negatives)"
+        ],
+        "Value": [
+            rec, prec, acc, f1,
+            sensitivity, specificity, balanced_accuracy,
+            ppv, npv, fpr, fnr,
+            mcc, kappa,
+            tp, fp, fn, tn
+        ]
     }
     pd.DataFrame(summary_data).to_csv("meta_classifier_summary.csv", index=False)
     print(f"\nSummary metrics saved to [meta_classifier_summary.csv](meta_classifier_summary.csv)")

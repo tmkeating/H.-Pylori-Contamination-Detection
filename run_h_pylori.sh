@@ -38,7 +38,7 @@ mkdir -p results
 # --- LOCAL SCRATCH SETUP ---
 # We use /tmp as it's on a local NVMe SSD (faster than network storage)
 LOCAL_SCRATCH="/tmp/ricse03_h_pylori_data"
-REMOTE_DATA="/import/fhome/vlia/HelicoDataSet"
+REMOTE_DATA="/export/hhome/ricse03/HelicoDataSet"
 
 echo "Synchronizing dataset to local scratch: $LOCAL_SCRATCH"
 mkdir -p "$LOCAL_SCRATCH"
@@ -146,7 +146,7 @@ import os
 from pathlib import Path
 
 exclude_filter_file = os.environ['EXCLUDE_FILTER_FILE']
-remote_data = os.environ.get('REMOTE_DATA', '/import/fhome/vlia/HelicoDataSet')
+remote_data = os.environ.get('REMOTE_DATA', '/export/hhome/ricse03/HelicoDataSet')
 
 excludes = []
 
