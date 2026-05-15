@@ -1018,6 +1018,84 @@ def main():
     pd.DataFrame(meta_summary_data).to_csv(meta_summary_name, index=False)
     print(f"✓ Meta-Classifier summary saved: {meta_summary_name}")
     
+    # Bootstrap CI for meta_classifier
+    print(f"\n--- Bootstrap Resampling for Meta-Classifier (1000 iterations) ---")
+    meta_bootstrap_ci = bootstrap_resample_metrics(
+        meta_y_true, meta_results['y_pred'], meta_y_pred_proba, meta_y_pred_proba, meta_y_pred_proba,
+        np.column_stack([meta_results['y_pred']] * 5), np.column_stack([meta_results['y_pred']] * 5), 
+        np.zeros_like(meta_y_true), n_bootstrap=1000
+    )
+    
+    # Create bootstrap CI CSV for meta_classifier
+    meta_bootstrap_ci_name = f"results/meta_classifier_bootstrap_ci_{run_label}.csv"
+    meta_ci_data = {
+        "Metric": [
+            "Recall", "Precision", "Accuracy", "F1_Score",
+            "Sensitivity", "Specificity", "Balanced_Accuracy",
+            "PPV_(Positive_Predictive_Value)", "NPV_(Negative_Predictive_Value)", 
+            "FPR_(False_Positive_Rate)", "FNR_(False_Negative_Rate)",
+            "Matthews_Correlation_Coefficient", "Cohen_Kappa"
+        ],
+        "Point_Estimate": [
+            meta_metrics['recall'], meta_metrics['precision'], meta_metrics['accuracy'], meta_metrics['f1'],
+            meta_metrics['sensitivity'], meta_metrics['specificity'], meta_metrics['balanced_accuracy'],
+            meta_metrics['ppv'], meta_metrics['npv'], meta_metrics['fpr'], meta_metrics['fnr'],
+            meta_metrics['mcc'], meta_metrics['kappa']
+        ],
+        "Bootstrap_Mean": [
+            meta_bootstrap_ci['recall']['mean'], meta_bootstrap_ci['precision']['mean'], 
+            meta_bootstrap_ci['accuracy']['mean'], meta_bootstrap_ci['f1']['mean'],
+            meta_bootstrap_ci['sensitivity']['mean'], meta_bootstrap_ci['specificity']['mean'], 
+            meta_bootstrap_ci['balanced_accuracy']['mean'],
+            meta_bootstrap_ci['ppv']['mean'], meta_bootstrap_ci['npv']['mean'], 
+            meta_bootstrap_ci['fpr']['mean'], meta_bootstrap_ci['fnr']['mean'],
+            meta_bootstrap_ci['mcc']['mean'], meta_bootstrap_ci['kappa']['mean']
+        ],
+        "Bootstrap_Std": [
+            meta_bootstrap_ci['recall']['std'], meta_bootstrap_ci['precision']['std'], 
+            meta_bootstrap_ci['accuracy']['std'], meta_bootstrap_ci['f1']['std'],
+            meta_bootstrap_ci['sensitivity']['std'], meta_bootstrap_ci['specificity']['std'], 
+            meta_bootstrap_ci['balanced_accuracy']['std'],
+            meta_bootstrap_ci['ppv']['std'], meta_bootstrap_ci['npv']['std'], 
+            meta_bootstrap_ci['fpr']['std'], meta_bootstrap_ci['fnr']['std'],
+            meta_bootstrap_ci['mcc']['std'], meta_bootstrap_ci['kappa']['std']
+        ],
+        "CI_Lower_95%": [
+            meta_bootstrap_ci['recall']['ci_lower'], meta_bootstrap_ci['precision']['ci_lower'], 
+            meta_bootstrap_ci['accuracy']['ci_lower'], meta_bootstrap_ci['f1']['ci_lower'],
+            meta_bootstrap_ci['sensitivity']['ci_lower'], meta_bootstrap_ci['specificity']['ci_lower'], 
+            meta_bootstrap_ci['balanced_accuracy']['ci_lower'],
+            meta_bootstrap_ci['ppv']['ci_lower'], meta_bootstrap_ci['npv']['ci_lower'], 
+            meta_bootstrap_ci['fpr']['ci_lower'], meta_bootstrap_ci['fnr']['ci_lower'],
+            meta_bootstrap_ci['mcc']['ci_lower'], meta_bootstrap_ci['kappa']['ci_lower']
+        ],
+        "CI_Upper_95%": [
+            meta_bootstrap_ci['recall']['ci_upper'], meta_bootstrap_ci['precision']['ci_upper'], 
+            meta_bootstrap_ci['accuracy']['ci_upper'], meta_bootstrap_ci['f1']['ci_upper'],
+            meta_bootstrap_ci['sensitivity']['ci_upper'], meta_bootstrap_ci['specificity']['ci_upper'], 
+            meta_bootstrap_ci['balanced_accuracy']['ci_upper'],
+            meta_bootstrap_ci['ppv']['ci_upper'], meta_bootstrap_ci['npv']['ci_upper'], 
+            meta_bootstrap_ci['fpr']['ci_upper'], meta_bootstrap_ci['fnr']['ci_upper'],
+            meta_bootstrap_ci['mcc']['ci_upper'], meta_bootstrap_ci['kappa']['ci_upper']
+        ],
+        "CI_Margin": [
+            meta_bootstrap_ci['recall']['ci_margin'], meta_bootstrap_ci['precision']['ci_margin'], 
+            meta_bootstrap_ci['accuracy']['ci_margin'], meta_bootstrap_ci['f1']['ci_margin'],
+            meta_bootstrap_ci['sensitivity']['ci_margin'], meta_bootstrap_ci['specificity']['ci_margin'], 
+            meta_bootstrap_ci['balanced_accuracy']['ci_margin'],
+            meta_bootstrap_ci['ppv']['ci_margin'], meta_bootstrap_ci['npv']['ci_margin'], 
+            meta_bootstrap_ci['fpr']['ci_margin'], meta_bootstrap_ci['fnr']['ci_margin'],
+            meta_bootstrap_ci['mcc']['ci_margin'], meta_bootstrap_ci['kappa']['ci_margin']
+        ]
+    }
+    pd.DataFrame(meta_ci_data).to_csv(meta_bootstrap_ci_name, index=False)
+    print(f"✓ Meta-Classifier bootstrap CI saved: {meta_bootstrap_ci_name}")
+    
+    # Generate bootstrap CI visualization for meta_classifier
+    meta_bootstrap_ci_png_path = f"results/meta_classifier_bootstrap_ci_{run_label}.png"
+    plot_bootstrap_confidence_intervals(meta_bootstrap_ci_name, meta_bootstrap_ci_png_path)
+    print(f"✓ Meta-Classifier bootstrap CI visualization saved: {meta_bootstrap_ci_png_path}")
+    
     # ===== HYBRID ENSEMBLE STRATEGY (Combining Both Methods) =====
     print(f"\n--- Running Hybrid Ensemble Strategy ---")
     hybrid_results = run_hybrid_ensemble_integration(
@@ -1067,6 +1145,84 @@ def main():
     }
     pd.DataFrame(hybrid_summary_data).to_csv(hybrid_summary_name, index=False)
     print(f"✓ Hybrid Ensemble summary saved: {hybrid_summary_name}")
+    
+    # Bootstrap CI for hybrid_ensemble
+    print(f"\n--- Bootstrap Resampling for Hybrid Ensemble (1000 iterations) ---")
+    hybrid_bootstrap_ci = bootstrap_resample_metrics(
+        hybrid_y_true, hybrid_y_pred, hybrid_y_pred_proba, hybrid_y_pred_proba, hybrid_y_pred_proba,
+        np.column_stack([hybrid_y_pred] * 5), np.column_stack([hybrid_y_pred] * 5), 
+        np.zeros_like(hybrid_y_true), n_bootstrap=1000
+    )
+    
+    # Create bootstrap CI CSV for hybrid_ensemble
+    hybrid_bootstrap_ci_name = f"results/hybrid_ensemble_bootstrap_ci_{run_label}.csv"
+    hybrid_ci_data = {
+        "Metric": [
+            "Recall", "Precision", "Accuracy", "F1_Score",
+            "Sensitivity", "Specificity", "Balanced_Accuracy",
+            "PPV_(Positive_Predictive_Value)", "NPV_(Negative_Predictive_Value)", 
+            "FPR_(False_Positive_Rate)", "FNR_(False_Negative_Rate)",
+            "Matthews_Correlation_Coefficient", "Cohen_Kappa"
+        ],
+        "Point_Estimate": [
+            hybrid_metrics['recall'], hybrid_metrics['precision'], hybrid_metrics['accuracy'], hybrid_metrics['f1'],
+            hybrid_metrics['sensitivity'], hybrid_metrics['specificity'], hybrid_metrics['balanced_accuracy'],
+            hybrid_metrics['ppv'], hybrid_metrics['npv'], hybrid_metrics['fpr'], hybrid_metrics['fnr'],
+            hybrid_metrics['mcc'], hybrid_metrics['kappa']
+        ],
+        "Bootstrap_Mean": [
+            hybrid_bootstrap_ci['recall']['mean'], hybrid_bootstrap_ci['precision']['mean'], 
+            hybrid_bootstrap_ci['accuracy']['mean'], hybrid_bootstrap_ci['f1']['mean'],
+            hybrid_bootstrap_ci['sensitivity']['mean'], hybrid_bootstrap_ci['specificity']['mean'], 
+            hybrid_bootstrap_ci['balanced_accuracy']['mean'],
+            hybrid_bootstrap_ci['ppv']['mean'], hybrid_bootstrap_ci['npv']['mean'], 
+            hybrid_bootstrap_ci['fpr']['mean'], hybrid_bootstrap_ci['fnr']['mean'],
+            hybrid_bootstrap_ci['mcc']['mean'], hybrid_bootstrap_ci['kappa']['mean']
+        ],
+        "Bootstrap_Std": [
+            hybrid_bootstrap_ci['recall']['std'], hybrid_bootstrap_ci['precision']['std'], 
+            hybrid_bootstrap_ci['accuracy']['std'], hybrid_bootstrap_ci['f1']['std'],
+            hybrid_bootstrap_ci['sensitivity']['std'], hybrid_bootstrap_ci['specificity']['std'], 
+            hybrid_bootstrap_ci['balanced_accuracy']['std'],
+            hybrid_bootstrap_ci['ppv']['std'], hybrid_bootstrap_ci['npv']['std'], 
+            hybrid_bootstrap_ci['fpr']['std'], hybrid_bootstrap_ci['fnr']['std'],
+            hybrid_bootstrap_ci['mcc']['std'], hybrid_bootstrap_ci['kappa']['std']
+        ],
+        "CI_Lower_95%": [
+            hybrid_bootstrap_ci['recall']['ci_lower'], hybrid_bootstrap_ci['precision']['ci_lower'], 
+            hybrid_bootstrap_ci['accuracy']['ci_lower'], hybrid_bootstrap_ci['f1']['ci_lower'],
+            hybrid_bootstrap_ci['sensitivity']['ci_lower'], hybrid_bootstrap_ci['specificity']['ci_lower'], 
+            hybrid_bootstrap_ci['balanced_accuracy']['ci_lower'],
+            hybrid_bootstrap_ci['ppv']['ci_lower'], hybrid_bootstrap_ci['npv']['ci_lower'], 
+            hybrid_bootstrap_ci['fpr']['ci_lower'], hybrid_bootstrap_ci['fnr']['ci_lower'],
+            hybrid_bootstrap_ci['mcc']['ci_lower'], hybrid_bootstrap_ci['kappa']['ci_lower']
+        ],
+        "CI_Upper_95%": [
+            hybrid_bootstrap_ci['recall']['ci_upper'], hybrid_bootstrap_ci['precision']['ci_upper'], 
+            hybrid_bootstrap_ci['accuracy']['ci_upper'], hybrid_bootstrap_ci['f1']['ci_upper'],
+            hybrid_bootstrap_ci['sensitivity']['ci_upper'], hybrid_bootstrap_ci['specificity']['ci_upper'], 
+            hybrid_bootstrap_ci['balanced_accuracy']['ci_upper'],
+            hybrid_bootstrap_ci['ppv']['ci_upper'], hybrid_bootstrap_ci['npv']['ci_upper'], 
+            hybrid_bootstrap_ci['fpr']['ci_upper'], hybrid_bootstrap_ci['fnr']['ci_upper'],
+            hybrid_bootstrap_ci['mcc']['ci_upper'], hybrid_bootstrap_ci['kappa']['ci_upper']
+        ],
+        "CI_Margin": [
+            hybrid_bootstrap_ci['recall']['ci_margin'], hybrid_bootstrap_ci['precision']['ci_margin'], 
+            hybrid_bootstrap_ci['accuracy']['ci_margin'], hybrid_bootstrap_ci['f1']['ci_margin'],
+            hybrid_bootstrap_ci['sensitivity']['ci_margin'], hybrid_bootstrap_ci['specificity']['ci_margin'], 
+            hybrid_bootstrap_ci['balanced_accuracy']['ci_margin'],
+            hybrid_bootstrap_ci['ppv']['ci_margin'], hybrid_bootstrap_ci['npv']['ci_margin'], 
+            hybrid_bootstrap_ci['fpr']['ci_margin'], hybrid_bootstrap_ci['fnr']['ci_margin'],
+            hybrid_bootstrap_ci['mcc']['ci_margin'], hybrid_bootstrap_ci['kappa']['ci_margin']
+        ]
+    }
+    pd.DataFrame(hybrid_ci_data).to_csv(hybrid_bootstrap_ci_name, index=False)
+    print(f"✓ Hybrid Ensemble bootstrap CI saved: {hybrid_bootstrap_ci_name}")
+    
+    # Generate bootstrap CI visualization for hybrid_ensemble
+    hybrid_bootstrap_ci_png_path = f"results/hybrid_ensemble_bootstrap_ci_{run_label}.png"
+    plot_bootstrap_confidence_intervals(hybrid_bootstrap_ci_name, hybrid_bootstrap_ci_png_path)
+    print(f"✓ Hybrid Ensemble bootstrap CI visualization saved: {hybrid_bootstrap_ci_png_path}")
     
     # Comparison summary
     print("\n" + "="*80)

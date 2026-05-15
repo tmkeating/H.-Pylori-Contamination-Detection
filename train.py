@@ -54,10 +54,11 @@ REQUIRED:
     Run once per fold for complete K-fold evaluation
 
 ARCHITECTURE:
-  --model_name {convnext_tiny, resnet50}
+  --model_name {convnext_tiny, convnext_small, resnet50}
     Default: convnext_tiny
     Backbone architecture for feature extraction
-    convnext_tiny: 28M params, efficient, high accuracy
+    convnext_tiny: 28M params, efficient, high accuracy (RECOMMENDED)
+    convnext_small: 50M params, more expressive, +3-5% accuracy vs tiny
     resnet50: Classical, 25M params, stable training
 
 CROSS-VALIDATION:
@@ -451,7 +452,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
     Args:
         fold_idx (int, optional): Current fold index for k-fold cross-validation. Default: 0
         num_folds (int, optional): Total number of folds for cross-validation. Default: 5
-        model_name (str, optional): Model architecture ('convnext_tiny', 'resnet50', etc.). Default: "convnext_tiny"
+        model_name (str, optional): Model architecture ('convnext_tiny', 'convnext_small', 'resnet50', etc.). Default: "convnext_tiny"
         pos_weight (float, optional): Weight for the positive class in Focal Loss. Default: 7.5
         neg_weight (float, optional): Weight for the negative class in Focal Loss. Default: 1.0
         gamma (float, optional): Gamma parameter for Focal Loss. Default: 1.0
@@ -1583,8 +1584,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="H. Pylori K-Fold Training")
     parser.add_argument("--fold", type=int, default=0, help="Index of the fold to use for validation (0 to num_folds-1)")
     parser.add_argument("--num_folds", type=int, default=5, help="Total number of folds")
-    parser.add_argument("--model_name", type=str, default="convnext_tiny", choices=["resnet50", "convnext_tiny"], 
-                        help="Backbone architecture to use (resnet50/convnext_tiny)")
+    parser.add_argument("--model_name", type=str, default="convnext_tiny", choices=["resnet50", "convnext_tiny", "convnext_small"], 
+                        help="Backbone architecture to use (resnet50/convnext_tiny/convnext_small)")
     parser.add_argument("--pos_weight", type=float, default=7.5, help="Weight for positive class in Focal Loss")
     parser.add_argument("--neg_weight", type=float, default=1.0, help="Weight for negative class in Focal Loss")
     parser.add_argument("--gamma", type=float, default=1.0, help="Gamma factor for Focal Loss")

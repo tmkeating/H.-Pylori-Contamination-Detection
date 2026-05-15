@@ -6,7 +6,7 @@ OVERVIEW
 --------
 This module implements the complete deep learning architecture for H. Pylori detection
 in high-resolution histological whole-slide images (WSI). The pipeline combines:
-  - Modern backbone architectures (ConvNeXt-Tiny or ResNet50) for feature extraction
+  - Modern backbone architectures (ConvNeXt-Tiny, ConvNeXt-Small, or ResNet50) for feature extraction
   - Gated Attention Multiple Instance Learning (MIL) for patient-level diagnosis
   - Memory-efficient inference via gradient checkpointing and chunked processing
   - Temperature-scaled attention for interpretability and clinical deployment
@@ -27,7 +27,7 @@ TWO-STAGE DESIGN:
   Stage 1 (Backbone): Feature extraction from individual patches
     - Input: (B, 3, 448, 448) preprocessed histology images
     - Output: (B, feature_dim) learned feature vectors
-    - Architectures: ConvNeXt-Tiny (768-dim) or ResNet50 (2048-dim)
+    - Architectures: ConvNeXt-Tiny (768-dim), ConvNeXt-Small (768-dim), or ResNet50 (2048-dim)
     - Pretrained on ImageNet → fine-tuned for histology domain
 
   Stage 2 (MIL Head): Learns from patch-level features to make patient-level predictions
@@ -322,8 +322,21 @@ class HPyNet(nn.Module):
             # ConvNeXt classification head is at .classifier[2]
             self.feature_dim = self.backbone.classifier[2].in_features # 768
             self.backbone.classifier[2] = nn.Identity()
+        
+        elif self.model_name == "convnext_small":
+            try:
+                from torchvision.models import ConvNeXt_Small_Weights
+                self.backbone = models.convnext_small(weights=ConvNeXt_Small_Weights.IMAGENET1K_V1 if pretrained else None)
+            except ImportError:
+                # Older torchvision versions might not support ConvNeXt via weights enum
+                self.backbone = models.convnext_small(pretrained=pretrained)
+            
+            # ConvNeXt classification head is at .classifier[2]
+            self.feature_dim = self.backbone.classifier[2].in_features # 768
+            self.backbone.classifier[2] = nn.Identity()
+        
         else:
-            raise ValueError(f"Unsupported backbone: {model_name}. Use 'resnet50' or 'convnext_tiny'.")
+            raise ValueError(f"Unsupported backbone: {model_name}. Use 'resnet50', 'convnext_tiny', or 'convnext_small'.")
 
         # 2. Universal Deep Classification Head
         # Restored Auditor Configuration: Standard Dropout for Generalization
