@@ -16,7 +16,7 @@ sbatch submit_dedupe.sh
 ### 1. Training (5-Fold Cross-Validation)
 Launch the primary training sweep using the `SEARCHER` profile. This uses ConvNeXt-Tiny with Attention-MIL and SWA.
 ```bash
-PROFILE=SEARCHER MODEL_NAME=convnext_tiny ITER=27.0 ./submit_all_folds.sh
+PROFILE=SEARCHER MODEL_NAME=convnext_tiny ITER=30.0 ./submit_all_folds.sh
 ```
 *Outputs: `results/*_model_brain.pth` and `results/*_patient_consensus.csv`.*
 
@@ -36,7 +36,7 @@ sbatch submit_rescue.sh
 *Outputs: `results/rescue_ensemble/rescue_*.csv`.*
 
 ### 4. Final Meta-Ensemble & Hybrid Fusion
-Fuse the newer high-precision results (302-306) with the sensitive historic models (299-301) to produce the "Golden Consensus" (94.7% Accuracy).
+Fuse the newer high-precision results with the sensitive historic models to produce the "Golden Consensus".
 ```bash
 # Generate the 94.7% Hybrid Ensemble
 python3 ensemble_voting.py --runs 302,303,299,300,301
@@ -63,14 +63,14 @@ sbatch run_visuals.sh
 - `ensemble_voting.py`: Meta-classifier using **Joint-Probability Gating** (Max > 0.39 & Mean > 0.28).
 - `profiles.sh`: Centralized hyperparameters (Learning rates, Weights, Data paths).
 
-## 📊 Final Clinical Performance (Hybrid Ensemble: 299-303)
+## 📊 Final Clinical Performance (TBD)
 
 | Metric | Value |
 | :--- | :--- |
-| **Accuracy** | **94.74%** |
-| **Recall (+)** | **98.25%** (Only 1 FN in 114 patients) |
-| **Precision (+)**| **91.80%** |
-| **The Final Ghost**| `B22-295_0` (Confidence: 0.31) |
+| **Accuracy** | **TBD** |
+| **Recall (+)** | **TBD** |
+| **Precision (+)**| **TBD** |
+
 
 ## 🛠️ Key Pipeline Features
 - **Stride-128 Rescue Pass**: Dense-window overlap to "catch" sparse bacteria that fall in gaps at default strides.

@@ -110,7 +110,7 @@ from torchvision import transforms
 from PIL import Image
 from visualization_utils import (
     generate_gradcam, plot_roc_curve, plot_confusion_matrix, plot_gradcam_pair,
-    plot_pr_curve, plot_probability_histogram
+    plot_pr_curve, plot_probability_histogram, plot_threshold_analysis
 )
 
 # --- Config ---
@@ -265,19 +265,223 @@ def full_visual_report(RUN_ID, MODEL_PATH, MODEL_NAME="convnext_tiny", fold_idx=
     # Create performance dataframe for Grad-CAM selection
     perf_df = pd.DataFrame(patient_performance)
     
+    # --- Step 1.5: Compute Per-Fold Metrics and Bootstrap CIs ---
+    print(f"\n--- Computing Per-Fold Metrics and Bootstrap Confidence Intervals ---")
+    
+    # Calculate standard metrics
+    from sklearn.metrics import matthews_corrcoef, cohen_kappa_score
+    
+    all_preds_bin = [1 if p >= 0.5 else 0 for p in all_probs]
+    all_labels_array = np.array(all_labels_bin)
+    all_preds_array = np.array(all_preds_bin)
+    all_probs_array = np.array(all_probs)
+    
+    cm = confusion_matrix(all_labels_array, all_preds_array)
+    tn, fp, fn, tp = cm.flatten()
+    
+    rec = tp / (tp + fn) if (tp + fn) > 0 else 0
+    prec = tp / (tp + fp) if (tp + fp) > 0 else 0
+    acc = (tp + tn) / (tp + tn + fp + fn) if (tp + tn + fp + fn) > 0 else 0
+    f1 = 2 * (prec * rec) / (prec + rec) if (prec + rec) > 0 else 0
+    
+    sensitivity = rec
+    specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
+    balanced_accuracy = (sensitivity + specificity) / 2
+    ppv = prec
+    npv = tn / (tn + fn) if (tn + fn) > 0 else 0
+    fpr = fp / (fp + tn) if (fp + tn) > 0 else 0
+    fnr = fn / (fn + tp) if (fn + tp) > 0 else 0
+    
+    mcc = matthews_corrcoef(all_labels_array, all_preds_array)
+    kappa = cohen_kappa_score(all_labels_array, all_preds_array)
+    
+    fold_metrics = {
+        'recall': rec, 'precision': prec, 'accuracy': acc, 'f1': f1,
+        'sensitivity': sensitivity, 'specificity': specificity,
+        'balanced_accuracy': balanced_accuracy,
+        'ppv': ppv, 'npv': npv, 'fpr': fpr, 'fnr': fnr,
+        'mcc': mcc, 'kappa': kappa,
+        'tp': tp, 'fp': fp, 'fn': fn, 'tn': tn
+    }
+    
+    # Bootstrap resampling for CIs (500 iterations for speed)
+    def bootstrap_fold_metrics(y_true, y_pred, y_prob, n_bootstrap=500):
+        """Bootstrap confidence intervals for fold metrics."""
+        n_patients = len(y_true)
+        bootstrap_metrics = {
+            'recall': [], 'precision': [], 'accuracy': [], 'f1': [],
+            'sensitivity': [], 'specificity': [], 'balanced_accuracy': [],
+            'ppv': [], 'npv': [], 'fpr': [], 'fnr': [],
+            'mcc': [], 'kappa': []
+        }
+        
+        print(f"  Running {n_bootstrap} bootstrap resamples...", end='', flush=True)
+        for b in range(n_bootstrap):
+            indices = np.random.choice(n_patients, size=n_patients, replace=True)
+            y_true_boot = y_true[indices]
+            y_pred_boot = y_pred[indices]
+            
+            cm_boot = confusion_matrix(y_true_boot, y_pred_boot, labels=[0, 1])
+            if cm_boot.shape == (2, 2):
+                tn_b, fp_b, fn_b, tp_b = cm_boot.flatten()
+            else:
+                tn_b = fp_b = fn_b = tp_b = 0
+                if len(cm_boot) == 2:
+                    if cm_boot.shape[0] == 2:
+                        tn_b, fp_b = cm_boot[0]
+                        fn_b, tp_b = cm_boot[1]
+            
+            rec_b = tp_b / (tp_b + fn_b) if (tp_b + fn_b) > 0 else 0
+            prec_b = tp_b / (tp_b + fp_b) if (tp_b + fp_b) > 0 else 0
+            acc_b = (tp_b + tn_b) / (tp_b + tn_b + fp_b + fn_b) if (tp_b + tn_b + fp_b + fn_b) > 0 else 0
+            f1_b = 2 * (prec_b * rec_b) / (prec_b + rec_b) if (prec_b + rec_b) > 0 else 0
+            
+            bootstrap_metrics['recall'].append(rec_b)
+            bootstrap_metrics['precision'].append(prec_b)
+            bootstrap_metrics['accuracy'].append(acc_b)
+            bootstrap_metrics['f1'].append(f1_b)
+            bootstrap_metrics['sensitivity'].append(rec_b)
+            bootstrap_metrics['specificity'].append(tn_b / (tn_b + fp_b) if (tn_b + fp_b) > 0 else 0)
+            bootstrap_metrics['balanced_accuracy'].append((rec_b + bootstrap_metrics['specificity'][-1]) / 2)
+            bootstrap_metrics['ppv'].append(prec_b)
+            bootstrap_metrics['npv'].append(tn_b / (tn_b + fn_b) if (tn_b + fn_b) > 0 else 0)
+            bootstrap_metrics['fpr'].append(fp_b / (fp_b + tn_b) if (fp_b + tn_b) > 0 else 0)
+            bootstrap_metrics['fnr'].append(fn_b / (fn_b + tp_b) if (fn_b + tp_b) > 0 else 0)
+            bootstrap_metrics['mcc'].append(matthews_corrcoef(y_true_boot, y_pred_boot))
+            bootstrap_metrics['kappa'].append(cohen_kappa_score(y_true_boot, y_pred_boot))
+            
+            if (b + 1) % 100 == 0:
+                print(f" {b+1}", end='', flush=True)
+        
+        print(" ✓")
+        
+        # Compute CI statistics
+        ci_results = {}
+        for metric_name, values in bootstrap_metrics.items():
+            values_array = np.array(values)
+            ci_results[metric_name] = {
+                'mean': np.mean(values_array),
+                'std': np.std(values_array),
+                'ci_lower': np.percentile(values_array, 2.5),
+                'ci_upper': np.percentile(values_array, 97.5),
+                'ci_margin': (np.percentile(values_array, 97.5) - np.percentile(values_array, 2.5)) / 2
+            }
+        
+        return ci_results
+    
+    bootstrap_ci = bootstrap_fold_metrics(all_labels_array, all_preds_array, all_probs_array)
+    
+    # Save per-fold metrics summary
+    metrics_summary_path = os.path.join("results", f"{full_prefix}_metrics_summary.csv")
+    metrics_data = {
+        "Metric": [
+            "Recall", "Precision", "Accuracy", "F1_Score",
+            "Sensitivity", "Specificity", "Balanced_Accuracy",
+            "PPV_(Positive_Predictive_Value)", "NPV_(Negative_Predictive_Value)", 
+            "FPR_(False_Positive_Rate)", "FNR_(False_Negative_Rate)",
+            "Matthews_Correlation_Coefficient", "Cohen_Kappa",
+            "TP_(True_Positives)", "FP_(False_Positives)", "FN_(False_Negatives)", 
+            "TN_(True_Negatives)"
+        ],
+        "Point_Estimate": [
+            fold_metrics['recall'], fold_metrics['precision'], fold_metrics['accuracy'], fold_metrics['f1'],
+            fold_metrics['sensitivity'], fold_metrics['specificity'], fold_metrics['balanced_accuracy'],
+            fold_metrics['ppv'], fold_metrics['npv'], fold_metrics['fpr'], fold_metrics['fnr'],
+            fold_metrics['mcc'], fold_metrics['kappa'],
+            fold_metrics['tp'], fold_metrics['fp'], fold_metrics['fn'], fold_metrics['tn']
+        ],
+        "Bootstrap_Mean": [
+            bootstrap_ci['recall']['mean'], bootstrap_ci['precision']['mean'], 
+            bootstrap_ci['accuracy']['mean'], bootstrap_ci['f1']['mean'],
+            bootstrap_ci['sensitivity']['mean'], bootstrap_ci['specificity']['mean'], 
+            bootstrap_ci['balanced_accuracy']['mean'],
+            bootstrap_ci['ppv']['mean'], bootstrap_ci['npv']['mean'], 
+            bootstrap_ci['fpr']['mean'], bootstrap_ci['fnr']['mean'],
+            bootstrap_ci['mcc']['mean'], bootstrap_ci['kappa']['mean'],
+            fold_metrics['tp'], fold_metrics['fp'], fold_metrics['fn'], fold_metrics['tn']
+        ],
+        "Bootstrap_Std": [
+            bootstrap_ci['recall']['std'], bootstrap_ci['precision']['std'], 
+            bootstrap_ci['accuracy']['std'], bootstrap_ci['f1']['std'],
+            bootstrap_ci['sensitivity']['std'], bootstrap_ci['specificity']['std'], 
+            bootstrap_ci['balanced_accuracy']['std'],
+            bootstrap_ci['ppv']['std'], bootstrap_ci['npv']['std'], 
+            bootstrap_ci['fpr']['std'], bootstrap_ci['fnr']['std'],
+            bootstrap_ci['mcc']['std'], bootstrap_ci['kappa']['std'],
+            0, 0, 0, 0
+        ],
+        "CI_Lower_95%": [
+            bootstrap_ci['recall']['ci_lower'], bootstrap_ci['precision']['ci_lower'], 
+            bootstrap_ci['accuracy']['ci_lower'], bootstrap_ci['f1']['ci_lower'],
+            bootstrap_ci['sensitivity']['ci_lower'], bootstrap_ci['specificity']['ci_lower'], 
+            bootstrap_ci['balanced_accuracy']['ci_lower'],
+            bootstrap_ci['ppv']['ci_lower'], bootstrap_ci['npv']['ci_lower'], 
+            bootstrap_ci['fpr']['ci_lower'], bootstrap_ci['fnr']['ci_lower'],
+            bootstrap_ci['mcc']['ci_lower'], bootstrap_ci['kappa']['ci_lower'],
+            fold_metrics['tp'], fold_metrics['fp'], fold_metrics['fn'], fold_metrics['tn']
+        ],
+        "CI_Upper_95%": [
+            bootstrap_ci['recall']['ci_upper'], bootstrap_ci['precision']['ci_upper'], 
+            bootstrap_ci['accuracy']['ci_upper'], bootstrap_ci['f1']['ci_upper'],
+            bootstrap_ci['sensitivity']['ci_upper'], bootstrap_ci['specificity']['ci_upper'], 
+            bootstrap_ci['balanced_accuracy']['ci_upper'],
+            bootstrap_ci['ppv']['ci_upper'], bootstrap_ci['npv']['ci_upper'], 
+            bootstrap_ci['fpr']['ci_upper'], bootstrap_ci['fnr']['ci_upper'],
+            bootstrap_ci['mcc']['ci_upper'], bootstrap_ci['kappa']['ci_upper'],
+            fold_metrics['tp'], fold_metrics['fp'], fold_metrics['fn'], fold_metrics['tn']
+        ],
+        "CI_Margin": [
+            bootstrap_ci['recall']['ci_margin'], bootstrap_ci['precision']['ci_margin'], 
+            bootstrap_ci['accuracy']['ci_margin'], bootstrap_ci['f1']['ci_margin'],
+            bootstrap_ci['sensitivity']['ci_margin'], bootstrap_ci['specificity']['ci_margin'], 
+            bootstrap_ci['balanced_accuracy']['ci_margin'],
+            bootstrap_ci['ppv']['ci_margin'], bootstrap_ci['npv']['ci_margin'], 
+            bootstrap_ci['fpr']['ci_margin'], bootstrap_ci['fnr']['ci_margin'],
+            bootstrap_ci['mcc']['ci_margin'], bootstrap_ci['kappa']['ci_margin'],
+            0, 0, 0, 0
+        ]
+    }
+    
+    pd.DataFrame(metrics_data).to_csv(metrics_summary_path, index=False)
+    print(f"✓ Per-fold metrics summary saved to [{metrics_summary_path}]")
+    
+    # Also save patient-level predictions for detailed analysis
+    perf_df.to_csv(os.path.join("results", f"{full_prefix}_predictions.csv"), index=False)
+    print(f"✓ Patient-level predictions saved to [results/{full_prefix}_predictions.csv]")
+    
     # --- Step 2: Visualization Plots ---
     # 1. Confusion Matrix
     all_preds_bin = [1 if p >= 0.5 else 0 for p in all_probs]
     plot_confusion_matrix(all_labels_bin, all_preds_bin, os.path.join("results", f"{full_prefix}_confusion_matrix.png"))
 
-    # 2. Patient-Level ROC
+    # 2. Patient-Level ROC (also compute AUC for reporting)
+    fpr, tpr, _ = roc_curve(all_labels_bin, all_probs)
+    roc_auc = auc(fpr, tpr)
     plot_roc_curve(all_labels_bin, all_probs, os.path.join("results", f"{full_prefix}_roc_curve.png"))
 
-    # 3. Precision-Recall Curve
+    # 3. Precision-Recall Curve (compute AP for reporting)
+    pr_auc = average_precision_score(all_labels_bin, all_probs)
     plot_pr_curve(all_labels_bin, all_probs, os.path.join("results", f"{full_prefix}_pr_curve.png"))
 
     # 4. Probability Histogram
     plot_probability_histogram(np.array(all_probs), np.array(all_labels_bin), os.path.join("results", f"{full_prefix}_probability_histogram.png"))
+
+    # 5. Threshold Analysis (Performance across decision boundaries)
+    plot_threshold_analysis(all_labels_bin, all_probs, os.path.join("results", f"{full_prefix}_threshold_analysis.png"))
+    
+    # Print per-fold metrics summary
+    print(f"\n{'='*50}")
+    print(f"PER-FOLD METRICS SUMMARY: {full_prefix}")
+    print(f"{'='*50}")
+    print(f"Recall:       {fold_metrics['recall']:.4f} [CI: {bootstrap_ci['recall']['ci_lower']:.4f} - {bootstrap_ci['recall']['ci_upper']:.4f}]")
+    print(f"Precision:    {fold_metrics['precision']:.4f} [CI: {bootstrap_ci['precision']['ci_lower']:.4f} - {bootstrap_ci['precision']['ci_upper']:.4f}]")
+    print(f"Accuracy:     {fold_metrics['accuracy']:.4f} [CI: {bootstrap_ci['accuracy']['ci_lower']:.4f} - {bootstrap_ci['accuracy']['ci_upper']:.4f}]")
+    print(f"F1 Score:     {fold_metrics['f1']:.4f} [CI: {bootstrap_ci['f1']['ci_lower']:.4f} - {bootstrap_ci['f1']['ci_upper']:.4f}]")
+    print(f"Specificity:  {fold_metrics['specificity']:.4f} [CI: {bootstrap_ci['specificity']['ci_lower']:.4f} - {bootstrap_ci['specificity']['ci_upper']:.4f}]")
+    print(f"ROC-AUC:      {roc_auc:.4f}")
+    print(f"PR-AUC:       {pr_auc:.4f}")
+    print(f"TP: {fold_metrics['tp']} | FP: {fold_metrics['fp']} | FN: {fold_metrics['fn']} | TN: {fold_metrics['tn']}")
+    print(f"{'='*50}\n")
 
     # --- Step 3: Grad-CAM for Top Suspicious Patients ---
     # Pick Top 3 Positives and Top 3 False Negatives (if any)

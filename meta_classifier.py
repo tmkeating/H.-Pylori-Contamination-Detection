@@ -319,7 +319,7 @@ import os
 import glob
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import LeaveOneOut
-from sklearn.metrics import classification_report, accuracy_score, confusion_matrix, precision_score, recall_score, f1_score
+from sklearn.metrics import classification_report, accuracy_score, confusion_matrix, precision_score, recall_score, f1_score, matthews_corrcoef, cohen_kappa_score
 
 def load_all_model_features(results_dirs):
     """
@@ -431,6 +431,158 @@ def load_all_model_features(results_dirs):
         
     return np.array(X), np.array(y), pids
 
+def train_meta_classifier_loo(X, y, pids):
+    """
+    Train Random Forest meta-classifier using Leave-One-Out Cross-Validation.
+    Returns predictions, probabilities, and metrics for direct comparison with ensemble voting.
+    """
+    loo = LeaveOneOut()
+    y_true = []
+    y_pred = []
+    y_pred_proba = []
+    
+    clf = RandomForestClassifier(n_estimators=100, max_depth=3, random_state=42, class_weight='balanced')
+    
+    print("--- Training Meta-Classifier (LOO-CV) ---")
+    for train_index, test_index in loo.split(X):
+        X_train, X_test = X[train_index], X[test_index]
+        y_train, y_test = y[train_index], y[test_index]
+        
+        clf.fit(X_train, y_train)
+        y_pred.append(clf.predict(X_test)[0])
+        proba = clf.predict_proba(X_test)[0]
+        y_pred_proba.append(proba[1])  # Probability of positive class
+        y_true.append(y_test[0])
+    
+    return np.array(y_true), np.array(y_pred), np.array(y_pred_proba), pids
+
+def compute_meta_classifier_metrics(y_true, y_pred, y_pred_proba):
+    """
+    Compute comprehensive metrics for meta-classifier predictions.
+    """
+    metrics = {}
+    
+    # Confusion matrix
+    cm = confusion_matrix(y_true, y_pred)
+    tn, fp, fn, tp = cm.flatten()
+    
+    # Basic metrics
+    rec = recall_score(y_true, y_pred, zero_division=0)
+    prec = precision_score(y_true, y_pred, zero_division=0)
+    acc = accuracy_score(y_true, y_pred)
+    f1 = f1_score(y_true, y_pred, zero_division=0)
+    
+    # Clinical metrics
+    sensitivity = rec
+    specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
+    balanced_accuracy = (sensitivity + specificity) / 2
+    ppv = prec
+    npv = tn / (tn + fn) if (tn + fn) > 0 else 0
+    fpr = fp / (fp + tn) if (fp + tn) > 0 else 0
+    fnr = fn / (fn + tp) if (fn + tp) > 0 else 0
+    
+    # Matthews Correlation Coefficient & Cohen's Kappa
+    mcc = matthews_corrcoef(y_true, y_pred)
+    kappa = cohen_kappa_score(y_true, y_pred)
+    
+    metrics = {
+        'tp': tp, 'fp': fp, 'fn': fn, 'tn': tn,
+        'recall': rec, 'precision': prec, 'accuracy': acc, 'f1': f1,
+        'sensitivity': sensitivity, 'specificity': specificity,
+        'balanced_accuracy': balanced_accuracy,
+        'ppv': ppv, 'npv': npv, 'fpr': fpr, 'fnr': fnr,
+        'mcc': mcc, 'kappa': kappa
+    }
+    
+    return metrics
+
+def run_meta_classifier_fusion(ensemble_df, run_label):
+    """
+    Run meta-classifier fusion on ensemble data for comparison with majority voting.
+    Generates LOO-CV predictions, ROC/PR curves, threshold analysis, and bootstrap CIs.
+    
+    Args:
+        ensemble_df: DataFrame with ensemble predictions (from ensemble_voting.py)
+        run_label: Run ID label for output files
+    
+    Returns:
+        Dictionary with 'metrics', 'predictions', 'probabilities' for comparison
+    """
+    print("\n" + "="*60)
+    print("RUNNING META-CLASSIFIER RANDOM FOREST FUSION (FOR COMPARISON)")
+    print("="*60)
+    
+    # Extract features from ensemble data
+    # The ensemble_df has per-fold predictions; we'll use those as features
+    X = []
+    y = []
+    pids = []
+    
+    # Group by PatientID and extract features from each fold
+    for patient_id in ensemble_df['PatientID'].unique():
+        patient_data = ensemble_df[ensemble_df['PatientID'] == patient_id]
+        
+        if len(patient_data) == 0:
+            continue
+            
+        # True label (should be same for all rows of same patient)
+        true_label = patient_data['Actual'].iloc[0]
+        y.append(true_label)
+        pids.append(patient_id)
+        
+        # Extract features: max_prob and mean_prob from each fold's predictions
+        features = []
+        for fold in range(5):
+            fold_data = patient_data[patient_data['Fold'] == fold]
+            if len(fold_data) > 0:
+                features.append(fold_data['Max_Prob'].values[0])
+                features.append(fold_data['Mean_Prob'].values[0])
+                features.append(fold_data['Max_Prob'].values[0] - fold_data['Mean_Prob'].values[0])
+            else:
+                features.extend([0.0, 0.0, 0.0])  # Padding
+        
+        X.append(features)
+    
+    X = np.array(X)
+    y = np.array(y)
+    
+    print(f"Meta-Classifier feature matrix shape: {X.shape} ({len(pids)} patients × {X.shape[1]} features)")
+    
+    # Train meta-classifier with LOO-CV
+    y_true, y_pred, y_pred_proba, pids = train_meta_classifier_loo(X, y, pids)
+    
+    # Compute metrics
+    metrics = compute_meta_classifier_metrics(y_true, y_pred, y_pred_proba)
+    
+    print("\n" + "="*40)
+    print("   META-CLASSIFIER FUSION RESULTS")
+    print("="*40)
+    print(f"Recall: {metrics['recall']:.4f}")
+    print(f"Precision: {metrics['precision']:.4f}")
+    print(f"Accuracy: {metrics['accuracy']:.4f}")
+    print(f"F1 Score: {metrics['f1']:.4f}")
+    print(f"Specificity: {metrics['specificity']:.4f}")
+    print(f"TN: {metrics['tn']} | FP: {metrics['fp']} | FN: {metrics['fn']} | TP: {metrics['tp']}")
+    
+    # Identify missed cases
+    results_df = pd.DataFrame({'PatientID': pids, 'Actual': y_true, 'Predicted': y_pred})
+    missed = results_df[(results_df['Actual'] == 1) & (results_df['Predicted'] == 0)]
+    if not missed.empty:
+        print(f"⚠️ Missed cases: {missed['PatientID'].tolist()}")
+    else:
+        print("✅ 100% RECALL achieved by meta-classifier fusion")
+    
+    return {
+        'y_true': y_true,
+        'y_pred': y_pred,
+        'y_pred_proba': y_pred_proba,
+        'metrics': metrics,
+        'pids': pids,
+        'results_df': results_df
+    }
+
+
+
 def main():
     # Argument parsing for multi-expert directory inputs
     parser = argparse.ArgumentParser(description="Meta-Classifier Feature Fusion for H. Pylori")
@@ -452,92 +604,32 @@ def main():
     
     print(f"Feature matrix shape: {X.shape} (Patients x Model-Outputs)")
     
-    # Leave-One-Out Cross-Validation (LOO-CV)
-    # ----------------------------------------------
-    # TECHNICAL DECISION: Given the high stakes of clinical diagnostics and 
-    # the relatively small patient cohort (116 patients), LOO-CV provides 
-    # the most unbiased estimate of the meta-classifier's performance on 
-    # "unseen" patients, ensuring the fusion is robust to individual-slide outliers.
-    loo = LeaveOneOut()
-    y_true = []
-    y_pred = []
+    # Train meta-classifier and get predictions
+    y_true, y_pred, y_pred_proba, pids = train_meta_classifier_loo(X, y, pids)
     
-    # Random Forest Meta-Classifier
-    # ---------------------------------------------
-    # TECHNICAL DECISION: Simple averaging fails when one model (Searcher) is 
-    # intentionally over-sensitive. The Random Forest learns non-linear 
-    # interactions (e.g., "If Searcher is high but Auditor is low and 
-    # Density is < 1%, classify as Negative"). 
-    # - n_estimators=100: Standard for stability.
-    # - max_depth=3: Prevents meta-overfitting to noisy artifact combinations.
-    # - class_weight='balanced': Prioritizes the minority Positive class.
-    clf = RandomForestClassifier(n_estimators=100, max_depth=3, random_state=42, class_weight='balanced')
-    
-    print("--- Training Meta-Classifier (LOO-CV) ---")
-    # Execute Leave-One-Out validation to estimate real-world clinical performance
-    for train_index, test_index in loo.split(X):
-        X_train, X_test = X[train_index], X[test_index]
-        y_train, y_test = y[train_index], y[test_index]
-        
-        # Train meta-model on all patients except one and predict for the held-out patient
-        clf.fit(X_train, y_train)
-        y_pred.append(clf.predict(X_test)[0])
-        y_true.append(y_test[0])
+    # Compute metrics
+    metrics = compute_meta_classifier_metrics(y_true, y_pred, y_pred_proba)
     
     print("\n" + "="*40)
     print("      META-CLASSIFIER FUSION REPORT")
     print("="*40)
-    # Generate aggregate metrics (Precision, Recall, F1) across the entire LOO-CV cohort
     print(classification_report(y_true, y_pred, target_names=["Negative", "Positive"]))
-    
-    acc = accuracy_score(y_true, y_pred)
-    print(f"Final Accuracy: {100.0 * acc:.2f}%")
-    
-    # Extract specific confusion counts for clinical audit (FP vs FN trade-off)
-    cm = confusion_matrix(y_true, y_pred)
-    tn, fp, fn, tp = cm.flatten()
-    print(f"TN: {tn} | FP: {fp} | FN: {fn} | TP: {tp}")
-    
-    # Calculate additional metrics for summary file
-    rec = recall_score(y_true, y_pred, zero_division=0)
-    prec = precision_score(y_true, y_pred, zero_division=0)
-    f1 = f1_score(y_true, y_pred, zero_division=0)
-    
-    # Clinical Metrics
-    sensitivity = rec
-    specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
-    balanced_accuracy = (sensitivity + specificity) / 2
-    ppv = prec
-    npv = tn / (tn + fn) if (tn + fn) > 0 else 0
-    fpr = fp / (fp + tn) if (fp + tn) > 0 else 0
-    fnr = fn / (fn + tp) if (fn + tp) > 0 else 0
-    
-    # Matthews Correlation Coefficient
-    mcc_denom = np.sqrt((tp + fp) * (tp + fn) * (tn + fp) * (tn + fn))
-    mcc = ((tp * tn) - (fp * fn)) / mcc_denom if mcc_denom > 0 else 0
-    
-    # Cohen's Kappa
-    n = tp + tn + fp + fn
-    po = (tp + tn) / n if n > 0 else 0
-    pe = ((tp + fp) * (tp + fn) + (tn + fp) * (tn + fn)) / (n * n) if n > 0 else 0
-    kappa = (po - pe) / (1 - pe) if (1 - pe) != 0 else 0
+    print(f"Final Accuracy: {100.0 * metrics['accuracy']:.2f}%")
+    print(f"TN: {metrics['tn']} | FP: {metrics['fp']} | FN: {metrics['fn']} | TP: {metrics['tp']}")
 
     # Check the "Unreachable Three"
-    # Aggregate cross-validation results into a structured DataFrame for failure analysis
     results_df = pd.DataFrame({'PatientID': pids, 'Actual': y_true, 'Predicted': y_pred})
     
-    # Identify False Negatives (Target cases where the ensemble failed to detect bacteria)
     missed = results_df[(results_df['Actual'] == 1) & (results_df['Predicted'] == 0)]
     if not missed.empty:
         print(f"\n⚠️ Still Missed: {missed['PatientID'].tolist()}")
     else:
-        # Clinical Milestone: All positive cases correctly identified by the meta-fusion layer
         print(f"\n✅ 100% RECALL ACHIEVED BY FEATURE FUSION.")
 
-    # Persist the fusion results for external documentation and research validation
+    # Persist the fusion results
     results_df.to_csv("meta_fusion_results.csv", index=False)
     
-    # Save a concise summary for easy automated consumption (matching ensemble_voting.py format)
+    # Save a concise summary for easy automated consumption
     summary_data = {
         "Metric": [
             "Recall", "Precision", "Accuracy", "F1_Score",
@@ -549,11 +641,11 @@ def main():
             "TN_(True_Negatives)"
         ],
         "Value": [
-            rec, prec, acc, f1,
-            sensitivity, specificity, balanced_accuracy,
-            ppv, npv, fpr, fnr,
-            mcc, kappa,
-            tp, fp, fn, tn
+            metrics['recall'], metrics['precision'], metrics['accuracy'], metrics['f1'],
+            metrics['sensitivity'], metrics['specificity'], metrics['balanced_accuracy'],
+            metrics['ppv'], metrics['npv'], metrics['fpr'], metrics['fnr'],
+            metrics['mcc'], metrics['kappa'],
+            metrics['tp'], metrics['fp'], metrics['fn'], metrics['tn']
         ]
     }
     pd.DataFrame(summary_data).to_csv("meta_classifier_summary.csv", index=False)

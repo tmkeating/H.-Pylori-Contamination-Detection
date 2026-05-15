@@ -429,6 +429,205 @@ def plot_pr_curve(all_labels, all_probs, output_path):
     plt.savefig(output_path)
     plt.close()
 
+
+def plot_threshold_analysis(all_labels, all_probs, output_path, figsize=(14, 8)):
+    """
+    Plot performance metrics across different decision thresholds.
+    
+    Shows how Sensitivity, Specificity, Precision, Recall, Accuracy, and F1
+    vary as the decision threshold changes from 0 to 1. Helps identify optimal
+    thresholds for different clinical criteria (high sensitivity vs specificity).
+    
+    Args:
+        all_labels: True labels (binary)
+        all_probs: Predicted probabilities
+        output_path: Path to save PNG file
+        figsize: Figure size tuple
+    """
+    from sklearn.metrics import (
+        precision_score, recall_score, f1_score, accuracy_score,
+        confusion_matrix
+    )
+    
+    # Generate thresholds from 0 to 1
+    thresholds = np.linspace(0, 1, 101)
+    metrics_by_threshold = {
+        'Sensitivity': [],
+        'Specificity': [],
+        'Precision': [],
+        'Recall': [],
+        'Accuracy': [],
+        'F1_Score': []
+    }
+    
+    for threshold in thresholds:
+        # Convert probabilities to binary predictions using this threshold
+        preds = (np.array(all_probs) >= threshold).astype(int)
+        
+        # Handle edge cases (all predictions same class)
+        if len(np.unique(preds)) == 1:
+            # If all predictions are same, metrics become undefined
+            tn, fp, fn, tp = confusion_matrix(all_labels, preds).ravel() if len(np.unique(all_labels)) > 1 else (0, 0, 0, 0)
+        else:
+            tn, fp, fn, tp = confusion_matrix(all_labels, preds).ravel()
+        
+        # Calculate metrics
+        sensitivity = tp / (tp + fn) if (tp + fn) > 0 else 0
+        specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
+        precision = precision_score(all_labels, preds, zero_division=0)
+        recall = recall_score(all_labels, preds, zero_division=0)
+        accuracy = accuracy_score(all_labels, preds)
+        f1 = f1_score(all_labels, preds, zero_division=0)
+        
+        metrics_by_threshold['Sensitivity'].append(sensitivity)
+        metrics_by_threshold['Specificity'].append(specificity)
+        metrics_by_threshold['Precision'].append(precision)
+        metrics_by_threshold['Recall'].append(recall)
+        metrics_by_threshold['Accuracy'].append(accuracy)
+        metrics_by_threshold['F1_Score'].append(f1)
+    
+    # Find optimal thresholds for different objectives
+    optimal_f1_idx = np.argmax(metrics_by_threshold['F1_Score'])
+    optimal_f1_threshold = thresholds[optimal_f1_idx]
+    optimal_f1_value = metrics_by_threshold['F1_Score'][optimal_f1_idx]
+    
+    # Youden's J statistic (maximizes Sensitivity + Specificity - 1)
+    youden_j = [s + sp - 1 for s, sp in zip(metrics_by_threshold['Sensitivity'], metrics_by_threshold['Specificity'])]
+    optimal_j_idx = np.argmax(youden_j)
+    optimal_j_threshold = thresholds[optimal_j_idx]
+    optimal_j_value = youden_j[optimal_j_idx]
+    
+    # Create visualization
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=figsize)
+    
+    # Panel 1: Core metrics
+    ax1.plot(thresholds, metrics_by_threshold['Sensitivity'], label='Sensitivity (Recall)', linewidth=2.5, color='#2E86AB')
+    ax1.plot(thresholds, metrics_by_threshold['Specificity'], label='Specificity', linewidth=2.5, color='#A23B72')
+    ax1.plot(thresholds, metrics_by_threshold['Precision'], label='Precision', linewidth=2.5, color='#F18F01')
+    ax1.plot(thresholds, metrics_by_threshold['Accuracy'], label='Accuracy', linewidth=2.5, color='#C73E1D')
+    
+    # Mark optimal F1 threshold
+    ax1.axvline(optimal_f1_threshold, color='green', linestyle='--', linewidth=2, alpha=0.7, label=f'Optimal F1 (threshold={optimal_f1_threshold:.2f})')
+    
+    ax1.set_xlabel('Decision Threshold', fontsize=11)
+    ax1.set_ylabel('Metric Value', fontsize=11)
+    ax1.set_title('Performance Metrics Across Decision Thresholds', fontsize=13, fontweight='bold')
+    ax1.legend(loc='best', fontsize=10)
+    ax1.grid(True, alpha=0.3)
+    ax1.set_xlim([0, 1])
+    ax1.set_ylim([0, 1.05])
+    
+    # Panel 2: F1 Score and Youden's J
+    ax2.plot(thresholds, metrics_by_threshold['F1_Score'], label='F1 Score', linewidth=2.5, color='#06A77D')
+    ax2.plot(thresholds, youden_j, label="Youden's J (Sensitivity + Specificity - 1)", linewidth=2.5, color='#D62828')
+    
+    # Mark optimal points
+    ax2.scatter([optimal_f1_threshold], [optimal_f1_value], color='green', s=100, zorder=5, edgecolors='darkgreen', linewidth=2, label=f'Max F1: {optimal_f1_value:.4f}')
+    ax2.scatter([optimal_j_threshold], [optimal_j_value], color='red', s=100, zorder=5, edgecolors='darkred', linewidth=2, label=f"Max J: {optimal_j_value:.4f}")
+    
+    # Mark default 0.5 threshold
+    ax2.axvline(0.5, color='gray', linestyle=':', linewidth=2, alpha=0.6, label='Default threshold (0.5)')
+    
+    ax2.set_xlabel('Decision Threshold', fontsize=11)
+    ax2.set_ylabel('Metric Value', fontsize=11)
+    ax2.set_title('Optimization Metrics: F1 Score and Youden\'s J Statistic', fontsize=13, fontweight='bold')
+    ax2.legend(loc='best', fontsize=10)
+    ax2.grid(True, alpha=0.3)
+    ax2.set_xlim([0, 1])
+    ax2.set_ylim([-0.1, 1.05])
+    
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches='tight')
+    plt.close()
+    
+    print(f"  ✓ Threshold analysis saved: {output_path}")
+    print(f"    - Optimal F1 threshold: {optimal_f1_threshold:.3f} (F1={optimal_f1_value:.4f})")
+    print(f"    - Optimal Youden threshold: {optimal_j_threshold:.3f} (J={optimal_j_value:.4f})")
+
+
+def plot_ensemble_roc_pr_curves(all_labels, ensemble_mean_prob, ensemble_max_prob, output_path, figsize=(16, 6)):
+    """
+    Plot ensemble voting ROC and PR curves with multiple probability aggregation methods.
+    
+    Shows model performance across all decision thresholds using:
+    - ROC Curve: Plots TPR vs FPR (sensitivity vs false positive rate)
+    - PR Curve: Plots Precision vs Recall (positive predictive value vs sensitivity)
+    
+    Compares two ensemble probability aggregation methods:
+    - Mean Ensemble Probability: Average prediction confidence across 5 folds
+    - Max Ensemble Probability: Maximum prediction confidence across 5 folds
+    
+    Args:
+        all_labels: True labels (binary, 0/1)
+        ensemble_mean_prob: Mean probability from ensemble (for each patient)
+        ensemble_max_prob: Max probability from ensemble (for each patient)
+        output_path: Path to save PNG file
+        figsize: Figure size tuple (width, height)
+    """
+    # Calculate metrics for both probability aggregation methods
+    fpr_mean, tpr_mean, _ = roc_curve(all_labels, ensemble_mean_prob)
+    roc_auc_mean = auc(fpr_mean, tpr_mean)
+    
+    fpr_max, tpr_max, _ = roc_curve(all_labels, ensemble_max_prob)
+    roc_auc_max = auc(fpr_max, tpr_max)
+    
+    precision_mean, recall_mean, _ = precision_recall_curve(all_labels, ensemble_mean_prob)
+    pr_auc_mean = average_precision_score(all_labels, ensemble_mean_prob)
+    
+    precision_max, recall_max, _ = precision_recall_curve(all_labels, ensemble_max_prob)
+    pr_auc_max = average_precision_score(all_labels, ensemble_max_prob)
+    
+    # Create side-by-side subplots
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize)
+    
+    # ========== ROC CURVE PANEL ==========
+    # ROC: TPR (sensitivity) vs FPR (1-specificity)
+    ax1.plot(fpr_mean, tpr_mean, color='#2E86AB', lw=3, label=f'Mean Prob (AUC = {roc_auc_mean:.4f})')
+    ax1.plot(fpr_max, tpr_max, color='#A23B72', lw=3, linestyle='--', label=f'Max Prob (AUC = {roc_auc_max:.4f})')
+    ax1.plot([0, 1], [0, 1], color='red', lw=2, linestyle=':', alpha=0.6, label='Random Classifier')
+    
+    ax1.set_xlabel('False Positive Rate (1 - Specificity)', fontsize=12, fontweight='bold')
+    ax1.set_ylabel('True Positive Rate (Sensitivity)', fontsize=12, fontweight='bold')
+    ax1.set_title('Ensemble ROC Curves\n(Probability aggregation comparison)', fontsize=13, fontweight='bold')
+    ax1.legend(loc='lower right', fontsize=11)
+    ax1.grid(True, alpha=0.3)
+    ax1.set_xlim([0.0, 1.0])
+    ax1.set_ylim([0.0, 1.05])
+    
+    # Add diagonal reference
+    ax1.fill_between([0, 1], 0, 1, alpha=0.1, color='gray')
+    
+    # ========== PRECISION-RECALL CURVE PANEL ==========
+    # PR: Precision (PPV) vs Recall (Sensitivity)
+    ax2.plot(recall_mean, precision_mean, color='#06A77D', lw=3, label=f'Mean Prob (AP = {pr_auc_mean:.4f})')
+    ax2.plot(recall_max, precision_max, color='#F18F01', lw=3, linestyle='--', label=f'Max Prob (AP = {pr_auc_max:.4f})')
+    
+    # Add reference: no-skill classifier (proportion of positives)
+    baseline = np.sum(all_labels == 1) / len(all_labels)
+    ax2.axhline(y=baseline, color='red', lw=2, linestyle=':', alpha=0.6, label=f'Random Classifier (P={baseline:.3f})')
+    
+    ax2.set_xlabel('Recall (Sensitivity = TP/(TP+FN))', fontsize=12, fontweight='bold')
+    ax2.set_ylabel('Precision (PPV = TP/(TP+FP))', fontsize=12, fontweight='bold')
+    ax2.set_title('Ensemble Precision-Recall Curves\n(Probability aggregation comparison)', fontsize=13, fontweight='bold')
+    ax2.legend(loc='best', fontsize=11)
+    ax2.grid(True, alpha=0.3)
+    ax2.set_xlim([0.0, 1.0])
+    ax2.set_ylim([0.0, 1.05])
+    
+    # Add shaded region for ideal performance
+    ax2.fill_between([0, 1], 1, 0, alpha=0.05, color='green')
+    
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches='tight')
+    plt.close()
+    
+    print(f"  ✓ Ensemble ROC/PR curves saved: {output_path}")
+    print(f"    - ROC-AUC (Mean Prob):  {roc_auc_mean:.4f}")
+    print(f"    - ROC-AUC (Max Prob):   {roc_auc_max:.4f}")
+    print(f"    - PR-AUC (Mean Prob):   {pr_auc_mean:.4f}")
+    print(f"    - PR-AUC (Max Prob):    {pr_auc_max:.4f}")
+
+
 # ============================================================================
 # GRAD-CAM VISUALIZATION
 # ============================================================================

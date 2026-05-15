@@ -8,7 +8,8 @@
 #   1. Looks for '*_evaluation_report.csv' files in a specified directory.
 #   2. Parses key metrics (Accuracy, Precision(+), Recall(+), F1-Macro).
 #   3. Calculates mean and standard deviation across folds to ensure stability.
-#   4. Saves the final aggregation to 'grand_cv_summary.csv'.
+#   4. Computes bootstrap confidence intervals across folds.
+#   5. Saves summaries to 'grand_cv_summary.csv' and 'grand_cv_averages.csv'.
 #
 # Usage:
 #   python3 summarize_results.py --dir results --last 5
@@ -19,9 +20,66 @@
 # --------------------------------------
 """
 import pandas as pd
+import numpy as np
 import glob
 import os
 import argparse
+
+def compute_bootstrap_ci_from_folds(summary_df, numeric_cols, n_bootstrap=500):
+    """
+    Compute bootstrap confidence intervals by resampling across folds.
+    
+    Args:
+        summary_df: DataFrame with fold-level metrics
+        numeric_cols: List of metric column names to compute CIs for
+        n_bootstrap: Number of bootstrap resamples
+    
+    Returns:
+        Dictionary with CI statistics for each metric
+    """
+    n_folds = len(summary_df)
+    bootstrap_stats = {col: [] for col in numeric_cols}
+    
+    print(f"  Computing bootstrap CIs ({n_bootstrap} resamples)...", end='', flush=True)
+    for b in range(n_bootstrap):
+        # Resample with replacement across folds
+        indices = np.random.choice(n_folds, size=n_folds, replace=True)
+        
+        for col in numeric_cols:
+            # Filter out NaN values in this column
+            fold_values = summary_df[col].values[indices]
+            fold_values = fold_values[~np.isnan(fold_values)]
+            
+            if len(fold_values) > 0:
+                bootstrap_stats[col].append(np.mean(fold_values))
+            else:
+                bootstrap_stats[col].append(np.nan)
+        
+        if (b + 1) % 100 == 0:
+            print(f" {b+1}", end='', flush=True)
+    
+    print(" ✓")
+    
+    # Compute statistics
+    ci_results = {}
+    for col in numeric_cols:
+        values = [v for v in bootstrap_stats[col] if not np.isnan(v)]
+        if values:
+            values_array = np.array(values)
+            ci_results[col] = {
+                'mean': np.mean(values_array),
+                'std': np.std(values_array),
+                'ci_lower': np.percentile(values_array, 2.5),
+                'ci_upper': np.percentile(values_array, 97.5),
+                'ci_margin': (np.percentile(values_array, 97.5) - np.percentile(values_array, 2.5)) / 2
+            }
+        else:
+            ci_results[col] = {
+                'mean': np.nan, 'std': np.nan,
+                'ci_lower': np.nan, 'ci_upper': np.nan, 'ci_margin': np.nan
+            }
+    
+    return ci_results
 
 def generate_grand_summary(results_dir="results", last_n=None):
     # 1. Find all evaluation report CSVs
@@ -123,6 +181,11 @@ def generate_grand_summary(results_dir="results", last_n=None):
     print(f"Recall(-):    {averages['Recall(-)']:.4f} ± {stds['Recall(-)']:.4f}")
     print(f"F1 Macro:     {averages['F1_Macro']:.4f} ± {stds['F1_Macro']:.4f}")
     print(f"{'='*60}\n")
+    
+    # Compute bootstrap confidence intervals across folds
+    print(f"\n{'Computing Bootstrap Confidence Intervals':^60}")
+    print(f"{'-'*60}")
+    bootstrap_ci = compute_bootstrap_ci_from_folds(summary_df, numeric_cols)
 
     # 3. Save to CSV for long-term tracking
     # Detect run range for filename
@@ -154,9 +217,26 @@ def generate_grand_summary(results_dir="results", last_n=None):
     averages_filename = f"grand_cv_averages{run_suffix}.csv"
     avg_stds_df.to_csv(os.path.join(results_dir, averages_filename), index=False)
     
+    # Save bootstrap confidence intervals
+    bootstrap_ci_filename = f"grand_cv_bootstrap_ci{run_suffix}.csv"
+    bootstrap_data = {
+        "Metric": numeric_cols,
+        "Point_Estimate": [averages[col] for col in numeric_cols],
+        "Fold_Std": [stds[col] for col in numeric_cols],
+        "Bootstrap_Mean": [bootstrap_ci[col]['mean'] for col in numeric_cols],
+        "Bootstrap_Std": [bootstrap_ci[col]['std'] for col in numeric_cols],
+        "CI_Lower_95%": [bootstrap_ci[col]['ci_lower'] for col in numeric_cols],
+        "CI_Upper_95%": [bootstrap_ci[col]['ci_upper'] for col in numeric_cols],
+        "CI_Margin": [bootstrap_ci[col]['ci_margin'] for col in numeric_cols]
+    }
+    
+    bootstrap_ci_df = pd.DataFrame(bootstrap_data)
+    bootstrap_ci_df.to_csv(os.path.join(results_dir, bootstrap_ci_filename), index=False)
+    
     # Final console notification for audit trails
     print(f"Grand summary saved to {results_dir}/{summary_filename}")
-    print(f"Grand averages with \u00b1 saved to {results_dir}/{averages_filename}")
+    print(f"Grand averages with ± saved to {results_dir}/{averages_filename}")
+    print(f"Bootstrap CIs saved to {results_dir}/{bootstrap_ci_filename}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

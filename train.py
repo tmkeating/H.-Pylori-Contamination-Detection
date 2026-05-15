@@ -293,13 +293,22 @@ def get_next_run_number(results_dir="results", current_slurm_id=None):
     
     # 1. Scan results for existing mappings
     for f in files:
-        # Matches formats like "62_102498_..."
-        match = re.match(r"^(\d+)_(\d+)_", f)
+        # Matches formats like "302_25.1_106069_..." (run_id_config_job_id_...)
+        # Also supports old format "62_102498_..." (run_id_job_id_...)
+        match = re.match(r"^(\d+)_[\d.]+_(\d+)_", f)
         if match:
             run_id = int(match.group(1))
             job_id = int(match.group(2))
             if job_id not in job_to_run or run_id > job_to_run[job_id]:
                 job_to_run[job_id] = run_id
+        else:
+            # Try old format for backward compatibility
+            match_old = re.match(r"^(\d+)_(\d+)_", f)
+            if match_old and not "." in match_old.group(0).split("_")[1]:
+                run_id = int(match_old.group(1))
+                job_id = int(match_old.group(2))
+                if job_id not in job_to_run or run_id > job_to_run[job_id]:
+                    job_to_run[job_id] = run_id
         
         # Also check existing output logs for "Starting Run ID" 
         if f.startswith("output_") and f.endswith(".txt"):
@@ -348,10 +357,26 @@ def get_next_run_number(results_dir="results", current_slurm_id=None):
     last_known_run = job_to_run[last_known_jid]
     
     # 4. Count the number of 'slots' (output logs) between then and now
+    # BUT only count jobs that are TRAINING jobs (not helper/pre-sync jobs)
+    # A training job will have "Starting Training for Fold:" in its output log
     rank_offset = 0
     for jid in sorted_jids:
         if jid > last_known_jid and jid <= current_jid:
-            rank_offset += 1
+            # Check if this job is a training job by looking for training log in output file
+            is_training_job = False
+            output_file = os.path.join(results_dir, f"output_{jid}.txt")
+            if os.path.exists(output_file):
+                try:
+                    with open(output_file, 'r') as f:
+                        content = f.read()
+                        # Training jobs have "Starting Training for Fold:" in output
+                        if "Starting Training for Fold:" in content:
+                            is_training_job = True
+                except:
+                    pass
+            
+            if is_training_job:
+                rank_offset += 1
             
     return last_known_run + rank_offset
 
