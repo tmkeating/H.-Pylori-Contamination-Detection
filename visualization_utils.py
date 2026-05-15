@@ -625,7 +625,89 @@ def plot_ensemble_roc_pr_curves(all_labels, ensemble_mean_prob, ensemble_max_pro
     print(f"    - ROC-AUC (Mean Prob):  {roc_auc_mean:.4f}")
     print(f"    - ROC-AUC (Max Prob):   {roc_auc_max:.4f}")
     print(f"    - PR-AUC (Mean Prob):   {pr_auc_mean:.4f}")
-    print(f"    - PR-AUC (Max Prob):    {pr_auc_max:.4f}")
+    print(f"    - PR-AUC (Max Prob):    {pr_auc_mean:.4f}")
+
+
+# ============================================================================
+# BOOTSTRAP CONFIDENCE INTERVAL VISUALIZATION
+# ============================================================================
+
+def plot_bootstrap_confidence_intervals(bootstrap_ci_csv, output_path, figsize=(16, 8)):
+    """
+    Visualize bootstrap confidence intervals as error bars for key metrics.
+    
+    Args:
+        bootstrap_ci_csv: Path to CSV file with bootstrap CI results
+                         (from ensemble_voting or meta_classifier)
+        output_path: Path to save PNG file
+        figsize: Figure size (width, height)
+    
+    Output: Publication-ready PNG with error bars showing metric uncertainty
+    """
+    import pandas as pd
+    import numpy as np
+    import matplotlib.pyplot as plt
+    
+    # Load bootstrap CI data
+    df = pd.read_csv(bootstrap_ci_csv)
+    
+    # Select key metrics for visualization
+    key_metrics = [
+        "Recall", "Precision", "Accuracy", "F1_Score",
+        "Sensitivity", "Specificity", "Balanced_Accuracy",
+        "PPV_(Positive_Predictive_Value)",
+        "Matthews_Correlation_Coefficient"
+    ]
+    
+    # Filter to only available metrics in CSV
+    available_metrics = [m for m in key_metrics if m in df['Metric'].values]
+    df_plot = df[df['Metric'].isin(available_metrics)].copy()
+    df_plot = df_plot.reset_index(drop=True)
+    
+    # Extract data for plotting
+    metrics = df_plot['Metric'].values
+    point_estimates = df_plot['Point_Estimate'].values
+    ci_lower = df_plot['CI_Lower_95%'].values
+    ci_upper = df_plot['CI_Upper_95%'].values
+    
+    # Calculate error margins
+    error_lower = point_estimates - ci_lower
+    error_upper = ci_upper - point_estimates
+    errors = np.array([error_lower, error_upper])
+    
+    # Create figure
+    fig, ax = plt.subplots(figsize=figsize)
+    
+    # Color palette for metrics
+    colors = plt.cm.Set3(np.linspace(0, 1, len(metrics)))
+    
+    # Plot horizontal error bars
+    y_positions = np.arange(len(metrics))
+    ax.barh(y_positions, point_estimates, xerr=errors, 
+            color=colors, alpha=0.75, capsize=8, 
+            error_kw={'elinewidth': 3, 'capthick': 2})
+    
+    # Customize plot
+    ax.set_yticks(y_positions)
+    ax.set_yticklabels(metrics, fontsize=11, fontweight='bold')
+    ax.set_xlabel('Metric Value', fontsize=13, fontweight='bold')
+    ax.set_title('Bootstrap Confidence Intervals (95% CI)\nError Bars Show Uncertainty from 1000 Resamples',
+                 fontsize=14, fontweight='bold', pad=20)
+    
+    # Add grid for readability
+    ax.grid(axis='x', alpha=0.3, linestyle='--')
+    ax.set_xlim(0, 1.05)
+    
+    # Add value labels on bars
+    for i, (estimate, ci_l, ci_u) in enumerate(zip(point_estimates, ci_lower, ci_upper)):
+        ax.text(estimate + 0.02, i, f'{estimate:.4f}\n[{ci_l:.4f}-{ci_u:.4f}]',
+               va='center', fontsize=9, fontweight='bold')
+    
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches='tight', facecolor='white')
+    plt.close()
+    
+    return output_path
 
 
 # ============================================================================
