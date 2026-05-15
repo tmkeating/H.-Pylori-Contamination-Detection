@@ -1,0 +1,20 @@
+Synchronizing dataset to local scratch: /tmp/ricse03_h_pylori_data
+[CLEANUP] Checking for blacklisted items to remove...
+[CLEANUP] Blacklist file: blacklist.json
+[CLEANUP] Scratch path: /tmp/ricse03_h_pylori_data
+[CLEANUP] Found 5 blacklisted bags to remove
+[CLEANUP] Removed 0 blacklisted bags from scratch
+[CLEANUP] Found 2788 image-level blacklist items to clean
+[CLEANUP] Removed 0 image-level blacklist files from scratch
+[CLEANUP] No blacklisted items found in scratch to remove
+[DEBUG] Blacklist: 5 bags + 2788 images
+[DEBUG] Loading clinical metadata...
+[DEBUG] Found 309 valid patients in clinical metadata
+[DEBUG] Detected 0 orphaned bags to exclude
+[DEBUG] Wrote 2793 total exclusion rules to filter file
+[RSYNC] Waiting for exclusive lock on scratch sync...
+[RSYNC] Acquired lock - proceeding with sync
+[RSYNC] Syncing with exclude filter file (/tmp/h_pylori_exclude_filters_2779047.txt)
+[RSYNC] Sync complete, releasing lock
+Data synchronization complete (blacklisted items and orphaned patches excluded).
+[PRE_SYNC] Pre-sync job complete. Exiting to allow dependent fold jobs to start training.

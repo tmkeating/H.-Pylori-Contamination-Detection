@@ -1,0 +1,19 @@
+,precision,recall,f1-score,support
+Negative,0.7916666666666666,1.0,0.8837209302325582,57.0
+Positive,1.0,0.7368421052631579,0.8484848484848484,57.0
+accuracy,0.868421052631579,0.868421052631579,0.868421052631579,0.868421052631579
+macro avg,0.8958333333333333,0.868421052631579,0.8661028893587033,114.0
+weighted avg,0.8958333333333334,0.868421052631579,0.8661028893587033,114.0
+Sensitivity_(Recall),0.7368421052631579,,,
+Specificity,1.0,,,
+Balanced_Accuracy,0.868421052631579,,,
+PPV_(Positive_Predictive_Value),1.0,,,
+NPV_(Negative_Predictive_Value),0.7916666666666666,,,
+FPR_(False_Positive_Rate),0.0,,,
+FNR_(False_Negative_Rate),0.2631578947368421,,,
+Matthews_Correlation_Coefficient,0.7637626158259734,,,
+Cohen_Kappa,0.736842105263158,,,
+TP_(True_Positives),42.0,,,
+FP_(False_Positives),0.0,,,
+FN_(False_Negatives),15.0,,,
+TN_(True_Negatives),57.0,,,
