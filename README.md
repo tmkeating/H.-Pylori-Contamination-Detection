@@ -76,6 +76,8 @@ sbatch run_visuals.sh
 
 ## 📊 Final Clinical Performance
 
+### Hybrid Ensemble (Best Method) - Three Fusion Approaches Compared
+
 | Metric | Ensemble Voting | Meta-Classifier | **Hybrid Ensemble** ⭐ |
 | :--- | :--- | :--- | :--- |
 | **Accuracy** | 86.84% | 91.23% | **92.11%** |
@@ -85,6 +87,34 @@ sbatch run_visuals.sh
 | **F1 Score** | 87.18% | 90.57% | **91.43%** |
 | **False Positives** | 9 | 1 | **0** |
 | **False Negatives** | 6 | 9 | 9 |
+
+### Architecture Comparison: ConvNeXt-Tiny vs ConvNeXt-Small
+
+**Test Results (5-Fold Cross-Validation Hybrid Ensemble)**
+
+| Metric | **ConvNeXt-Tiny** ⭐ | ConvNeXt-Small |
+| :--- | :--- | :--- |
+| **Accuracy** | **92.11%** | 87.72% |
+| **Precision** | **100.00%** (0 FP) | 92.16% (4 FP) |
+| **Recall** | 84.21% (48 TP) | 82.46% (47 TP) |
+| **Specificity** | **100.00%** | 92.98% |
+| **F1 Score** | **91.43%** | 87.04% |
+| **MCC** | **0.8528** | 0.7586 |
+| **Kappa** | **0.8421** | 0.7544 |
+| **False Positives** | **0** | 4 |
+| **False Negatives** | 9 | 10 |
+| **Parameters** | 28M | 50M (+80%) |
+| **Training Time** | ~1x | ~1.5x |
+
+**Recommendation: ConvNeXt-Tiny** ✅
+- **Better overall accuracy**: +4.4% absolute improvement
+- **Perfect precision**: Zero false positives (critical for clinical safety)
+- **Perfect specificity**: All negative patients correctly identified
+- **Better F1 Score**: +4.4% absolute improvement (91.43% vs 87.04%)
+- **More efficient**: 56% fewer parameters, faster training/inference
+- **Superior trade-off**: Better balance of sensitivity and specificity
+
+ConvNeXt-Small's additional parameters did not translate to improved performance on this task, suggesting **ConvNeXt-Tiny is the optimal choice for H. pylori detection** in this dataset.
 
 
 ## 🛠️ Key Pipeline Features

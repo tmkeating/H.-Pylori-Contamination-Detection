@@ -6,7 +6,7 @@ OVERVIEW
 --------
 This module implements the complete deep learning architecture for H. Pylori detection
 in high-resolution histological whole-slide images (WSI). The pipeline combines:
-  - Modern backbone architectures (ConvNeXt-Tiny, ConvNeXt-Small, or ResNet50) for feature extraction
+  - Modern backbone architectures (ConvNeXt-Tiny [RECOMMENDED], ConvNeXt-Small, or ResNet50) for feature extraction
   - Gated Attention Multiple Instance Learning (MIL) for patient-level diagnosis
   - Memory-efficient inference via gradient checkpointing and chunked processing
   - Temperature-scaled attention for interpretability and clinical deployment
@@ -27,7 +27,10 @@ TWO-STAGE DESIGN:
   Stage 1 (Backbone): Feature extraction from individual patches
     - Input: (B, 3, 448, 448) preprocessed histology images
     - Output: (B, feature_dim) learned feature vectors
-    - Architectures: ConvNeXt-Tiny (768-dim), ConvNeXt-Small (768-dim), or ResNet50 (2048-dim)
+    - Architectures:
+      * ConvNeXt-Tiny [RECOMMENDED]: 28M params, 768-dim, optimal 92.11% accuracy, 100% precision
+      * ConvNeXt-Small: 50M params, 768-dim, empirically underperforms tiny (-4.4% accuracy)
+      * ResNet50: 25M params, 2048-dim, classical stable baseline
     - Pretrained on ImageNet → fine-tuned for histology domain
 
   Stage 2 (MIL Head): Learns from patch-level features to make patient-level predictions

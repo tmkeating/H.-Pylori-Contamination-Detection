@@ -1,0 +1,3 @@
+[DEBUG] Filter file will be at: /tmp/h_pylori_exclude_filters_2898474.txt
+[DEBUG] jq not available, using Python
+[DEBUG] Filter file created: -rw-rw-r-- 1 ricse03 ricse03 54K may 15 20:57 /tmp/h_pylori_exclude_filters_2898474.txt

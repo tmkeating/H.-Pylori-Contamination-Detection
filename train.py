@@ -55,10 +55,10 @@ REQUIRED:
 
 ARCHITECTURE:
   --model_name {convnext_tiny, convnext_small, resnet50}
-    Default: convnext_tiny
+    Default: convnext_tiny (RECOMMENDED ⭐)
     Backbone architecture for feature extraction
-    convnext_tiny: 28M params, efficient, high accuracy (RECOMMENDED)
-    convnext_small: 50M params, more expressive, +3-5% accuracy vs tiny
+    convnext_tiny: 28M params, efficient, OPTIMAL performance (92.11% accuracy, 100% precision)
+    convnext_small: 50M params, +80% parameters but -4.4% accuracy (empirical trade-off)
     resnet50: Classical, 25M params, stable training
 
 CROSS-VALIDATION:

@@ -1,0 +1,164 @@
+Synchronizing dataset to local scratch: /tmp/ricse03_h_pylori_data
+[SKIP_SYNC] Skipping data sync - fold job will use pre-synced data
+Data synchronization complete (blacklisted items and orphaned patches excluded).
+Starting Training for Fold: 4 of 5 using convnext_small (NegWeight=1.0, PosWeight=1.5, Gamma=3.0, Epochs=20, Saver=f1, FreezeBN=True, ClipGrad=1.0, PctStart=0.1, WD=0.05, SWA=True, SWAStart=12, Jitter=0.25, Pool=attention, Iter=29.1)
+--- Starting Run ID: 422 (Fold: 4/5, Model: convnext_small, SLURM Job: 112897, Iter: 29.1) ---
+Using device: cuda
+Set float32 matmul precision to 'high' for A40 hardware optimization.
+Using Data Path: /tmp/ricse03_h_pylori_data
+Pre-processing: Using Standard ImageNet Normalization (IHC-mode).
+
+📊 DEBUG: File Enumeration & Deduplication Statistics
+   Total files enumerated: 128,724
+   Unique patients with files: 154
+   Total samples added: 128,724
+
+   Gap analysis:
+     Enumerated: 128,724
+     Added to samples: 128,724
+     Silent skips (Priority match but already in added_keys): 0
+     Explicit skips (Priority 4 - no match): 0
+     Unaccounted: 0
+
+✓ DEBUG: No patches skipped by Priority 4 filter (all have density info)
+
+   Total samples loaded: 128,724
+--- LIVE DATA INTEGRITY AUDIT ---
+  Scanned Patches: 128724
+  Conflict Blacklist: Removed 0 patient bags []
+    (Note: Conflict bags were excluded at rsync level - not in scratch)
+  Image-Level Blacklist: Removed 0 cross-folder duplicate images
+    (Note: These images appear in multiple bags; removing from non-primary locations)
+  Total Patches Removed: 0
+  Total Patches Remaining: 128724
+  Final Valid Bags: 223
+---------------------------------
+--- Fold 4/5 Split (Leakage-Proof MIL) ---
+Total Clinical Patients: 154
+Training Clinical IDs: 124
+Validation Clinical IDs: 30
+Independent Patient-level split:
+ - Train: 178 biopsy bags
+ - Val:   45 biopsy bags
+Training distribution (Bags): Negative=89, Contaminated=89
+Pos Weight 1.5 > 1.0: Disabling Sampler, using Shuffle=True.
+Using AdamW Optimizer for convnext_small (LR=2e-5, WD=0.05)...
+Skipping torch.compile for convnext_small to conserve VRAM...
+Running on standard PyTorch (IPEX disabled).
+Epoch 1/20 (Fold 4/5)
+Train Loss: 0.1202 Acc: 0.5000
+Val Loss: 0.1397 Acc: 0.6000 Recall: 1.0000 F1: 0.7500
+New Best F1! 0.7500
+Saving model to results/422_29.1_112897_f3_convnext_small_model_brain.pth
+Epoch 2/20 (Fold 4/5)
+Train Loss: 0.0894 Acc: 0.5674
+Val Loss: 0.0982 Acc: 0.6000 Recall: 1.0000 F1: 0.7500
+Epoch 3/20 (Fold 4/5)
+Train Loss: 0.0671 Acc: 0.6348
+Val Loss: 0.0818 Acc: 0.9333 Recall: 0.8889 F1: 0.9412
+New Best F1! 0.9412
+Saving model to results/422_29.1_112897_f3_convnext_small_model_brain.pth
+Epoch 4/20 (Fold 4/5)
+Train Loss: 0.0579 Acc: 0.8034
+Val Loss: 0.0973 Acc: 0.9111 Recall: 0.8519 F1: 0.9200
+Epoch 5/20 (Fold 4/5)
+Train Loss: 0.0300 Acc: 0.9045
+Val Loss: 0.0605 Acc: 0.9333 Recall: 0.9259 F1: 0.9434
+New Best F1! 0.9434
+Saving model to results/422_29.1_112897_f3_convnext_small_model_brain.pth
+Epoch 6/20 (Fold 4/5)
+Train Loss: 0.0197 Acc: 0.8933
+Val Loss: 0.0815 Acc: 0.9333 Recall: 0.8889 F1: 0.9412
+Epoch 7/20 (Fold 4/5)
+Train Loss: 0.0189 Acc: 0.9157
+Val Loss: 0.0665 Acc: 0.9111 Recall: 0.9259 F1: 0.9259
+Epoch 8/20 (Fold 4/5)
+Train Loss: 0.0307 Acc: 0.9213
+Val Loss: 0.0950 Acc: 0.9333 Recall: 0.8889 F1: 0.9412
+Epoch 9/20 (Fold 4/5)
+Train Loss: 0.0061 Acc: 0.8820
+Val Loss: 0.0621 Acc: 0.9333 Recall: 0.8889 F1: 0.9412
+Epoch 10/20 (Fold 4/5)
+Train Loss: 0.0099 Acc: 0.9382
+Val Loss: 0.0886 Acc: 0.9333 Recall: 0.8889 F1: 0.9412
+Epoch 11/20 (Fold 4/5)
+Train Loss: 0.0052 Acc: 0.9270
+Val Loss: 0.0594 Acc: 0.9111 Recall: 0.8889 F1: 0.9231
+Epoch 12/20 (Fold 4/5)
+Train Loss: -0.0019 Acc: 0.9438
+Val Loss: 0.0852 Acc: 0.9333 Recall: 0.8889 F1: 0.9412
+Epoch 13/20 (Fold 4/5)
+Train Loss: 0.0069 Acc: 0.9382
+Val Loss: 0.0789 Acc: 0.9111 Recall: 0.8889 F1: 0.9231
+Epoch 14/20 (Fold 4/5)
+Train Loss: -0.0031 Acc: 0.9270
+Val Loss: 0.0751 Acc: 0.9333 Recall: 0.8889 F1: 0.9412
+Epoch 15/20 (Fold 4/5)
+Train Loss: -0.0138 Acc: 0.9663
+Val Loss: 0.0858 Acc: 0.9333 Recall: 0.8889 F1: 0.9412
+Epoch 16/20 (Fold 4/5)
+Train Loss: -0.0157 Acc: 0.9663
+Val Loss: 0.0940 Acc: 0.9333 Recall: 0.8889 F1: 0.9412
+Epoch 17/20 (Fold 4/5)
+Train Loss: -0.0151 Acc: 0.9551
+Val Loss: 0.0941 Acc: 0.9333 Recall: 0.8889 F1: 0.9412
+Epoch 18/20 (Fold 4/5)
+Train Loss: -0.0102 Acc: 0.9326
+Val Loss: 0.1190 Acc: 0.9333 Recall: 0.8889 F1: 0.9412
+Epoch 19/20 (Fold 4/5)
+Train Loss: -0.0148 Acc: 0.9719
+Val Loss: 0.1161 Acc: 0.9333 Recall: 0.8889 F1: 0.9412
+Epoch 20/20 (Fold 4/5)
+Train Loss: -0.0189 Acc: 0.9494
+Val Loss: 0.1306 Acc: 0.9333 Recall: 0.8889 F1: 0.9412
+Training complete. Best Val F1: 0.9434
+Final SWA Clinical Model saved to results/422_29.1_112897_f3_convnext_small_swa_model_brain.pth
+Saved clinical learning curves to results/422_29.1_112897_f3_convnext_small_learning_curves.png
+
+Evaluating on Independent Hold-Out set from: /tmp/ricse03_h_pylori_data/HoldOut with 16-way TTA
+
+📊 DEBUG: File Enumeration & Deduplication Statistics
+   Total files enumerated: 87,602
+   Unique patients with files: 114
+   Total samples added: 87,602
+
+   Gap analysis:
+     Enumerated: 87,602
+     Added to samples: 87,602
+     Silent skips (Priority match but already in added_keys): 0
+     Explicit skips (Priority 4 - no match): 0
+     Unaccounted: 0
+
+✓ DEBUG: No patches skipped by Priority 4 filter (all have density info)
+
+   Total samples loaded: 87,602
+--- LIVE DATA INTEGRITY AUDIT ---
+  Scanned Patches: 87602
+  Conflict Blacklist: Removed 0 patient bags []
+    (Note: Conflict bags were excluded at rsync level - not in scratch)
+  Image-Level Blacklist: Removed 0 cross-folder duplicate images
+    (Note: These images appear in multiple bags; removing from non-primary locations)
+  Total Patches Removed: 0
+  Total Patches Remaining: 87602
+  Final Valid Bags: 114
+---------------------------------
+
+Patient-Level Classification Report (MIL):
+              precision    recall  f1-score   support
+
+    Negative       0.87      0.95      0.91        57
+    Positive       0.94      0.86      0.90        57
+
+    accuracy                           0.90       114
+   macro avg       0.91      0.90      0.90       114
+weighted avg       0.91      0.90      0.90       114
+
+Clinical consensus report saved to 422_29.1_112897_f3_convnext_small_patient_consensus.csv
+Evaluation report saved to results/422_29.1_112897_f3_convnext_small_evaluation_report.csv
+
+Final Patient-Level Accuracy (MIL): 90.35%
+
+Generating final metrics and interpretability maps...
+Generating Grad-CAM for most suspicious patient bags in results/422_29.1_112897_f3_convnext_small_gradcam_samples...
+Generating Grad-CAM for 5 False Negative (Ghost) bags...
+Iteration reporting and metrics complete.
