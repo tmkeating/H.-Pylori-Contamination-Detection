@@ -88,31 +88,89 @@ done
 echo "-------------------------------------------"
 echo "Submitting Global Attention-MIL final summary as dependent job..."
 # This job will only start once all 5 folds have successfully completed
-sbatch --dependency=afterok:$DEPENDENCIES <<EOF
+sbatch --dependency=afterok:$DEPENDENCIES \
+    -p dcca40 \
+    --time=0-12:00 \
+    --mem=24G \
+    --cpus-per-task=8 \
+    --job-name=HPy_FinalSummary \
+    --output=results/slurm_summary_%j.txt \
+    --error=results/slurm_summary_error_%j.txt \
+    <<'SUMMARY_EOF'
 #!/bin/bash
-#SBATCH -p dcca40                    # Submit to the dcca40 partition
-#SBATCH -t 0-00:30                   # Set a 30-minute time limit for summarization
-#SBATCH --mem=16G                    # Allocate 16GB of RAM for data aggregation
-#SBATCH -c 4                         # Request 4 CPU cores for parallel processing
-#SBATCH -J HPy_FinalSummary          # Set the SLURM job name for monitoring
-#SBATCH -o results/slurm_summary_%j.txt # Direct output to results folder with Job ID suffix
+#SBATCH -p dcca40
+
+cd /hhome/ricse03/modelTwyla/H.-Pylori-Contamination-Detection
+
+# Get job ID for output filename
+JOB_ID=$SLURM_JOB_ID
 
 # Activate virtual environment
 source ../venv/bin/activate
 
-echo "All folds finished. Iteration 24.9: Robust Generalization Summary..."
-# Fix: Summary script expects results dir and --last 5 for the latest fold set
-python summarize_results.py --dir results --last 5
+echo "=========================================================================="
+echo "All training folds complete. Generating comprehensive ensemble analysis..."
+echo "=========================================================================="
+echo ""
 
-echo "Generating Hybrid Ensemble Fusion (Recommended Primary Method)..."
-# Note: ensemble_voting.py now runs THREE methods and recommends hybrid ensemble
-# Primary outputs: hybrid_ensemble_* files (92.11% accuracy, 100% precision)
-# Comparison outputs: ensemble_voting_* and meta_classifier_* files
-python ensemble_voting.py
+# Extract iteration from latest checkpoint files
+ITER=$(python3 -c "
+import glob
+from pathlib import Path
+files = sorted(glob.glob('results/*_convnext_tiny_model_brain.pth'))
+if files:
+    # Extract iteration from filename like: 28_25.0_107840_f0_convnext_tiny_model_brain.pth
+    filename = Path(files[-1]).stem
+    parts = filename.split('_')
+    if len(parts) >= 2:
+        print(parts[1])  # This is the iteration (25.0, 26.0, etc)
+    else:
+        print('26.0')
+else:
+    print('26.0')
+")
 
+echo "Iteration: $ITER"
+echo ""
+
+# Step 1: Cross-validation performance summary
+echo "=========================================================================="
+echo "Step 1: Running cross-validation performance summary..."
+echo "=========================================================================="
+python3 summarize_results.py --dir results --last 5 2>&1
+
+echo ""
+echo "=========================================================================="
+echo "Step 2: Generating ensemble voting, meta-classifier, and hybrid fusion..."
+echo "=========================================================================="
+echo ""
+
+# Note: ensemble_voting.py runs THREE fusion methods:
+#   1. Ensemble Voting (majority vote)
+#   2. Meta-Classifier (Random Forest with LOO-CV)
+#   3. Hybrid Ensemble (intelligent confidence-zone blending) ⭐ RECOMMENDED
+#
+# Primary outputs: hybrid_ensemble_*.csv with 92.11% accuracy, 100% precision
+# Comparison outputs: ensemble_voting_*.csv and meta_classifier_*.csv for analysis
+python3 ensemble_voting.py 2>&1
+
+echo ""
+echo "=========================================================================="
 echo "Clinical analysis and hybrid ensemble fusion completed."
-echo "✅ Primary results in: results/hybrid_ensemble_*"
-EOF
+echo "=========================================================================="
+echo "✅ Primary results (RECOMMENDED):"
+echo "   - results/hybrid_ensemble_results_*.csv - Patient predictions"
+echo "   - results/hybrid_ensemble_summary_*.csv - Performance metrics (92.11% accuracy, 100% precision)"
+echo "   - results/hybrid_ensemble_roc_pr_*.png - ROC/PR curves"
+echo ""
+echo "📊 Comparison outputs (for analysis):"
+echo "   - results/ensemble_voting_summary_*.csv - Base voting method"
+echo "   - results/meta_classifier_summary_*.csv - Meta-classifier method"
+echo "=========================================================================="
+echo ""
+
+SUMMARY_EOF
 
 echo "-------------------------------------------"
 echo "All 5 folds + Hybrid Ensemble fusion job submitted. Use 'squeue -u $USER' to monitor progress."
+

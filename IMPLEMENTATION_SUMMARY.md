@@ -56,7 +56,7 @@ chmod +x submit_transfer_learning.sh
 
 This is the simplest and recommended approach. Just run one command and let the pipeline handle everything for ~28 hours.
 
-### Option B: All-in-One Pipeline (Fully Automated) ✅
+### Option A: All-in-One Pipeline (Fully Automated) ✅
 
 ```bash
 cd /hhome/ricse03/modelTwyla/H.-Pylori-Contamination-Detection

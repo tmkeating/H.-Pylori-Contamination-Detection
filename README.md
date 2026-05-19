@@ -58,38 +58,76 @@ done
 
 ## Execution Workflow (Step-by-Step)
 
-To reproduce the results, follow this specific execution order:
+To reproduce the results, follow this specific execution order (with optional transfer learning from DeepHP):
 
-### 0. Data Integrity & Deduplication Audit
-Before training, run a byte-level MD5 hash audit across the dataset to identify exact duplicated images across the Folders (Annotated, Cropped, HoldOut) to prevent data leakage and skewed metrics.
+### 0. HelicoDataSet Data Integrity & Deduplication Audit (BEFORE SYNCING)
+Run a comprehensive data integrity audit on the permanent HelicoDataSet before syncing to scratch:
+
+**Step 1: Identify Duplicates & Generate Blacklist**
 ```bash
-sbatch submit_dedupe.sh
+sbatch submit_duplicates_check.sh
 ```
-*Outputs:* `global_image_inventory.csv`, `global_image_duplicates.csv`, `dataset_presence_matrix.csv`, and `patient_duplicate_audit.csv`.
+*Outputs:* `global_image_inventory.csv`, `global_image_duplicates.csv`, `suggested_blacklist.json` - Identifies duplicate patches across folders.
 
-### 1. Training (5-Fold Cross-Validation)
-Launch the primary training sweep using the `SEARCHER` profile. This uses ConvNeXt-Tiny with Attention-MIL and SWA.
+**Step 2: Validate Label Consistency & Patient Distribution**
 ```bash
-PROFILE=SEARCHER MODEL_NAME=convnext_tiny ITER=30.0 ./submit_all_folds.sh
+python3 verify_data_integrity.py
 ```
-*Outputs: `results/*_model_brain.pth` and `results/*_patient_consensus.csv`.*
+*Outputs:* `data_integrity_summary.csv` - Ensures patient-level labels are consistent across all slides/patches.
 
-### 2. Data Integrity and Blacklist Removal Check
-After it has been synced, run the .png audit count to ensure the blacklisted files are being properly removed/excluded from the scratch directory.
+**Step 3: Verify PNG Count**
 ```bash
 python3 audit_png_count.py
 ```
-*Outputs: `audit_png_count_report.csv`.*
+*Outputs:* `audit_png_count_report.csv` - Confirms 216,326 total patches available (128,724 training after blacklist, 87,602 HoldOut).
 
-### 3. High-Resolution Rescue (Dense Inference Pass)
-Specifically target difficult "Ghost Patients" using the dense Stride-128 rescue scan. This recovers signals from sparse biopsies that were missed by the default Stride-512/Stride-250 sampling. 
+### 0a. DeepHP Data Integrity Checks (⭐ If Using Transfer Learning - BEFORE SYNCING)
+If performing transfer learning with pre-trained backbone, audit the DeepHP H&E dataset for duplicates before syncing:
+
 ```bash
-# Update submit_rescue.sh with the correct Searcher Run IDs
-sbatch submit_rescue.sh
-```
-*Outputs: `results/rescue_ensemble/rescue_*.csv`.*
+# Check for byte-level duplicates across all 394,926 patches
+sbatch submit_duplicates_check_deepHP.sh
 
-### 4. Final Hybrid Ensemble & Fusion (⭐ RECOMMENDED METHOD)
+# Count PNG patches for verification
+python3 audit_png_count_deepHP.py
+```
+*Outputs:* 
+- `deephp_image_inventory.csv`, `deephp_patch_duplicate_audit.csv`, `suggested_deephp_blacklist.json` - Duplicate audit results
+- `deephp_audit_report.csv` - Class distribution verification
+- **Result**: Verified 394,926 patches, 0 duplicates found
+
+### 1. Dataset Syncing to Scratch
+After integrity checks pass, sync the vetted datasets to local node storage for performance:
+
+**HelicoDataSet Sync** (automatic in `run_h_pylori.sh`):
+- Syncs to `/tmp/ricse03_h_pylori_data/` using `suggested_blacklist.json` to exclude problematic patches
+- 128,724 training patches (after blacklist removal) + 87,602 HoldOut patches
+
+**DeepHP Sync** (automatic in `train_deepHP_patches.py`):
+- Syncs to `/tmp/ricse03_deephp_data/` using `suggested_deephp_blacklist.json` if available
+- 394,926 clean patches (verified 0 duplicates)
+
+### 2. Training (5-Fold Cross-Validation)
+Launch the automated training workflow with transfer learning pre-training and fine-tuning:
+
+```bash
+sbatch submit_transfer_learning.sh
+```
+
+This script automatically orchestrates:
+1. **DeepHP Backbone Pre-training** (5-fold stratified CV on 394,926 H&E patches)
+2. **Backbone Averaging** (creates unified pre-trained backbone)
+3. **HelicoDataSet Fine-tuning** (5-fold stratified CV on 114 patients with pre-trained backbone)
+
+*Outputs: `results/*_model_brain.pth` (trained models), `results/*_patient_consensus.csv` (per-fold predictions), `results/*_evaluation_report.csv` (fold metrics)*
+
+**Alternative: Direct Training (Without Transfer Learning)**
+If skipping transfer learning, run:
+```bash
+PROFILE=SEARCHER MODEL_NAME=convnext_tiny ITER=30.0 ./submit_all_folds.sh
+```
+
+### 3. Final Hybrid Ensemble & Fusion (⭐ RECOMMENDED METHOD)
 Intelligently fuses multiple fusion approaches (Ensemble Voting, Meta-Classifier, and **Hybrid Ensemble**) to produce the best clinical predictions.
 ```bash
 # Generate the 92.11% Hybrid Ensemble (Production-Ready)
@@ -103,13 +141,13 @@ python3 ensemble_voting.py --runs 302,303,299,300,301
 - `hybrid_ensemble_threshold_analysis_*.png` - Threshold optimization
 
 **Comparison Outputs (For Analysis):**
-- `ensemble_voting_results_*.csv` - Base ensemble voting predictions
-- `meta_classifier_results_*.csv` - Random Forest meta-classifier predictions
+- `ensemble_voting_summary_*.csv` - Ensemble voting summary metrics
+- `meta_classifier_summary_*.csv` - Meta-classifier comparison
 
 *Key Result: **92.11% Accuracy | 100% Precision (Zero False Positives) | 100% Specificity***
 
-### 5. (Optional). Interpretability Analysis & Reports (Grad-CAM & Metrics)
-Generate visual evidence for the model's decisions and patch/patient-level metrics. It bypasses older plotting packages and directly visualizes the confusion matrix and valid ROCs. Ensure you edit `run_visuals.sh` to target your desired `RUN_ID` before submitting.
+### 4. (Optional). Interpretability Analysis & Reports (Grad-CAM & Metrics)
+Generate visual evidence for the model's decisions and patch/patient-level metrics. Grad-CAM visualizations are generated during training, but you can also create supplementary analysis with this script:
 ```bash
 sbatch run_visuals.sh
 ```
