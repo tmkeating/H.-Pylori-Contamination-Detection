@@ -45,6 +45,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import argparse
+import re
 import gc
 from torch.utils.data import DataLoader
 from torchvision import transforms as T
@@ -62,6 +63,27 @@ from dataset_deepHP import DeepHPDataset, create_deephp_transforms_train, create
 from model import get_model
 from config import DATASET_ROOT, SCRATCH_ROOT, DEEPHP_DATASET_ROOT
 from visualization_utils import plot_learning_curves, plot_confusion_matrix, plot_roc_curve, plot_pr_curve
+
+# Function to get next run number (matching train.py pattern)
+def get_next_run_number(results_dir="results", current_slurm_id=None):
+    """Simple version to get next available run number."""
+    if not os.path.exists(results_dir):
+        return 0
+    
+    files = os.listdir(results_dir)
+    max_run = 0
+    
+    # Look for existing run IDs in filename patterns (e.g., "302_25.1_106069_...")
+    for f in files:
+        match = re.match(r"^(\d+)_[\d.]+_(\d+)_", f)
+        if match:
+            try:
+                run_id = int(match.group(1))
+                max_run = max(max_run, run_id)
+            except:
+                pass
+    
+    return max_run + 1
 
 
 class FocalLoss(nn.Module):
@@ -82,7 +104,7 @@ class FocalLoss(nn.Module):
 
 def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", num_epochs=20, 
                           batch_size=128, learning_rate=2e-5, weight_decay=0.01, 
-                          use_focal_loss=False, pos_weight=2.5, gamma=1.0):
+                          use_focal_loss=False, pos_weight=2.5, gamma=1.0, iter_name="deephp"):
     """
     Train a CNN backbone on DeepHP H&E patches for pre-training.
     
@@ -110,10 +132,32 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
         torch.set_float32_matmul_precision('high')
         torch.cuda.set_per_process_memory_fraction(0.70, 0)
     
-    # Setup output paths
-    prefix = f"deephp_backbone_pretrained_{model_name}_f{fold_idx}"
-    best_model_path = os.path.join(results_dir, f"{prefix}.pth")
-    results_csv_path = os.path.join(results_dir, f"{prefix}_evaluation.csv")
+    # Get SLURM job ID and generate run ID (matching train.py naming convention)
+    slurm_id = os.environ.get("SLURM_JOB_ID", "local")
+    
+    # Check for existing run IDs for THIS EXACT iteration (for multi-fold consistency within same run)
+    existing_run_id = None
+    if os.path.exists(results_dir):
+        for filename in os.listdir(results_dir):
+            # Look for files matching pattern: {run_id}_{iter_name}_{slurm_id}_f{fold}_{model_name}*
+            # E.g., "420_31.0_113456_f0_convnext_tiny_model_brain.pth"
+            # Only reuse run_id if this EXACT iteration has files in results
+            match = re.match(rf"^(\d+)_{re.escape(iter_name)}_\d+_f\d+_{model_name}", filename)
+            if match:
+                existing_run_id = match.group(1)
+                break
+    
+    # Use existing run_id if found (for multi-fold consistency), otherwise generate next available run_id
+    if existing_run_id:
+        run_id = existing_run_id
+    else:
+        # Generate next run_id based on ALL existing run IDs in results folder
+        run_id = f"{get_next_run_number(results_dir, slurm_id):02d}"
+    
+    # Setup output paths with unified naming convention
+    prefix = f"{run_id}_{iter_name}_{slurm_id}_f{fold_idx}_{model_name}"
+    best_model_path = os.path.join(results_dir, f"{prefix}_model_brain.pth")
+    results_csv_path = os.path.join(results_dir, f"{prefix}_evaluation_report.csv")
     cm_path = os.path.join(results_dir, f"{prefix}_confusion_matrix.png")
     roc_path = os.path.join(results_dir, f"{prefix}_roc_curve.png")
     pr_path = os.path.join(results_dir, f"{prefix}_pr_curve.png")
@@ -121,6 +165,7 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
     
     print(f"\n{'='*80}")
     print(f"DeepHP Backbone Pre-training: Fold {fold_idx + 1}/{num_folds}")
+    print(f"Run ID: {run_id} (Iter: {iter_name}, SLURM Job: {slurm_id})")
     print(f"{'='*80}")
     print(f"Model: {model_name} | Epochs: {num_epochs} | Batch Size: {batch_size}")
     print(f"Learning Rate: {learning_rate} | Weight Decay: {weight_decay}")
@@ -331,7 +376,14 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
     recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
     f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
     specificity = tn / (tn + fp) if (tn + fp) > 0 else 0.0
+    sensitivity = recall  # Same as recall
+    ppv = precision  # Positive predictive value
+    npv = tn / (tn + fn) if (tn + fn) > 0 else 0.0
+    fpr = fp / (fp + tn) if (fp + tn) > 0 else 0.0
+    fnr = fn / (fn + tp) if (fn + tp) > 0 else 0.0
     mcc = matthews_corrcoef(all_labels, all_preds)
+    kappa = cohen_kappa_score(all_labels, all_preds)
+    balanced_accuracy = (sensitivity + specificity) / 2.0
     
     print(f"Accuracy:  {accuracy*100:.2f}%")
     print(f"Precision: {precision*100:.2f}%")
@@ -342,25 +394,30 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
     print(f"Confusion Matrix: TP={tp}, FP={fp}, FN={fn}, TN={tn}")
     print(f"{'='*80}\n")
     
-    # Save evaluation report
+    # Save evaluation report (matching train.py format)
     report = classification_report(all_labels, all_preds, target_names=['Negative', 'Positive'], output_dict=True, zero_division=0)
     report_df = pd.DataFrame(report).transpose()
     
-    clinical_metrics = {
-        'Sensitivity_(Recall)': recall,
-        'Specificity': specificity,
-        'Precision': precision,
-        'F1_Score': f1,
-        'Accuracy': accuracy,
-        'Matthews_Correlation_Coefficient': mcc,
-        'TP': float(tp),
-        'FP': float(fp),
-        'FN': float(fn),
-        'TN': float(tn)
+    # Create dataframe with clinical metrics as additional rows (matching train.py order)
+    first_col = report_df.columns[0]
+    clinical_metrics_data = {
+        'Sensitivity_(Recall)': {first_col: sensitivity},
+        'Specificity': {first_col: specificity},
+        'Balanced_Accuracy': {first_col: balanced_accuracy},
+        'PPV_(Positive_Predictive_Value)': {first_col: ppv},
+        'NPV_(Negative_Predictive_Value)': {first_col: npv},
+        'FPR_(False_Positive_Rate)': {first_col: fpr},
+        'FNR_(False_Negative_Rate)': {first_col: fnr},
+        'Matthews_Correlation_Coefficient': {first_col: mcc},
+        'Cohen_Kappa': {first_col: kappa},
+        'TP_(True_Positives)': {first_col: float(tp)},
+        'FP_(False_Positives)': {first_col: float(fp)},
+        'FN_(False_Negatives)': {first_col: float(fn)},
+        'TN_(True_Negatives)': {first_col: float(tn)}
     }
     
-    for metric_name, metric_value in clinical_metrics.items():
-        report_df.loc[metric_name] = metric_value
+    clinical_df = pd.DataFrame(clinical_metrics_data).T
+    report_df = pd.concat([report_df, clinical_df])
     
     report_df.to_csv(results_csv_path)
     print(f"✓ Saved evaluation report to {results_csv_path}")
@@ -421,6 +478,7 @@ if __name__ == "__main__":
     parser.add_argument("--use_focal_loss", type=bool, default=False, help="Use Focal Loss")
     parser.add_argument("--pos_weight", type=float, default=2.5, help="Positive class weight (for DeepHP 1:2.5 imbalance)")
     parser.add_argument("--gamma", type=float, default=1.0, help="Focal Loss gamma")
+    parser.add_argument("--iter", type=str, default="deephp", help="Iteration name for tracking (e.g., 'deephp' or '31.0')")
     
     args = parser.parse_args()
     
@@ -434,5 +492,6 @@ if __name__ == "__main__":
         weight_decay=args.weight_decay,
         use_focal_loss=args.use_focal_loss,
         pos_weight=args.pos_weight,
-        gamma=args.gamma
+        gamma=args.gamma,
+        iter_name=args.iter
     )

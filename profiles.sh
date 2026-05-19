@@ -16,6 +16,7 @@ function set_profile_AUDITOR() {
     export POS_WEIGHT=7.5
     export GAMMA=1.0
     export NUM_EPOCHS=20
+    export DEEPHP_EPOCHS=20
     export SAVER_METRIC="f1"
     export FREEZE_BN="False"
     export CLIP_GRAD=0.0
@@ -38,11 +39,11 @@ function set_profile_SEARCHER() {
     export WEIGHT_DECAY=0.05
     # Reduced epochs with early stopping potential
     export NUM_EPOCHS=20
+    export DEEPHP_EPOCHS=20
     export SAVER_METRIC="f1"
     export FREEZE_BN="True"
     export CLIP_GRAD=1.0
     export PCT_START=0.1
-    export WEIGHT_DECAY=0.05
     export USE_SWA="True"
     export SWA_START=12
     export JITTER=0.25
@@ -53,6 +54,8 @@ function set_profile_SEARCHER() {
 function set_profile_EXTREME() {
     export POS_WEIGHT=25.0
     export GAMMA=5.0
+    export NUM_EPOCHS=25
+    export DEEPHP_EPOCHS=25
     export SAVER_METRIC="recall"
     export POOL_TYPE="max"
 }
@@ -62,6 +65,7 @@ function set_profile_TEST() {
     export POS_WEIGHT=1.0 
     export GAMMA=3.0
     export NUM_EPOCHS=1
+    export DEEPHP_EPOCHS=1
     export SAVER_METRIC="f1"
     export POOL_TYPE="attention"
 }

@@ -46,17 +46,69 @@
 
 ## Quick Start: Execute Option 1
 
-### Option A: Two-Stage Orchestrator (Recommended)
+**🚀 RECOMMENDED: Single Command (Option A - Fully Automated)**
+
+```bash
+cd /hhome/ricse03/modelTwyla/H.-Pylori-Contamination-Detection
+chmod +x submit_transfer_learning.sh
+./submit_transfer_learning.sh
+```
+
+This is the simplest and recommended approach. Just run one command and let the pipeline handle everything for ~28 hours.
+
+### Option B: All-in-One Pipeline (Fully Automated) ✅
+
+```bash
+cd /hhome/ricse03/modelTwyla/H.-Pylori-Contamination-Detection
+
+chmod +x submit_transfer_learning.sh
+./submit_transfer_learning.sh
+
+# Or with custom profile
+PROFILE=EXTREME MODEL_NAME=convnext_tiny ITER=31.0 ./submit_transfer_learning.sh
+```
+
+This runs the complete pipeline end-to-end automatically:
+1. ✅ Pre-training orchestration (automatically calls `submit_train_deepHP.sh`)
+2. ✅ Waits for all pre-training folds + backbone averaging
+3. ✅ Fine-tuning orchestration (automatically starts after pre-training)
+4. ✅ Waits for all fine-tuning folds
+5. ✅ Creates ensemble summary
+6. ✅ Total time: ~28 hours (fully automated, no manual intervention needed)
+
+**How it works:**
+- `submit_transfer_learning.sh` automatically invokes `submit_train_deepHP.sh`
+- Captures the DeepHP summary job ID
+- Makes all fine-tuning jobs depend on that summary job via SLURM `--dependency=afterok`
+- Once pre-training completes, fine-tuning automatically starts
+- All phases orchestrated seamlessly with proper job dependencies
+
+**Monitor progress in another terminal:**
+```bash
+# Watch all jobs
+squeue -u $USER
+
+# Watch only transfer learning jobs
+squeue -u $USER | grep -E "deephp|transfer|heli"
+
+# View logs as they run
+tail -f results/slurm_deephp_*.txt  # Pre-training
+tail -f results/slurm_transfer_*.txt  # Fine-tuning
+```
+
+### Option B: Two-Stage Orchestrator (For Manual Control)
+
+**If you prefer more control over each phase:**
 
 **Stage 1: DeepHP Pre-training + Averaging**
 ```bash
 cd /hhome/ricse03/modelTwyla/H.-Pylori-Contamination-Detection
 
-chmod +x train_deepHP.sh
-./train_deepHP.sh
+chmod +x submit_train_deepHP.sh
+./submit_train_deepHP.sh
 
 # Or with custom profile
-PROFILE=SEARCHER ./train_deepHP.sh
+PROFILE=SEARCHER ./submit_train_deepHP.sh
 ```
 
 This orchestrator automatically:
@@ -66,32 +118,20 @@ This orchestrator automatically:
 4. ✅ Provides next-steps instructions
 5. ✅ Estimated time: ~20-22 hours
 
-**Stage 2: HelicoDataSet Fine-tuning**
+**Stage 2: HelicoDataSet Fine-tuning** (after Stage 1 completes)
 ```bash
 chmod +x submit_transfer_learning.sh
+PRETRAINED_BACKBONE="results/deephp_backbone_final_convnext_tiny.pth" \
 ./submit_transfer_learning.sh
 ```
 
 This orchestrator automatically:
-1. ✅ Submits 5 fold fine-tuning jobs with pre-trained backbone
-2. ✅ Waits for all folds to complete
-3. ✅ Estimated time: ~6-8 hours
+1. ✅ Syncs HelicoDataSet to local scratch
+2. ✅ Submits 5 fold fine-tuning jobs with pre-trained backbone
+3. ✅ Waits for all folds to complete
+4. ✅ Estimated time: ~6-8 hours
 
-### Option B: All-in-One Pipeline (Fully Automated)
-
-```bash
-cd /hhome/ricse03/modelTwyla/H.-Pylori-Contamination-Detection
-
-chmod +x submit_transfer_learning.sh
-./submit_transfer_learning.sh
-```
-
-This runs the complete pipeline end-to-end:
-1. Pre-training orchestration (automatically calls `train_deepHP.sh`)
-2. Waits for all pre-training folds
-3. Averages backbone weights
-4. Fine-tuning orchestration
-5. Total time: ~28 hours
+**Advantages:** Fine-grained control, manual verification between phases
 
 ### Option C: Manual Control (For Advanced Users)
 

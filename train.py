@@ -575,8 +575,9 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
     
     # Standard ImageNet normalization: IHC (Brown/Blue) doesn't use Macenko.
     train_transform = v2.Compose([
-        v2.ToImage(),
-        v2.ToDtype(torch.float32, scale=True),
+        v2.PILToTensor(),
+        v2.ToDtype(torch.float32),
+        v2.Lambda(lambda x: x / 255.0),
         v2.RandomHorizontalFlip(p=0.5),
         v2.RandomVerticalFlip(p=0.5),
         v2.RandomRotation(degrees=15),
@@ -585,8 +586,9 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
     ])
     
     val_transform = v2.Compose([
-        v2.ToImage(),
-        v2.ToDtype(torch.float32, scale=True),
+        v2.PILToTensor(),
+        v2.ToDtype(torch.float32),
+        v2.Lambda(lambda x: x / 255.0),
         v2.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
 
@@ -814,7 +816,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
 
     # --- Step 7: The Main Training Loop ---
     # We use Automatic Mixed Precision (AMP) to speed up training on the A40
-    scaler = torch.amp.GradScaler('cuda')
+    scaler = torch.cuda.amp.GradScaler()
     best_loss = float('inf')
     best_recall = 0.0 # Track sensitivity for Searcher phase
     best_f1 = 0.0    # Track F1 score for Calibration phase
