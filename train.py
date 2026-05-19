@@ -436,7 +436,7 @@ def update_swa_bn(loader, swa_model, device):
             bags = bags.unsqueeze(0)
             wrapper(bags)
 
-def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=7.5, neg_weight=1.0, gamma=1.0, num_epochs=15, saver_metric="recall", freeze_bn=False, clip_grad=0.0, pct_start=0.1, weight_decay=0.01, use_swa=True, swa_start=15, jitter=0.15, pool_type="attention", iter_name="24.9"):
+def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=7.5, neg_weight=1.0, gamma=1.0, num_epochs=15, saver_metric="recall", freeze_bn=False, clip_grad=0.0, pct_start=0.1, weight_decay=0.01, use_swa=True, swa_start=15, jitter=0.15, pool_type="attention", iter_name="24.9", pretrained_backbone_path=None, freeze_backbone=False):
     """
     Train a deep learning model for H. pylori contamination detection using k-fold cross-validation.
     This function implements a complete machine learning pipeline including:
@@ -736,6 +736,23 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
 
     # --- Step 5: Build the customized AI brain ---
     model = get_model(model_name=model_name, num_classes=2, pretrained=True, pool_type=pool_type).to(device)
+
+    # --- Step 5.1: Optional Pre-trained Backbone Loading (Transfer Learning) ---
+    if pretrained_backbone_path:
+        print(f"\n{'='*80}")
+        print(f"TRANSFER LEARNING: Loading Pre-trained Backbone from DeepHP")
+        print(f"Backbone Path: {pretrained_backbone_path}")
+        print(f"{'='*80}")
+        
+        from load_pretrained_backbone import load_pretrained_backbone
+        model = load_pretrained_backbone(model, pretrained_backbone_path, freeze_backbone=freeze_backbone)
+        
+        if freeze_backbone:
+            print(f"Backbone is FROZEN (no gradient updates)")
+        else:
+            print(f"Backbone is TRAINABLE (will fine-tune on HelicoDataSet)")
+    else:
+        print(f"Training from ImageNet pre-trained backbone (no DeepHP transfer learning)")
 
     # --- Step 6: Define the Learning Rules ---
     # Strategy C: Profile-based Loss (Iteration 19 Support)
@@ -1602,6 +1619,10 @@ if __name__ == "__main__":
     parser.add_argument("--pool_type", type=str, default="attention", choices=["attention", "max"], 
                         help="MIL aggregation pooling type (Iteration 22)")
     parser.add_argument("--iter", type=str, default="24.9", help="Iteration version for filename prefixing")
+    parser.add_argument("--pretrained_backbone_path", type=str, default=None, 
+                        help="Path to pre-trained backbone weights from DeepHP (enables transfer learning)")
+    parser.add_argument("--freeze_backbone", type=str, default="False", 
+                        help="Freeze backbone during HelicoDataSet fine-tuning (True/False)")
     
     args = parser.parse_args()
     
@@ -1622,5 +1643,7 @@ if __name__ == "__main__":
         swa_start=args.swa_start,
         jitter=args.jitter,
         pool_type=args.pool_type,
-        iter_name=args.iter
+        iter_name=args.iter,
+        pretrained_backbone_path=args.pretrained_backbone_path,
+        freeze_backbone=args.freeze_backbone == "True"
     )

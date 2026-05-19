@@ -13,10 +13,12 @@ import os
 
 # Dataset Storage Paths
 DATASET_ROOT = "/export/hhome/ricse03/HelicoDataSet"
+DEEPHP_DATASET_ROOT = "/export/hhome/ricse03/8117177"  # DeepHP H&E patches (Positive & Negative folders)
 SCRATCH_ROOT = "/tmp/ricse03_h_pylori_data"
 
 # Allow override via environment variables
 DATASET_ROOT = os.environ.get('DATASET_ROOT', DATASET_ROOT)
+DEEPHP_DATASET_ROOT = os.environ.get('DEEPHP_DATASET_ROOT', DEEPHP_DATASET_ROOT)
 SCRATCH_ROOT = os.environ.get('SCRATCH_ROOT', SCRATCH_ROOT)
 
 # Metadata Files
