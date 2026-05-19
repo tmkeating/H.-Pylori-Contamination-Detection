@@ -1,7 +1,9 @@
 """
-# H. Pylori Global Image-Level Deduplication & Inventory
-# -----------------------------------------------------
-# This script performs a byte-level audit across the entire H. Pylori dataset.
+# H. Pylori HelicoDataSet Global Image-Level Deduplication & Inventory
+# =======================================================================
+# ⚠️  THIS SCRIPT IS FOR HELICODATASET ONLY - NOT FOR DEEPHP DATASET
+# 
+# This script performs a byte-level audit across the entire HelicoDataSet.
 # It identifies:
 #   1. Global Image Duplicates: Checks all images against each other for duplicates (by MD5) regardless of folder.
 #   2. Patient Inventory: Complete list of patients in Annotated, Cropped, and HoldOut.

@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """
-# H. Pylori Dataset PNG Counter & Audit Script - AUTHORITATIVE PATCH COUNT
-# -----------------------------------------------
-# ★ Use this script for the CORRECT patch counts: 128,724 (training) + 87,602 (HoldOut) = 216,326 (total) ★
+# H. Pylori HelicoDataSet PNG Counter & Audit Script - AUTHORITATIVE PATCH COUNT
+# =============================================================================================
+# ⚠️  THIS SCRIPT IS FOR HELICODATASET ONLY - NOT FOR DEEPHP DATASET
+# 
+# ★ Use this script for the CORRECT HelicoDataSet patch counts: 128,724 (training) + 87,602 (HoldOut) = 216,326 (total) ★
 # This script performs a comprehensive audit of PNG files across both the permanent
-# dataset storage and the scratch directory (local NVMe SSD), comparing file counts
+# HelicoDataSet storage and the scratch directory (local NVMe SSD), comparing file counts
 # and patch distributions to ensure proper data synchronization and integrity.
 #
 # What it does:

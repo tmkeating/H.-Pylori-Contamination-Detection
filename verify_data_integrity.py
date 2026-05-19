@@ -1,7 +1,9 @@
 """
-# H. Pylori Data Integrity: Clinical Dataset Audit
-# -----------------------------------------------
-# This script performs a "Data Hygiene" audit on the Annotated dataset split.
+# H. Pylori HelicoDataSet Data Integrity: Clinical Dataset Audit
+# ================================================================
+# ⚠️  THIS SCRIPT IS FOR HELICODATASET ONLY - NOT FOR DEEPHP DATASET
+# 
+# This script performs a "Data Hygiene" audit on the HelicoDataSet Annotated split.
 # It validates that the patient-level labels match the slide-level diagnostic
 # ground truth and analyzes the distribution of tissue patches per patient.
 #
