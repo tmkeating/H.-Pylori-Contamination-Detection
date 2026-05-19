@@ -8,7 +8,7 @@
 #   4. Create final ensemble summary
 #
 # Usage:
-#   PROFILE=SEARCHER MODEL_NAME=convnext_tiny ITER=31.0 ./submit_transfer_learning.sh
+#   PROFILE=SEARCHER MODEL_NAME=convnext_tiny ITER=30.0 ./submit_transfer_learning.sh
 #
 # Environment Variables:
 #   PROFILE:    Model profile from profiles.sh (default: SEARCHER)

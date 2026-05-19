@@ -834,43 +834,6 @@ def main():
     pd.DataFrame(summary_data).to_csv(summary_name, index=False)
     print(f"Comprehensive summary saved to [{summary_name}]({summary_name})")
 
-    # Production Fusion: meta_fusion_results.csv with run numbers
-    fusion_name = f"results/meta_fusion_results_{run_label}.csv"
-    # Select key diagnosis columns for pathologist hand-off
-    fusion_df = ensemble_df[['PatientID', 'Actual', 'Ensemble_Pred', 'Max_Ensemble_Prob']].copy()
-    fusion_df.columns = ['ID', 'Pathology', 'AI_Decision', 'Confidence']
-    fusion_df.to_csv(fusion_name, index=False)
-    print(f"Pathology hand-off report saved to [{fusion_name}]({fusion_name})")
-
-    # Meta Fusion Summary: meta_fusion_summary.csv with run numbers
-    fusion_summary_name = f"results/meta_fusion_summary_{run_label}.csv"
-    fusion_summary_data = {
-        "Metric": [
-            "Recall", "Precision", "Accuracy", "F1_Score",
-            "Sensitivity", "Specificity", "Balanced_Accuracy",
-            "PPV_(Positive_Predictive_Value)", "NPV_(Negative_Predictive_Value)", 
-            "FPR_(False_Positive_Rate)", "FNR_(False_Negative_Rate)",
-            "Matthews_Correlation_Coefficient", "Cohen_Kappa",
-            "TP_(True_Positives)", "FP_(False_Positives)", "FN_(False_Negatives)", 
-            "TN_(True_Negatives)",
-            # Curve-Based Metrics for Meta Fusion
-            "ROC_AUC_(Mean_Prob)", "PR_AUC_(Mean_Prob)",
-            "ROC_AUC_(Max_Prob)", "PR_AUC_(Max_Prob)"
-        ],
-        "Value": [
-            rec, prec, acc, f1,
-            metrics['sensitivity'], metrics['specificity'], metrics['balanced_accuracy'],
-            metrics['ppv'], metrics['npv'], metrics['fpr'], metrics['fnr'],
-            metrics['mcc'], metrics['kappa'],
-            tp, fp, fn, tn,
-            # Curve-Based Metrics Values
-            ensemble_roc_auc, ensemble_pr_auc,
-            ensemble_roc_auc_max, ensemble_pr_auc_max
-        ]
-    }
-    pd.DataFrame(fusion_summary_data).to_csv(fusion_summary_name, index=False)
-    print(f"Meta fusion summary saved to [{fusion_summary_name}]({fusion_summary_name})")
-
     # ===== CONFIDENCE INTERVALS & BOOTSTRAP RESULTS CSV =====
     # Create comprehensive CI report for thesis publication
     bootstrap_ci_name = f"results/ensemble_voting_bootstrap_ci_{run_label}.csv"

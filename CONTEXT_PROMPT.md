@@ -117,16 +117,51 @@ Each method generates comprehensive outputs:
 
 ---
 
+## � Dataset Architecture
+
+### HelicoDataSet (IHC H. Pylori Stain)
+- **Location**: `/export/hhome/ricse03/8117180/`
+- **Structure**: Patient-hierarchical with stratified 5-fold CV
+- **Total Patches**: ~400K+ across patient cohort
+- **Classes**: Positive (H. pylori) / Negative (no bacteria)
+- **Training**: `train.py` with patient-level cross-validation
+- **Integrity**: Global MD5 deduplication via `global_duplicates_check.py`
+
+### DeepHP Dataset (H&E Histology)
+- **Location**: `/export/hhome/ricse03/8117177/` 
+- **Structure**: Flat class directories (Positive/, Negative/) - NOT patient-hierarchical
+- **Total Patches**: 394,926 patches (111,005 Positive + 283,921 Negative)
+- **Class Imbalance**: 2.56:1 (Negative:Positive ratio)
+- **Sync**: Pre-synced to `/tmp/ricse03_deephp_data/` for training
+- **Purpose**: ConvNeXt-Tiny backbone pre-training on diverse histology patterns
+- **Training**: `train_deepHP_patches.py` with 5-fold stratified CV on patches
+- **Integrity**: Global MD5 deduplication via `check_global_duplicates_deepHP.py` (verified: 0 duplicates, 394,926/394,926 patches present)
+
+---
+
 ## 📂 Core Pipeline Files
 
-### Primary Scripts
+### Primary Scripts (HelicoDataSet IHC Workflow)
 - **[train.py](train.py)**: k-fold cross-validation training engine with ConvNeXt-Tiny default, SWA BN Recalibration, Grad-CAM visualization
 - **[ensemble_voting.py](ensemble_voting.py)**: THREE FUSION METHODS with comprehensive outputs
-  - Generates `ensemble_voting_*.csv`, `meta_classifier_*.csv`, `hybrid_ensemble_*.csv` (⭐ PRIMARY)
+  - Generates `ensemble_voting_summary_*.csv`, `meta_classifier_summary_*.csv`, `hybrid_ensemble_summary_*.csv` (⭐ PRIMARY)
   - All include results CSV, summary CSV, bootstrap CI CSV, ROC/PR PNG, threshold analysis PNG, bootstrap CI PNG
   - Hybrid Ensemble output recommended for production deployment
 - **[run_h_pylori.sh](run_h_pylori.sh)**: SLURM submission wrapper for 5-fold training with automatic run numbering
 - **[profiles.sh](profiles.sh)**: Centralized hyperparameters (learning rates, pos_weight, gamma, data paths)
+
+### DeepHP Backbone Pre-Training Scripts
+- **[train_deepHP_patches.py](train_deepHP_patches.py)**: Patch-level 5-fold stratified CV for ConvNeXt-Tiny backbone pre-training on 394,926 H&E patches
+  - Auto-increments run IDs from `results/` folder state
+  - Focal Loss with configurable pos_weight for 2.56:1 imbalance
+  - Generates model weights, evaluation reports, confusion matrices, learning curves, ROC/PR curves
+- **[audit_png_count_deepHP.py](audit_png_count_deepHP.py)**: PNG patch counting and sync verification for DeepHP dataset
+  - Outputs `deephp_audit_report.csv` with class distribution
+  - Verifies all 394,926 patches synced to scratch (`/tmp/ricse03_deephp_data/`)
+- **[check_global_duplicates_deepHP.py](check_global_duplicates_deepHP.py)**: Full-file MD5 byte-level duplicate detection across DeepHP dataset
+  - Outputs: `deephp_image_inventory.csv`, `deephp_image_duplicates.csv`, `deephp_class_distribution.csv`, `deephp_patch_duplicate_audit.csv`, `suggested_deephp_blacklist.json`
+  - Verified: 0 duplicates across 394,926 patches (tested Job 113406)
+- **[submit_duplicates_check_deepHP.sh](submit_duplicates_check_deepHP.sh)**: SLURM orchestration for duplicate audit (4 CPUs, 2 hours, 32GB memory)
 
 ### Model & Data
 - **[model.py](model.py)**: HPyNet architecture with Gated Attention MIL head and ConvNeXt-Tiny backbone (default)
@@ -167,11 +202,11 @@ Each method generates comprehensive outputs:
 
 ## 🚀 Execution Workflow
 
-1. **Training** (`run_h_pylori.sh`): 5-fold CV with automatic SLURM job tracking and run numbering
-2. **Fusion** (`ensemble_voting.py`): Generate 3 methods × 6 output types = 18 files per fold
-3. **Visualization** (`generate_visuals.py`): Grad-CAM, confusion matrices, learning curves
-4. **Reporting** (`summarize_results.py`): Aggregate cross-fold metrics and bootstrap CIs
-5. **Cleanup** (`global_duplicates_check.py`): Data integrity audit before final metric reporting
+1. **Data Integrity Audit** (`global_duplicates_check.py`): MD5 deduplication verification before training starts
+2. **Training** (`run_h_pylori.sh`): 5-fold CV with automatic SLURM job tracking and run numbering
+3. **Visualization** (During/After `train.py`): Grad-CAM, confusion matrices, learning curves generated during training and saved post-fold
+4. **Fusion** (`ensemble_voting.py`): Generate 3 methods × 6 output types = 18 files per fold
+5. **Reporting** (`summarize_results.py`): Aggregate cross-fold metrics and bootstrap CIs
 
 ---
 
