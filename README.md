@@ -1,45 +1,10 @@
-# H. Pylori Contamination Detection (Iteration 26.0+: Hybrid Ensemble Fusion)
+# H. Pylori Contamination Detection (Iteration 30.0: Hybrid Ensemble Fusion)
 
 This project implements a **High-Resolution Multi-Stage MIL Pipeline** for the automated detection of *H. pylori* contamination in histology tissue samples. It features a **Searcher-Rescue** architecture designed to identify sparse bacterium clusters in high-resolution whole-slide imaging, combined with an **intelligent Hybrid Ensemble** that achieves 92.11% accuracy with perfect precision.
 
-## 🔄 (NEW) DeepHP Transfer Learning Integration
-
-**Option 1: Transfer Learning with DeepHP H&E Pre-training** (Recommended for improved accuracy)
+**Transfer Learning with DeepHP H&E Pre-training** (Recommended for improved accuracy)
 
 The pipeline now supports backbone pre-training on the **DeepHP dataset** (394,926 H&E-stained histology patches, 111K positive / 283K negative). This dramatically improves feature learning before fine-tuning on the patient-level IHC data from HelicoDataSet.
-
-### Quick Start: Transfer Learning Path
-
-**Phase 1A: Pre-train Backbone on DeepHP (H&E Patches)**
-```bash
-# Train on all 5 folds in parallel (recommended)
-for i in {0..4}; do
-  sbatch -J deephp_f$i train_deepHP.sh $i &
-done
-
-# Or run sequentially for easier monitoring
-python3 train_deepHP_patches.py --fold 0 --num_folds 5 --num_epochs 20
-```
-
-**Phase 1B: Average Backbone Across Folds**
-```bash
-# Creates unified pre-trained backbone from 5-fold models
-python3 -c "from load_pretrained_backbone import average_backbone_weights; \
-  average_backbone_weights(
-    [f'results/deephp_backbone_pretrained_convnext_tiny_f{i}.pth' for i in range(5)],
-    'results/deephp_backbone_final_convnext_tiny.pth'
-  )"
-```
-
-**Phase 1C: Fine-tune on HelicoDataSet with Pre-trained Backbone**
-```bash
-# Now train on patient-level IHC data using pre-trained backbone
-PRETRAINED_BACKBONE="results/deephp_backbone_final_convnext_tiny.pth"
-
-for i in {0..4}; do
-  sbatch -J heli_ft_f$i run_h_pylori.sh $i $PRETRAINED_BACKBONE &
-done
-```
 
 ### Benefits of Transfer Learning
 - ✅ **+3-5% accuracy improvement** (from 92.11% towards 95%+) due to backbone initialization
@@ -121,18 +86,25 @@ This script automatically orchestrates:
 
 *Outputs: `results/*_model_brain.pth` (trained models), `results/*_patient_consensus.csv` (per-fold predictions), `results/*_evaluation_report.csv` (fold metrics)*
 
-**Alternative: Direct Training (Without Transfer Learning)**
+**Alternative: Training Without Transfer Learning**
 If skipping transfer learning, run:
 ```bash
 PROFILE=SEARCHER MODEL_NAME=convnext_tiny ITER=30.0 ./submit_all_folds.sh
 ```
 
-### 3. Final Hybrid Ensemble & Fusion (⭐ RECOMMENDED METHOD)
-Intelligently fuses multiple fusion approaches (Ensemble Voting, Meta-Classifier, and **Hybrid Ensemble**) to produce the best clinical predictions.
-```bash
-# Generate the 92.11% Hybrid Ensemble (Production-Ready)
-python3 ensemble_voting.py --runs 302,303,299,300,301
-```
+This script automatically orchestrates:
+1. **Pre-sync** (syncs HelicoDataSet to scratch)
+2. **5-Fold Training** (trains models on all folds in parallel)
+3. **Summary & Ensemble Fusion** (automatically runs after all folds complete)
+
+*Outputs: Same as transfer learning workflow - trained models, fold predictions, and ensemble results*
+
+### 3. Ensemble Results (Automatic)
+Both training workflows (`submit_transfer_learning.sh` and `submit_all_folds.sh`) automatically generate ensemble voting, meta-classifier, and hybrid ensemble results after all training folds complete. **No manual step required.**
+
+The automated summary job runs:
+- `summarize_results.py` — Aggregates cross-fold metrics with bootstrap confidence intervals
+- `ensemble_voting.py` — Generates three fusion methods for comparison
 
 **Primary Output (Use These Files):**
 - `hybrid_ensemble_results_*.csv` - Patient predictions with confidence scores
@@ -145,6 +117,13 @@ python3 ensemble_voting.py --runs 302,303,299,300,301
 - `meta_classifier_summary_*.csv` - Meta-classifier comparison
 
 *Key Result: **92.11% Accuracy | 100% Precision (Zero False Positives) | 100% Specificity***
+
+**Manual Run** (if needed):
+If you want to regenerate ensemble results manually from existing fold results:
+```bash
+python3 ensemble_voting.py
+
+```
 
 ### 4. (Optional). Interpretability Analysis & Reports (Grad-CAM & Metrics)
 Generate visual evidence for the model's decisions and patch/patient-level metrics. Grad-CAM visualizations are generated during training, but you can also create supplementary analysis with this script:
@@ -210,6 +189,7 @@ ConvNeXt-Small's additional parameters did not translate to improved performance
 
 
 ## 🛠️ Key Pipeline Features
+- **Macenko Stain Normalization**: Applied during DeepHP H&E pre-training to normalize color variations across different staining protocols and tissue scanners, improving generalization to clinical IHC stains.
 - **Stride-128 Rescue Pass**: Dense-window overlap to "catch" sparse bacteria that fall in gaps at default strides.
 - **Top-3 Mixed MIL**: Balances sensitivity with noise resilience by averaging the top 3 most confident tissue chunks.
 - **Contrast-Boosted TTA**: 16-way transforms (8 spatial + 1.1x contrast jitter) to "pop" faint IHC signals.
@@ -225,3 +205,38 @@ ConvNeXt-Small's additional parameters did not translate to improved performance
 - **Compute**: Optimized for **NVIDIA A40/A100 (48GB/80GB)**.
 - **Precision**: `torch.set_float32_matmul_precision('high')`.
 - **Data Locality**: Automated node-local `/tmp` storage sync via `run_h_pylori.sh`.
+
+
+
+### Quick Start: Manual Transfer Learning Path
+
+**Phase 1A: Pre-train Backbone on DeepHP (H&E Patches)**
+```bash
+# Train on all 5 folds in parallel (recommended)
+for i in {0..4}; do
+  sbatch -J deephp_f$i train_deepHP.sh $i &
+done
+
+# Or run sequentially for easier monitoring
+python3 train_deepHP_patches.py --fold 0 --num_folds 5 --num_epochs 20
+```
+
+**Phase 1B: Average Backbone Across Folds**
+```bash
+# Creates unified pre-trained backbone from 5-fold models
+python3 -c "from load_pretrained_backbone import average_backbone_weights; \
+  average_backbone_weights(
+    [f'results/deephp_backbone_pretrained_convnext_tiny_f{i}.pth' for i in range(5)],
+    'results/deephp_backbone_final_convnext_tiny.pth'
+  )"
+```
+
+**Phase 1C: Fine-tune on HelicoDataSet with Pre-trained Backbone**
+```bash
+# Now train on patient-level IHC data using pre-trained backbone
+PRETRAINED_BACKBONE="results/deephp_backbone_final_convnext_tiny.pth"
+
+for i in {0..4}; do
+  sbatch -J heli_ft_f$i run_h_pylori.sh $i $PRETRAINED_BACKBONE &
+done
+```
