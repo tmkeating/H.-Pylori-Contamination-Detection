@@ -343,8 +343,11 @@ except Exception as e:
 with open(exclude_filter_file, 'w') as out:
     for exclude in excludes:
         out.write(exclude + "\n")
+    # CRITICAL: Must include directories and all files BEFORE the final exclude-all rule
+    # Without these, rsync will exclude everything including the data we want to copy!
     out.write("+ */\n")
-    out.write("- *\n")
+    out.write("+ **\n")  # Include all files and subdirectories
+    out.write("- *\n")   # Finally, exclude anything not explicitly included
 
 print(f"[DEBUG] Wrote {len(excludes)} total exclusion rules")
 PYTHON_EOF
@@ -595,8 +598,11 @@ except Exception as e:
 with open(exclude_filter_file, 'w') as out:
     for exclude in excludes:
         out.write(exclude + "\n")
+    # CRITICAL: Must include directories and all files BEFORE the final exclude-all rule
+    # Without these, rsync will exclude everything including the data we want to copy!
     out.write("+ */\n")
-    out.write("- *\n")
+    out.write("+ **\n")  # Include all files and subdirectories
+    out.write("- *\n")   # Finally, exclude anything not explicitly included
 
 print(f"[DEBUG] Wrote {len(excludes)} total exclusion rules")
 PYTHON_EOF
