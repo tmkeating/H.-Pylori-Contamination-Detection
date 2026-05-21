@@ -349,24 +349,21 @@ with open(exclude_filter_file, 'w') as out:
 print(f"[DEBUG] Wrote {len(excludes)} total exclusion rules")
 PYTHON_EOF
 
-# Sync folders with filter file using exclusive lock
+# Sync folders with filter file (no lock - SLURM handles job isolation)
 echo "[PRESYNC] Syncing HelicoDataSet to local scratch..."
-SYNC_LOCK_FILE="/tmp/h_pylori_sync.lock"
-{
-    flock -x 200
-    mkdir -p "$LOCAL_SCRATCH/CrossValidation"
-    if [ -f "$EXCLUDE_FILTER_FILE" ]; then
-        rsync -aq --filter="merge $EXCLUDE_FILTER_FILE" "$REMOTE_DATA/CrossValidation/Annotated" "$LOCAL_SCRATCH/CrossValidation/"
-        rsync -aq --filter="merge $EXCLUDE_FILTER_FILE" "$REMOTE_DATA/CrossValidation/Cropped" "$LOCAL_SCRATCH/CrossValidation/"
-        rsync -aq --filter="merge $EXCLUDE_FILTER_FILE" "$REMOTE_DATA/HoldOut" "$LOCAL_SCRATCH/"
-        rm -f "$EXCLUDE_FILTER_FILE"
-    else
-        echo "[RSYNC] Filter file not found - syncing all files"
-        rsync -aq "$REMOTE_DATA/CrossValidation/Annotated" "$LOCAL_SCRATCH/CrossValidation/"
-        rsync -aq "$REMOTE_DATA/CrossValidation/Cropped" "$LOCAL_SCRATCH/CrossValidation/"
-        rsync -aq "$REMOTE_DATA/HoldOut" "$LOCAL_SCRATCH/"
-    fi
-} 200>"$SYNC_LOCK_FILE"
+mkdir -p "$LOCAL_SCRATCH/CrossValidation"
+if [ -f "$EXCLUDE_FILTER_FILE" ]; then
+    echo "[RSYNC] Syncing with exclusion filters..."
+    rsync -aq --filter="merge $EXCLUDE_FILTER_FILE" "$REMOTE_DATA/CrossValidation/Annotated" "$LOCAL_SCRATCH/CrossValidation/" || { echo "[ERROR] Sync failed for Annotated"; exit 1; }
+    rsync -aq --filter="merge $EXCLUDE_FILTER_FILE" "$REMOTE_DATA/CrossValidation/Cropped" "$LOCAL_SCRATCH/CrossValidation/" || { echo "[ERROR] Sync failed for Cropped"; exit 1; }
+    rsync -aq --filter="merge $EXCLUDE_FILTER_FILE" "$REMOTE_DATA/HoldOut" "$LOCAL_SCRATCH/" || { echo "[ERROR] Sync failed for HoldOut"; exit 1; }
+    rm -f "$EXCLUDE_FILTER_FILE"
+else
+    echo "[RSYNC] Filter file not found - syncing all files without filtering"
+    rsync -aq "$REMOTE_DATA/CrossValidation/Annotated" "$LOCAL_SCRATCH/CrossValidation/" || { echo "[ERROR] Sync failed for Annotated"; exit 1; }
+    rsync -aq "$REMOTE_DATA/CrossValidation/Cropped" "$LOCAL_SCRATCH/CrossValidation/" || { echo "[ERROR] Sync failed for Cropped"; exit 1; }
+    rsync -aq "$REMOTE_DATA/HoldOut" "$LOCAL_SCRATCH/" || { echo "[ERROR] Sync failed for HoldOut"; exit 1; }
+fi
 
 echo "[PRESYNC] Sync complete - calculating statistics..."
 echo ""
@@ -607,21 +604,20 @@ PYTHON_EOF
 # Sync folders with filter file using exclusive lock
 echo "[PRESYNC] Syncing HelicoDataSet to local scratch..."
 SYNC_LOCK_FILE="/tmp/h_pylori_sync.lock"
-{
-    flock -x 200
-    mkdir -p "$LOCAL_SCRATCH/CrossValidation"
-    if [ -f "$EXCLUDE_FILTER_FILE" ]; then
-        rsync -aq --filter="merge $EXCLUDE_FILTER_FILE" "$REMOTE_DATA/CrossValidation/Annotated" "$LOCAL_SCRATCH/CrossValidation/"
-        rsync -aq --filter="merge $EXCLUDE_FILTER_FILE" "$REMOTE_DATA/CrossValidation/Cropped" "$LOCAL_SCRATCH/CrossValidation/"
-        rsync -aq --filter="merge $EXCLUDE_FILTER_FILE" "$REMOTE_DATA/HoldOut" "$LOCAL_SCRATCH/"
-        rm -f "$EXCLUDE_FILTER_FILE"
-    else
-        echo "[RSYNC] Filter file not found - syncing all files"
-        rsync -aq "$REMOTE_DATA/CrossValidation/Annotated" "$LOCAL_SCRATCH/CrossValidation/"
-        rsync -aq "$REMOTE_DATA/CrossValidation/Cropped" "$LOCAL_SCRATCH/CrossValidation/"
-        rsync -aq "$REMOTE_DATA/HoldOut" "$LOCAL_SCRATCH/"
-    fi
-} 200>"$SYNC_LOCK_FILE"
+# Sync folders with filter file (no lock - SLURM handles job isolation)
+mkdir -p "$LOCAL_SCRATCH/CrossValidation"
+if [ -f "$EXCLUDE_FILTER_FILE" ]; then
+    echo "[RSYNC] Syncing with exclusion filters..."
+    rsync -aq --filter="merge $EXCLUDE_FILTER_FILE" "$REMOTE_DATA/CrossValidation/Annotated" "$LOCAL_SCRATCH/CrossValidation/" || { echo "[ERROR] Sync failed for Annotated"; exit 1; }
+    rsync -aq --filter="merge $EXCLUDE_FILTER_FILE" "$REMOTE_DATA/CrossValidation/Cropped" "$LOCAL_SCRATCH/CrossValidation/" || { echo "[ERROR] Sync failed for Cropped"; exit 1; }
+    rsync -aq --filter="merge $EXCLUDE_FILTER_FILE" "$REMOTE_DATA/HoldOut" "$LOCAL_SCRATCH/" || { echo "[ERROR] Sync failed for HoldOut"; exit 1; }
+    rm -f "$EXCLUDE_FILTER_FILE"
+else
+    echo "[RSYNC] Filter file not found - syncing all files without filtering"
+    rsync -aq "$REMOTE_DATA/CrossValidation/Annotated" "$LOCAL_SCRATCH/CrossValidation/" || { echo "[ERROR] Sync failed for Annotated"; exit 1; }
+    rsync -aq "$REMOTE_DATA/CrossValidation/Cropped" "$LOCAL_SCRATCH/CrossValidation/" || { echo "[ERROR] Sync failed for Cropped"; exit 1; }
+    rsync -aq "$REMOTE_DATA/HoldOut" "$LOCAL_SCRATCH/" || { echo "[ERROR] Sync failed for HoldOut"; exit 1; }
+fi
 
 echo "[PRESYNC] Sync complete - calculating statistics..."
 echo ""
@@ -685,6 +681,15 @@ fi
 PRE_SYNC_ID=$(echo $PRE_SYNC_JOB | awk '{print $4}')
 PRE_SYNC_DEPENDENCY="afterok:$PRE_SYNC_ID"
 echo "Pre-sync job ID: $PRE_SYNC_ID"
+
+# Validate that we got a valid job ID
+if [ -z "$PRE_SYNC_ID" ] || [ "$PRE_SYNC_ID" = "" ]; then
+    echo "ERROR: Failed to extract pre-sync job ID!"
+    echo "Pre-sync submission output: $PRE_SYNC_JOB"
+    exit 1
+fi
+
+echo "✓ Pre-sync dependency set: $PRE_SYNC_DEPENDENCY"
 echo ""
 
 # 2. Submit 5 fine-tuning jobs (parallel, depend on pre-sync)
@@ -741,7 +746,14 @@ TRAIN_EOF
 )
     
     JOB_ID=$(echo $JOB_OUT | awk '{print $4}')
-    echo "  → Job ID: $JOB_ID"
+    
+    if [ -z "$JOB_ID" ] || [ "$JOB_ID" = "" ]; then
+        echo "  ✗ ERROR: Failed to submit fold $FOLD!"
+        echo "  Submission output: $JOB_OUT"
+        exit 1
+    fi
+    
+    echo "  ✓ Job ID: $JOB_ID (will start after pre-sync: $PRE_SYNC_ID)"
     
     # Add to dependency list
     if [ -z "$DEPENDENCIES" ]; then
@@ -756,6 +768,19 @@ done
 echo ""
 echo "=========================================================================="
 echo "All 5 fine-tuning jobs submitted. Scheduling final summary + ensemble job..."
+echo "=========================================================================="
+echo "DEPENDENCY CHAIN SUMMARY"
+echo "=========================================================================="
+echo ""
+echo "Pre-sync Job:     $PRE_SYNC_ID"
+echo "Fine-tuning Jobs: $DEPENDENCIES"
+echo "  (All depend on pre-sync: $PRE_SYNC_ID)"
+echo ""
+echo "Execution Order:"
+echo "  1. Pre-sync ($PRE_SYNC_ID) - Syncs data to scratch"
+echo "  2. Fine-tuning folds (parallel, wait for step 1)"
+echo "  3. Summary & ensemble (waits for step 2)"
+echo ""
 echo "=========================================================================="
 echo ""
 

@@ -547,6 +547,42 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
         else:
             # Last resort: look in the parent directory
             base_data_path = os.path.abspath(os.path.join(os.getcwd(), "..", "HelicoDataSet"))
+    
+    # --- Step 2.1: Ensure data is synced to scratch if using scratch ---
+    # If we're using SCRATCH_ROOT but the data directories don't exist yet, sync from DATASET_ROOT
+    # This is a FALLBACK only - normally the pre-sync SLURM job should have done this
+    scratch_train_dir = os.path.join(SCRATCH_ROOT, "CrossValidation/Annotated")
+    scratch_cropped_dir = os.path.join(SCRATCH_ROOT, "CrossValidation/Cropped")
+    
+    if base_data_path == SCRATCH_ROOT and not os.path.exists(scratch_train_dir):
+        print(f"[SYNC] WARNING: Scratch data not found at {SCRATCH_ROOT}")
+        print(f"[SYNC] This suggests the pre-sync SLURM job may not have completed.")
+        print(f"[SYNC] Attempting emergency sync from permanent storage: {DATASET_ROOT}")
+        import subprocess
+        try:
+            os.makedirs(os.path.join(SCRATCH_ROOT, "CrossValidation"), exist_ok=True)
+            subprocess.run(["rsync", "-aq", 
+                          os.path.join(DATASET_ROOT, "CrossValidation/Annotated"),
+                          os.path.join(SCRATCH_ROOT, "CrossValidation/")],
+                         check=True, timeout=300)
+            subprocess.run(["rsync", "-aq",
+                          os.path.join(DATASET_ROOT, "CrossValidation/Cropped"),
+                          os.path.join(SCRATCH_ROOT, "CrossValidation/")],
+                         check=True, timeout=300)
+            subprocess.run(["rsync", "-aq",
+                          os.path.join(DATASET_ROOT, "HoldOut"),
+                          os.path.join(SCRATCH_ROOT, "/")],
+                         check=True, timeout=300)
+            # Also copy metadata files
+            subprocess.run(["cp", os.path.join(DATASET_ROOT, "*.csv"), SCRATCH_ROOT],
+                         check=False, shell=True)
+            subprocess.run(["cp", os.path.join(DATASET_ROOT, "*.xlsx"), SCRATCH_ROOT],
+                         check=False, shell=True)
+            print(f"[SYNC] Emergency sync completed (this should not be necessary)")
+        except Exception as e:
+            print(f"[SYNC] ERROR: Emergency sync failed ({e}), falling back to {DATASET_ROOT}")
+            print(f"[SYNC] CRITICAL: Check that pre-sync SLURM job (transfer_presync) completed successfully")
+            base_data_path = DATASET_ROOT
         
         print(f"Primary data path not found. Using: {base_data_path}")
     else:
@@ -568,6 +604,21 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
     cropped_dir = os.path.join(base_data_path, "CrossValidation/Cropped")
     # This folder contains patients that the AI has NEVER seen during training.
     holdout_dir = os.path.join(base_data_path, "HoldOut")
+
+    # --- Step 2.2: Validate data directories exist and have content ---
+    print(f"Validating data at: {base_data_path}")
+    if not os.path.exists(train_dir):
+        raise FileNotFoundError(f"Training data directory not found: {train_dir}")
+    if not os.path.exists(patient_csv):
+        raise FileNotFoundError(f"Patient CSV not found: {patient_csv}")
+    if not os.path.exists(patch_csv):
+        raise FileNotFoundError(f"Patch Excel file not found: {patch_csv}")
+    
+    # Check that directories are not empty
+    train_files = os.listdir(train_dir) if os.path.isdir(train_dir) else []
+    if len(train_files) == 0:
+        raise ValueError(f"Training directory is empty: {train_dir}")
+    print(f"✓ Data validation passed ({len(train_files)} bags found in training directory)")
 
     # --- Step 3: Define "Study Habits" (Transforms) ---
     # Global imports ensure v2 is accessible within the function scope
