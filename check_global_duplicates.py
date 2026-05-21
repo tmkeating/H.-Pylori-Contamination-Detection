@@ -171,7 +171,7 @@ def run_global_audit():
             folders_and_sets = []
             for p in paths:
                 # Extract folder and set from the path
-                # Path format example: /export/hhome/ricse03/HelicoDataSet/CrossValidation/Annotated/123/img.png
+                # Path format example: /export/hhome/tkeating/HelicoDataSet/CrossValidation/Annotated/123/img.png
                 parts = p.split('/')
                 set_name = ""
                 folder_name = ""

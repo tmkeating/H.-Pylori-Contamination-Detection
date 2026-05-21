@@ -10,8 +10,8 @@
 # and patch distributions to ensure proper data synchronization and integrity.
 #
 # What it does:
-#   1. Counts PNG files in the permanent dataset (/export/hhome/ricse03/HelicoDataSet)
-#   2. Counts PNG files in the scratch directory (/tmp/ricse03_h_pylori_data)
+#   1. Counts PNG files in the permanent dataset (/export/hhome/tkeating/HelicoDataSet)
+#   2. Counts PNG files in the scratch directory (/tmp/tkeating_h_pylori_data)
 #   3. Generates patient-by-patient breakdowns for both locations
 #   4. Reports sync status (are all permanent files present in scratch?)
 #   5. Verifies blacklist exclusion at rsync level (3,283 patches correctly excluded)
@@ -36,7 +36,7 @@
 #
 # COUNTING SOURCES:
 #
-#   A) PERMANENT STORAGE (original dataset in /export/hhome/ricse03/HelicoDataSet):
+#   A) PERMANENT STORAGE (original dataset in /export/hhome/tkeating/HelicoDataSet):
 #      - Count:     ~219,609 patches
 #      - Source:    All PNG files physically stored in HelicoDataSet
 #      - Includes:  All files in Annotated, Cropped, HoldOut directories
@@ -46,7 +46,7 @@
 #   B) SCRATCH DIRECTORY (CrossValidation folder after rsync with blacklist exclusion):
 #      - Count:     ~128,724 patches (ACTUAL TRAINING DATASET)
 #      - Breakdown: CrossValidation/Annotated (~2,953) + CrossValidation/Cropped (~125,771)
-#      - Source:    /tmp/ricse03_h_pylori_data/CrossValidation (local NVMe SSD)
+#      - Source:    /tmp/tkeating_h_pylori_data/CrossValidation (local NVMe SSD)
 #      - Includes:  All PNG files actually present in CrossValidation after blacklist excluded at rsync
 #      - Excludes:  Blacklist items excluded by rsync (3,283 patches never synced)
 #      - Excludes:  HoldOut folder (separate evaluation set)
@@ -55,7 +55,7 @@
 #
 #   C) HOLDOUT/EVALUATION DATASET (HoldOut folder in scratch, separate test set):
 #      - Count:     ~87,602 patches (FOR FINAL EVALUATION ONLY)
-#      - Source:    /tmp/ricse03_h_pylori_data/HoldOut (local NVMe SSD after rsync)
+#      - Source:    /tmp/tkeating_h_pylori_data/HoldOut (local NVMe SSD after rsync)
 #      - Purpose:   Independent test set, never used for training
 #      - Note:      Patient-level separation ensures no leakage
 #

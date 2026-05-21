@@ -34,7 +34,7 @@ mkdir -p results/rescue_ensemble
 
 # --- LOCAL SCRATCH SETUP (Skip image sync if already present or just use remote) ---
 # We'll rely on the existing dataset paths in rescue_inference.py which already 
-# check for /tmp/ricse03_h_pylori_data first.
+# check for /tmp/tkeating_h_pylori_data first.
 
 # Activate virtual environment
 source ../venv/bin/activate

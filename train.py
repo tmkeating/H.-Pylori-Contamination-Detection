@@ -190,7 +190,7 @@ Visualizations (PNG):
 REQUIREMENTS
 ------------
   - PyTorch with GPU support (CUDA recommended for reasonable training time)
-  - H. Pylori dataset at: /export/hhome/ricse03/HelicoDataSet or ../HelicoDataSet
+  - H. Pylori dataset at: /export/hhome/tkeating/HelicoDataSet or ../HelicoDataSet
   - 32GB+ GPU VRAM recommended (adjust batch size if needed)
   - Models: ConvNeXt-Tiny or ResNet50 from torchvision
 

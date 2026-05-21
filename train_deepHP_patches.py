@@ -17,7 +17,7 @@ Differences from train.py (patient-level MIL training):
 
 Configuration:
     DeepHP dataset path is set via config.py (DEEPHP_DATASET_ROOT).
-    Default: /export/hhome/ricse03/8117177
+    Default: /export/hhome/tkeating/8117177
     Override: export DEEPHP_DATASET_ROOT=/path/to/deephp
 
 Usage:

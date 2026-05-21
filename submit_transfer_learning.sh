@@ -49,7 +49,7 @@ set -e  # Exit on error
 MODEL_NAME=${MODEL_NAME:-"convnext_tiny"}
 PROFILE=${PROFILE:-"SEARCHER"}
 ITER=${ITER:-"31.0"}
-PRETRAINED_BACKBONE="results/deephp_backbone_final_convnext_tiny.pth"
+PRETRAINED_BACKBONE="results/deephp_backbone_final_${MODEL_NAME}.pth"
 FREEZE_BACKBONE=${FREEZE_BACKBONE:-"False"}
 SKIP_PRETRAINING=${SKIP_PRETRAINING:-"False"}
 DEEPHP_SUMMARY_JOB_ID=${DEEPHP_SUMMARY_JOB_ID:-""}
@@ -225,16 +225,16 @@ fi
 # Check pre-trained backbone exists (only required when NOT skipping pre-training)
 # When SKIP_PRETRAINING=True, assume backbone already exists from a previous run
 if [ "$SKIP_PRETRAINING" != "True" ] && [ "$SKIP_PRETRAINING" != "true" ]; then
-    if [ ! -f "results/deephp_backbone_final_convnext_tiny.pth" ]; then
-        echo "ERROR: Pre-trained backbone not found at results/deephp_backbone_final_convnext_tiny.pth"
+    if [ ! -f "results/deephp_backbone_final_${MODEL_NAME}.pth" ]; then
+        echo "ERROR: Pre-trained backbone not found at results/deephp_backbone_final_${MODEL_NAME}.pth"
         echo "Please run Phase 1 (pre-training) or set SKIP_PRETRAINING=True if using existing backbone"
         exit 1
     fi
     echo "✓ Pre-trained backbone found"
 else
     echo "[INFO] SKIP_PRETRAINING=True: Assuming backbone exists from previous run"
-    if [ ! -f "results/deephp_backbone_final_convnext_tiny.pth" ]; then
-        echo "WARNING: Pre-trained backbone not found at results/deephp_backbone_final_convnext_tiny.pth"
+    if [ ! -f "results/deephp_backbone_final_${MODEL_NAME}.pth" ]; then
+        echo "WARNING: Pre-trained backbone not found at results/deephp_backbone_final_${MODEL_NAME}.pth"
         echo "         Fine-tuning will proceed with random initialization if file is missing"
     else
         echo "✓ Pre-trained backbone found"
@@ -490,16 +490,16 @@ fi
 # Check pre-trained backbone exists (only required when NOT skipping pre-training)
 # When SKIP_PRETRAINING=True, assume backbone already exists from a previous run
 if [ "$SKIP_PRETRAINING" != "True" ] && [ "$SKIP_PRETRAINING" != "true" ]; then
-    if [ ! -f "results/deephp_backbone_final_convnext_tiny.pth" ]; then
-        echo "ERROR: Pre-trained backbone not found at results/deephp_backbone_final_convnext_tiny.pth"
+    if [ ! -f "results/deephp_backbone_final_${MODEL_NAME}.pth" ]; then
+        echo "ERROR: Pre-trained backbone not found at results/deephp_backbone_final_${MODEL_NAME}.pth"
         echo "Please run Phase 1 (pre-training) or set SKIP_PRETRAINING=True if using existing backbone"
         exit 1
     fi
     echo "✓ Pre-trained backbone found"
 else
     echo "[INFO] SKIP_PRETRAINING=True: Assuming backbone exists from previous run"
-    if [ ! -f "results/deephp_backbone_final_convnext_tiny.pth" ]; then
-        echo "WARNING: Pre-trained backbone not found at results/deephp_backbone_final_convnext_tiny.pth"
+    if [ ! -f "results/deephp_backbone_final_${MODEL_NAME}.pth" ]; then
+        echo "WARNING: Pre-trained backbone not found at results/deephp_backbone_final_${MODEL_NAME}.pth"
         echo "         Fine-tuning will proceed with random initialization if file is missing"
     else
         echo "✓ Pre-trained backbone found"
@@ -791,7 +791,7 @@ TRAIN_CMD="python3 train.py \
 
 # Only include backbone path if not skipping pre-training
 if [ "\$SKIP_PRETRAINING" != "True" ] && [ "\$SKIP_PRETRAINING" != "true" ]; then
-    TRAIN_CMD="\$TRAIN_CMD --pretrained_backbone_path results/deephp_backbone_final_convnext_tiny.pth"
+    TRAIN_CMD="\$TRAIN_CMD --pretrained_backbone_path results/deephp_backbone_final_${MODEL_NAME}.pth"
 fi
 
 TRAIN_CMD="\$TRAIN_CMD --freeze_backbone \$FREEZE_BACKBONE"
@@ -871,7 +871,9 @@ echo ""
 ITER=$(python3 -c "
 import glob
 from pathlib import Path
-files = sorted(glob.glob('results/*_convnext_tiny_model_brain.pth'))
+# Search for model files matching the current model architecture
+model_pattern = 'results/*_${MODEL_NAME}_model_brain.pth'
+files = sorted(glob.glob(model_pattern))
 if files:
     # Extract iteration from filename like: 31_25.0_107840_f0_convnext_tiny_model_brain.pth
     filename = Path(files[-1]).stem

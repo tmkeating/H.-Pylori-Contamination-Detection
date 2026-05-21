@@ -11,7 +11,7 @@
 ### ✅ Phase 1: Created Transfer Learning Infrastructure
 
 1. **dataset_deepHP.py** (334 lines)
-   - Loads DeepHP H&E patches from `/export/hhome/ricse03/8117177/` (394,926 total patches)
+   - Loads DeepHP H&E patches from `/export/hhome/tkeating/8117177/` (394,926 total patches)
    - Stratified k-fold splits maintaining 2.56:1 class balance
    - Compatible with PyTorch DataLoader
    - Tested ✓ (Fold 0: 315,941 train, 78,985 val patches)
@@ -49,7 +49,7 @@
 **🚀 RECOMMENDED: Single Command (Option A - Fully Automated)**
 
 ```bash
-cd /hhome/ricse03/modelTwyla/H.-Pylori-Contamination-Detection
+cd /hhome/tkeating/model/H.-Pylori-Contamination-Detection
 chmod +x submit_transfer_learning.sh
 ./submit_transfer_learning.sh
 ```
@@ -59,7 +59,7 @@ This is the simplest and recommended approach. Just run one command and let the 
 ### Option A: All-in-One Pipeline (Fully Automated) ✅
 
 ```bash
-cd /hhome/ricse03/modelTwyla/H.-Pylori-Contamination-Detection
+cd /hhome/tkeating/modelTwyla/H.-Pylori-Contamination-Detection
 
 chmod +x submit_transfer_learning.sh
 ./submit_transfer_learning.sh
@@ -102,7 +102,7 @@ tail -f results/slurm_transfer_*.txt  # Fine-tuning
 
 **Stage 1: DeepHP Pre-training + Averaging**
 ```bash
-cd /hhome/ricse03/modelTwyla/H.-Pylori-Contamination-Detection
+cd /hhome/tkeating/model/H.-Pylori-Contamination-Detection
 
 chmod +x submit_train_deepHP.sh
 ./submit_train_deepHP.sh
@@ -246,8 +246,8 @@ wait
 
 ### "DeepHP dataset not found"
 ```bash
-ls -la /export/hhome/ricse03/8117177/Positive | wc -l  # Should show 111,005
-ls -la /export/hhome/ricse03/8117177/Negative | wc -l  # Should show 283,921
+ls -la /export/hhome/tkeating/8117177/Positive | wc -l  # Should show 111,005
+ls -la /export/hhome/tkeating/8117177/Negative | wc -l  # Should show 283,921
 ```
 
 ### "Backbone loading failed"

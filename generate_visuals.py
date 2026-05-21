@@ -77,7 +77,7 @@ REQUIREMENTS
 ------------
   - PyTorch with GPU support (CUDA recommended)
   - Trained model checkpoint at: results/{RUN_ID}_f{FOLD}_{MODEL_NAME}_model_brain.pth
-  - H. Pylori dataset at: /export/hhome/ricse03/HelicoDataSet or ../HelicoDataSet
+  - H. Pylori dataset at: /export/hhome/tkeating/HelicoDataSet or ../HelicoDataSet
 
 NOTES
 -----
@@ -98,8 +98,12 @@ import sys
 import argparse
 import gc
 from tqdm import tqdm
-from config import DATASET_ROOT, PATIENT_CSV, PATCH_XLSX, CV_ANNOTATED, HOLDOUT
+from config import DATASET_ROOT, DEEPHP_DATASET_ROOT, PATIENT_CSV, PATCH_XLSX, CV_ANNOTATED, HOLDOUT
 from dataset import HPyloriDataset
+try:
+    from dataset_deepHP import DeepHPDataset
+except ImportError:
+    DeepHPDataset = None
 from model import get_model
 import torch.nn.functional as F
 from sklearn.metrics import (
@@ -114,15 +118,8 @@ from visualization_utils import (
 )
 
 # --- Config ---
-# These paths are set through command line arguments
+# These paths are set through config.py for consistency across all scripts
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-# Data Paths
-BASE_PATH = DATASET_ROOT
-if not os.path.exists(BASE_PATH):
-    BASE_PATH = os.path.abspath(os.path.join(os.getcwd(), "..", "HelicoDataSet"))
-TRAIN_DIR = CV_ANNOTATED
-HOLDOUT_DIR = HOLDOUT
 
 # Preprocessing (Deterministic for validation)
 def det_preprocess_batch(batch, training=False):
@@ -141,25 +138,43 @@ VAL_TRANSFORM = transforms.Compose([
     transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
 ])
 
-def full_visual_report(RUN_ID, MODEL_PATH, MODEL_NAME="convnext_tiny", fold_idx=0, num_folds=5):
+def full_visual_report(RUN_ID, MODEL_PATH, MODEL_NAME="convnext_tiny", fold_idx=0, num_folds=5, dataset_type="helicodataset"):
     # Extract full prefix from model filename to include iteration name and SLURM job ID
     # e.g., 317_IntegrityRunV7_108024_f4_convnext_tiny from 317_IntegrityRunV7_108024_f4_convnext_tiny_model_brain.pth
     model_filename = os.path.basename(MODEL_PATH)
     # Remove _model_brain.pth or _swa_model_brain.pth suffix
     full_prefix = model_filename.replace("_swa_model_brain.pth", "").replace("_model_brain.pth", "")
     
-    print(f"--- Generating Visual Report for {full_prefix} (Model: {MODEL_NAME}) ---")
+    print(f"\n{'='*80}")
+    print(f"Generating Visual Report for {full_prefix}")
+    print(f"Dataset: {dataset_type.upper()} | Model: {MODEL_NAME} | Fold: {fold_idx}/{num_folds}")
+    print(f"{'='*80}\n")
     OUTPUT_DIR = os.path.join("results", f"{full_prefix}_gradcam_samples")
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     # Initialize Dataset (Hold-out / Unseen Test Set) with manageable bag size
-    full_dataset = HPyloriDataset(
-        HOLDOUT_DIR, PATIENT_CSV, PATCH_XLSX, 
-        transform=VAL_TRANSFORM, bag_mode=True, 
-        max_bag_size=1000, train=False  # Reduced from 10000 to save memory
-    )
+    if dataset_type.lower() == "helicodataset":
+        print(f"Loading HelicoDataSet (HoldOut set from {HOLDOUT})...")
+        full_dataset = HPyloriDataset(
+            HOLDOUT, PATIENT_CSV, PATCH_XLSX, 
+            transform=VAL_TRANSFORM, bag_mode=True, 
+            max_bag_size=1000, train=False  # Reduced from 10000 to save memory
+        )
+    elif dataset_type.lower() == "deephp":
+        if DeepHPDataset is None:
+            print("ERROR: DeepHP dataset module not available. Install dataset_deepHP.py")
+            sys.exit(1)
+        print(f"Loading DeepHP Dataset (fold {fold_idx}/{num_folds} from {DEEPHP_DATASET_ROOT})...")
+        full_dataset = DeepHPDataset(
+            DEEPHP_DATASET_ROOT, fold_idx=fold_idx, num_folds=num_folds,
+            train=False, transform=VAL_TRANSFORM, bag_mode=True,
+            max_bag_size=1000
+        )
+    else:
+        print(f"ERROR: Unknown dataset_type '{dataset_type}'. Use 'helicodataset' or 'deephp'")
+        sys.exit(1)
     
-    print(f"Evaluating on complete holdout set: {len(full_dataset)} patients")
+    print(f"✓ Dataset loaded: {len(full_dataset)} patients/samples")
     
     # Create DataLoader: one patient (bag) per batch
     val_loader = DataLoader(
@@ -629,6 +644,9 @@ if __name__ == "__main__":
     parser.add_argument("--num_folds", type=int, default=5, help="Total number of folds")
     parser.add_argument("--model_name", type=str, default="convnext_tiny", choices=["resnet50", "convnext_tiny"],
                          help="Backbone architecture")
+    parser.add_argument("--dataset", type=str, default="helicodataset", 
+                       choices=["helicodataset", "deephp", "both"],
+                       help="Which dataset to visualize: 'helicodataset', 'deephp', or 'both'")
     args = parser.parse_args()
     
     # If no run_id provided, use the latest one
@@ -652,8 +670,16 @@ if __name__ == "__main__":
         
     if os.path.exists(model_path):
         print(f"Using model: {os.path.basename(model_path)}")
-        full_id = f"{run_id}_f{actual_fold}"
-        full_visual_report(full_id, model_path, args.model_name, actual_fold, args.num_folds)
+        
+        # Process selected dataset(s)
+        datasets_to_process = []
+        if args.dataset.lower() == "both":
+            datasets_to_process = ["helicodataset", "deephp"]
+        else:
+            datasets_to_process = [args.dataset.lower()]
+        
+        for ds_type in datasets_to_process:
+            full_visual_report(run_id, model_path, args.model_name, actual_fold, args.num_folds, ds_type)
     else:
         print(f"Error: Model file not found at {model_path}")
         sys.exit(1)

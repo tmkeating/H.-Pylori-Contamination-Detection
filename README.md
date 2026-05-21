@@ -17,7 +17,7 @@ The pipeline now supports backbone pre-training on the **DeepHP dataset** (394,9
 - **New**: `dataset_deepHP.py` - DeepHP dataset loader with stratified k-fold CV  
 - **New**: `load_pretrained_backbone.py` - Utilities for loading and averaging backbone weights
 - **Modified**: `train.py` - Added `--pretrained_backbone_path` argument for loading backbone
-- **DeepHP Data**: `/export/hhome/ricse03/8117177/` (Positive/ and Negative/ folders)
+- **DeepHP Data**: `/export/hhome/tkeating/8117177/` (Positive/ and Negative/ folders)
 
 ---
 
@@ -65,11 +65,11 @@ python3 audit_png_count_deepHP.py
 After integrity checks pass, sync the vetted datasets to local node storage for performance:
 
 **HelicoDataSet Sync** (automatic in `run_h_pylori.sh`):
-- Syncs to `/tmp/ricse03_h_pylori_data/` using `suggested_blacklist.json` to exclude problematic patches
+- Syncs to `/tmp/tkeating_h_pylori_data/` using `suggested_blacklist.json` to exclude problematic patches
 - 128,724 training patches (after blacklist removal) + 87,602 HoldOut patches
 
 **DeepHP Sync** (automatic in `train_deepHP_patches.py`):
-- Syncs to `/tmp/ricse03_deephp_data/` using `suggested_deephp_blacklist.json` if available
+- Syncs to `/tmp/tkeating_deephp_data/` using `suggested_deephp_blacklist.json` if available
 - 394,926 clean patches (verified 0 duplicates)
 
 ### 2. Training (5-Fold Cross-Validation)

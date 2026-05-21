@@ -62,7 +62,7 @@ done
 
 ```bash
 # Check all DeepHP jobs
-squeue -u ricse03 | grep deephp
+squeue -u tkeating | grep deephp
 
 # Watch individual fold training (replace f0 with f1-f4 as needed)
 tail -f results/slurm_deephp_f0_*.txt
@@ -122,7 +122,7 @@ The `train_deepHP.sh` orchestrator automatically averages backbone weights after
 ### Step 3A: Submit Fine-tuning Jobs (5 Folds)
 
 ```bash
-cd /hhome/ricse03/modelTwyla/H.-Pylori-Contamination-Detection
+cd /hhome/tkeating/model/H.-Pylori-Contamination-Detection
 
 # Path to pre-trained backbone
 PRETRAINED_BACKBONE="results/deephp_backbone_final_convnext_tiny.pth"
@@ -160,7 +160,7 @@ wait
 
 ```bash
 # Check job status
-squeue -u ricse03 | grep heli_ft
+squeue -u tkeating | grep heli_ft
 
 # Watch training
 tail -f results/ft_slurm_*_output.txt
@@ -270,8 +270,8 @@ python3 train.py --help
 **Check**:
 ```bash
 # Verify DeepHP data exists
-ls -la /export/hhome/ricse03/8117177/Positive | head
-ls -la /export/hhome/ricse03/8117177/Negative | head
+ls -la /export/hhome/tkeating/8117177/Positive | head
+ls -la /export/hhome/tkeating/8117177/Negative | head
 
 # Check dataset.py loads correctly
 python3 -c "from dataset_deepHP import DeepHPDataset; \

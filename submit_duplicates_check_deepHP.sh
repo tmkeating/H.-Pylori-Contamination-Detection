@@ -30,7 +30,7 @@ mkdir -p results
 source ../venv/bin/activate
 
 echo "Starting DeepHP Global Duplicate Detection Audit..."
-echo "Dataset: /export/hhome/ricse03/8117177 (Positive + Negative folders)"
+echo "Dataset: /export/hhome/tkeating/8117177 (Positive + Negative folders)"
 echo "Expected patches: ~394,926 total (111,005 Positive + 283,921 Negative)"
 echo ""
 

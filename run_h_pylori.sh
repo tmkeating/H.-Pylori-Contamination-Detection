@@ -146,7 +146,7 @@ import os
 from pathlib import Path
 
 exclude_filter_file = os.environ['EXCLUDE_FILTER_FILE']
-remote_data = os.environ.get('REMOTE_DATA', '/export/hhome/ricse03/HelicoDataSet')
+remote_data = os.environ.get('REMOTE_DATA', '/export/hhome/tkeating/HelicoDataSet')
 
 excludes = []
 

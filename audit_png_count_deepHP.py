@@ -9,16 +9,16 @@
 # counting patch distributions and ensuring data integrity.
 #
 # What it does:
-#   1. Counts PNG files in the DeepHP dataset (/export/hhome/ricse03/8117177/Positive and Negative)
-#   2. Optionally counts PNG files in scratch directory (/tmp/ricse03_deephp_data)
+#   1. Counts PNG files in the DeepHP dataset (/export/hhome/tkeating/8117177/Positive and Negative)
+#   2. Optionally counts PNG files in scratch directory (/tmp/tkeating_deephp_data)
 #   3. Generates class-level breakdowns (Positive vs Negative)
 #   4. Reports sync status if scratch exists
 #   5. Exports comprehensive CSV report with all counts
 #
 # Dataset Structure (DeepHP):
-#   - Location: /export/hhome/ricse03/8117177/
-#   - Positive class: /export/hhome/ricse03/8117177/Positive/ (~111,005 patches)
-#   - Negative class: /export/hhome/ricse03/8117177/Negative/ (~283,921 patches)
+#   - Location: /export/hhome/tkeating/8117177/
+#   - Positive class: /export/hhome/tkeating/8117177/Positive/ (~111,005 patches)
+#   - Negative class: /export/hhome/tkeating/8117177/Negative/ (~283,921 patches)
 #   - Total: ~394,926 patches
 #   - Used for: Backbone pre-training with 5-fold stratified cross-validation
 #
@@ -223,7 +223,7 @@ def main():
     from config import DEEPHP_DATASET_ROOT
     
     dataset_root = Path(DEEPHP_DATASET_ROOT)
-    scratch_root = Path(f"/tmp/{os.environ.get('USER', 'ricse03')}_deephp_data")
+    scratch_root = Path(f"/tmp/{os.environ.get('USER', 'tkeating')}_deephp_data")
     output_csv = Path('deephp_audit_report.csv')
     
     # Run audit
