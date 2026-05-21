@@ -9,8 +9,8 @@
 #   - **Production-ready** with 92.11% accuracy and 100% precision (zero false positives)
 #
 # What it does:
-#   1. Collections the 5 most recent '*_patient_consensus.csv' files (or a 
-#      specified RunID range).
+#   1. Collections the 5 most recent '*_holdout_consensus.csv' files (or a 
+#      specified RunID range). These are the independent test set predictions from all 5 folds.
 #   2. Generates predictions using THREE fusion approaches:
 #      A. Ensemble Voting: Majority vote (3/5) with safety override logic
 #      B. Meta-Classifier: Random Forest with Leave-One-Out Cross-Validation
@@ -391,7 +391,7 @@ def main():
             for rid in run_list:
                 found = False
                 for s_dir in search_dirs:
-                    matches = glob.glob(os.path.join(s_dir, f"{rid}_*_patient_consensus.csv"))
+                    matches = glob.glob(os.path.join(s_dir, f"{rid}_*_holdout_consensus.csv"))
                     if matches:
                         files.extend(matches)
                         found = True
@@ -414,7 +414,7 @@ def main():
             all_possible = []
             for s_dir in search_dirs:
                 if os.path.exists(s_dir):
-                    all_possible.extend(glob.glob(os.path.join(s_dir, "*_f[0-4]_*_patient_consensus.csv")))
+                    all_possible.extend(glob.glob(os.path.join(s_dir, "*_holdout_consensus.csv")))
             
             files = []
             for f in all_possible:
@@ -425,10 +425,10 @@ def main():
                 except ValueError:
                     continue
         else:
-            files = glob.glob(os.path.join("results", f"{args.runs}_*_patient_consensus.csv"))
+            files = glob.glob(os.path.join("results", f"{args.runs}_*_holdout_consensus.csv"))
     else:
         # Iteration 25.0: Dynamically find the 5 most recent consensus files in results/
-        pattern = os.path.join("results", "*_f[0-4]_*_patient_consensus.csv")
+        pattern = os.path.join("results", "*_holdout_consensus.csv")
         all_files = glob.glob(pattern)
         all_files.sort(key=os.path.getmtime, reverse=True)
         
@@ -489,7 +489,7 @@ def main():
     # Validate that dataframes were loaded
     if not all_dfs:
         print(f"\nError: No evaluation report files found. Cannot create ensemble voting summary.")
-        print(f"Expected to find patient consensus CSV files matching pattern: *_patient_consensus.csv")
+        print(f"Expected to find holdout consensus CSV files matching pattern: *_holdout_consensus.csv")
         print(f"Checked location: results/")
         return
         
