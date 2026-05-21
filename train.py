@@ -1114,6 +1114,67 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
     else:
         print(f"Training complete. Best Val Loss: {best_loss:.4f}")
 
+    # --- Step 7.7: Generate Fold-Level Validation Consensus (For Ensemble Voting) ---
+    # CRITICAL: Save validation patient predictions for ensemble_voting.py
+    # This ensures each fold produces a *_patient_consensus.csv file.
+    # We collect this IMMEDIATELY after training, BEFORE holdout evaluation,
+    # to guarantee these files exist even if holdout evaluation fails or times out.
+    print(f"\n[ENSEMBLE] Generating fold-level validation consensus for ensemble voting...")
+    fold_consensus_data = []
+    fold_patient_ids = []
+    fold_actual_labels = []
+    fold_pred_labels = []
+    fold_probs = []
+    
+    model.eval()
+    with torch.no_grad():
+        for bags, labels, patient_ids, bag_indices in val_loader:
+            bags = bags.squeeze(0).to(device)
+            bags = det_preprocess_batch(bags, training=False)
+            
+            outputs, _ = model.forward_bag(bags)
+            probs = torch.softmax(outputs, dim=1)
+            _, preds = torch.max(probs, 1)
+            
+            bag_size = bags.shape[0]
+            max_prob = probs[:, 1].max().cpu().item()
+            mean_prob = probs[:, 1].mean().cpu().item()
+            
+            patient_id = patient_ids[0] if isinstance(patient_ids, list) else str(patient_ids)
+            true_label = labels.cpu().item()
+            pred_label = preds.cpu().item()
+            
+            fold_consensus_data.append({
+                "PatientID": patient_id,
+                "Actual": true_label,
+                "Predicted": pred_label,
+                "Searcher_Flag": 1 if max_prob > 0.1 or mean_prob > 0.1 else 0,
+                "Bag_Mean_Prob": mean_prob,
+                "Max_Prob": max_prob,
+                "Meta_Prob": mean_prob,
+                "Patch_Count": bag_size,
+                "Method": f"MIL-{pool_type}",
+                "Correct": 1 if pred_label == true_label else 0
+            })
+            
+            fold_patient_ids.append(patient_id)
+            fold_actual_labels.append(true_label)
+            fold_pred_labels.append(pred_label)
+            fold_probs.append(mean_prob)
+    
+    # Save fold-level validation consensus CSV
+    if fold_consensus_data:
+        fold_consensus_df = pd.DataFrame(fold_consensus_data)
+        fold_consensus_path = os.path.join(results_dir, f"{prefix}_patient_consensus.csv")
+        fold_consensus_df.to_csv(fold_consensus_path, index=False)
+        val_acc = sum([1 for actual, pred in zip(fold_actual_labels, fold_pred_labels) if actual == pred]) / len(fold_actual_labels)
+        print(f"[ENSEMBLE] ✓ Saved fold validation consensus ({len(fold_consensus_data)} patients, {val_acc*100:.1f}% acc)")
+        print(f"[ENSEMBLE]   File: {prefix}_patient_consensus.csv ({os.path.getsize(fold_consensus_path)} bytes)")
+        sys.stdout.flush()
+    else:
+        print(f"[ENSEMBLE] ⚠ WARNING: No validation data collected for consensus!")
+        sys.stdout.flush()
+
     # --- Step 7.8: Final SWA Update (Iteration 13) ---
     if use_swa:
         # Final SWA normalization (after training is fully complete)
@@ -1402,30 +1463,32 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
     print(classification_report(all_labels_pat, all_preds_pat, target_names=['Negative', 'Positive'], zero_division=0))
     sys.stdout.flush()
     
-    # --- Step 9: Clinical Consensus Reporting ---
-    # We aggregate all patient-level predictions and confidence scores into a structured CSV.
-    # This report serves as the primary audit trail for the Searcher phase, allowing 
-    # pathologists to identify "High-Ghost" or "Borderline" cases for manual rescue.
-    consensus_data = []
-    for i in range(num_holdout):
-        consensus_data.append({
-            "PatientID": patient_ids_list[i],
-            "Actual": all_labels_pat[i],
-            "Predicted": all_preds_pat[i],
-            # Searcher_Flag: Triggers if either the Mean or Top-K confidence is elevated.
-            # This is used to flag samples for high-resolution dense re-scanning.
-            "Searcher_Flag": 1 if all_max_probs[i] > 0.1 or all_probs_pat[i] > 0.1 else 0, 
-            "Bag_Mean_Prob": all_probs_pat[i], 
-            "Max_Prob": all_max_probs[i], # Captures the single most suspicious tissue area
-            "Meta_Prob": all_probs_pat[i], # Input for the final meta-classifier fusion
-            "Patch_Count": all_patch_counts[i], 
-            "Method": f"MIL-{pool_type}",
-            "Correct": 1 if all_preds_pat[i] == all_labels_pat[i] else 0
-        })
-    consensus_df = pd.DataFrame(consensus_data)
-    consensus_df.to_csv(os.path.join(results_dir, f"{prefix}_patient_consensus.csv"), index=False)
-    print(f"Clinical consensus report saved to {prefix}_patient_consensus.csv")
-    sys.stdout.flush()
+    # --- Step 9: Clinical Consensus Reporting (Holdout Set Audit) ---
+    # NOTE: Fold-level consensus is generated immediately after training (Step 7.7)
+    # for ensemble voting. This holdout consensus is an ADDITIONAL audit trail
+    # showing performance on the independent held-out test set.
+    # We only save this if holdout data exists and evaluation completed successfully.
+    if num_holdout > 0:
+        consensus_data = []
+        for i in range(num_holdout):
+            consensus_data.append({
+                "PatientID": patient_ids_list[i],
+                "Actual": all_labels_pat[i],
+                "Predicted": all_preds_pat[i],
+                "Searcher_Flag": 1 if all_max_probs[i] > 0.1 or all_probs_pat[i] > 0.1 else 0, 
+                "Bag_Mean_Prob": all_probs_pat[i], 
+                "Max_Prob": all_max_probs[i],
+                "Meta_Prob": all_probs_pat[i],
+                "Patch_Count": all_patch_counts[i], 
+                "Method": f"MIL-{pool_type}",
+                "Correct": 1 if all_preds_pat[i] == all_labels_pat[i] else 0
+            })
+        consensus_df = pd.DataFrame(consensus_data)
+        # Save as holdout_consensus to distinguish from fold consensus
+        holdout_consensus_path = os.path.join(results_dir, f"{prefix}_holdout_consensus.csv")
+        consensus_df.to_csv(holdout_consensus_path, index=False)
+        print(f"Holdout consensus report saved to {prefix}_holdout_consensus.csv")
+        sys.stdout.flush()
 
     # --- Step 11: Patient-Level Performance Audit ---
     # We visualize the Receiver Operating Characteristic (ROC) curve to evaluate
