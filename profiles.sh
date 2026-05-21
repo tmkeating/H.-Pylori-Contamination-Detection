@@ -10,6 +10,50 @@
 #   EXTREME:  Diagnostic safety mode (Max-MIL pooling, massive PosWeight).
 # ---------------------------------------------
 
+# Profile: SEARCHER (Iteration 24.9: Robust Generalization - Target 100% Recall)
+# Using Max-MIL + Stabilized Weighted Training + ReduceLROnPlateau
+function set_profile_SEARCHER() {
+    export NEG_WEIGHT=1.0
+    export POS_WEIGHT=1.5 
+    # Maintained 3.0 to focus gradients on 'Hard' sparse bacterial targets
+    export GAMMA=3.0
+    # Higher WD to prevent 100% Training Accuracy (Overfitting)
+    export WEIGHT_DECAY=0.05
+    # Reduced epochs with early stopping potential
+    export NUM_EPOCHS=20
+    export DEEPHP_EPOCHS=20
+    export SAVER_METRIC="f1"
+    export FREEZE_BN="True"
+    export FREEZE_BACKBONE="False"
+    export CLIP_GRAD=1.0
+    export PCT_START=0.1
+    export USE_SWA="True"
+    export SWA_START=12
+    export JITTER=0.25
+    export POOL_TYPE="attention"
+}
+
+function set_profile_SEARCHERTRANSFER() {
+    export NEG_WEIGHT=1.0
+    export POS_WEIGHT=1.5 
+    # Maintained 3.0 to focus gradients on 'Hard' sparse bacterial targets
+    export GAMMA=3.0
+    # Higher WD to prevent 100% Training Accuracy (Overfitting)
+    export WEIGHT_DECAY=0.05
+    # Reduced epochs with early stopping potential
+    export NUM_EPOCHS=20
+    export DEEPHP_EPOCHS=20
+    export SAVER_METRIC="f1"
+    export FREEZE_BN="False"
+    export FREEZE_BACKBONE="False"
+    export CLIP_GRAD=1.0
+    export PCT_START=0.1
+    export USE_SWA="True"
+    export SWA_START=12
+    export JITTER=0.25
+    export POOL_TYPE="attention"
+}
+
 # Profile: AUDITOR (Clinical Grade - 100% Precision)
 function set_profile_AUDITOR() {
     export NEG_WEIGHT=1.0
@@ -25,28 +69,6 @@ function set_profile_AUDITOR() {
     export USE_SWA="True"
     export SWA_START=15
     export JITTER=0.15
-    export POOL_TYPE="attention"
-}
-
-# Profile: SEARCHER (Iteration 24.9: Robust Generalization - Target 100% Recall)
-# Using Max-MIL + Stabilized Weighted Training + ReduceLROnPlateau
-function set_profile_SEARCHER() {
-    export NEG_WEIGHT=1.0
-    export POS_WEIGHT=1.5 
-    # Maintained 3.0 to focus gradients on 'Hard' sparse bacterial targets
-    export GAMMA=3.0
-    # Higher WD to prevent 100% Training Accuracy (Overfitting)
-    export WEIGHT_DECAY=0.05
-    # Reduced epochs with early stopping potential
-    export NUM_EPOCHS=20
-    export DEEPHP_EPOCHS=20
-    export SAVER_METRIC="f1"
-    export FREEZE_BN="True"
-    export CLIP_GRAD=1.0
-    export PCT_START=0.1
-    export USE_SWA="True"
-    export SWA_START=12
-    export JITTER=0.25
     export POOL_TYPE="attention"
 }
 

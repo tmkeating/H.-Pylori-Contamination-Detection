@@ -792,18 +792,26 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
 
     # --- Step 5.1: Optional Pre-trained Backbone Loading (Transfer Learning) ---
     if pretrained_backbone_path:
-        print(f"\n{'='*80}")
-        print(f"TRANSFER LEARNING: Loading Pre-trained Backbone from DeepHP")
-        print(f"Backbone Path: {pretrained_backbone_path}")
-        print(f"{'='*80}")
-        
-        from load_pretrained_backbone import load_pretrained_backbone
-        model = load_pretrained_backbone(model, pretrained_backbone_path, freeze_backbone=freeze_backbone)
-        
-        if freeze_backbone:
-            print(f"Backbone is FROZEN (no gradient updates)")
+        # Check if backbone file exists before attempting to load
+        if not os.path.exists(pretrained_backbone_path):
+            print(f"\n{'='*80}")
+            print(f"WARNING: Pre-trained backbone path provided but file not found:")
+            print(f"  Expected: {pretrained_backbone_path}")
+            print(f"  Will train from ImageNet pre-trained backbone with random initialization")
+            print(f"{'='*80}\n")
         else:
-            print(f"Backbone is TRAINABLE (will fine-tune on HelicoDataSet)")
+            print(f"\n{'='*80}")
+            print(f"TRANSFER LEARNING: Loading Pre-trained Backbone from DeepHP")
+            print(f"Backbone Path: {pretrained_backbone_path}")
+            print(f"{'='*80}")
+            
+            from load_pretrained_backbone import load_pretrained_backbone
+            model = load_pretrained_backbone(model, pretrained_backbone_path, freeze_backbone=freeze_backbone)
+            
+            if freeze_backbone:
+                print(f"Backbone is FROZEN (no gradient updates)")
+            else:
+                print(f"Backbone is TRAINABLE (will fine-tune on HelicoDataSet)")
     else:
         print(f"Training from ImageNet pre-trained backbone (no DeepHP transfer learning)")
 

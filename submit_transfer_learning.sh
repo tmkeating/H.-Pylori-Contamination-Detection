@@ -2,23 +2,47 @@
 # submit_transfer_learning.sh - Complete Transfer Learning Pipeline
 #
 # Purpose: Orchestrate full transfer learning pipeline end-to-end:
-#   1. Pre-train backbone on 394,926 H&E patches (5 folds) via submit_train_deepHP.sh
-#   2. Wait for backbone averaging completion
-#   3. Fine-tune on HelicoDataSet using pre-trained backbone (5 folds in parallel)
-#   4. Create final ensemble summary
+#   Phase 1: Pre-train backbone on 394,926 H&E patches (5 folds) via submit_train_deepHP.sh
+#   Phase 2: Sync data to local scratch and clean blacklisted items
+#   Phase 3: Fine-tune on HelicoDataSet using pre-trained backbone (5 folds in parallel)
+#   Phase 4: Generate ensemble voting, meta-classifier, and hybrid fusion results
+#
+# Key Features:
+#   - Automatic data syncing to /tmp with rsync + exclusion filters
+#   - Fold-level consensus files generated automatically during training
+#   - Holdout consensus for proper ensemble voting on independent test set
+#   - Bootstrap confidence intervals (1000 resamples) for all metrics
+#   - SLURM job dependency chains ensure proper sequencing
 #
 # Usage:
 #   PROFILE=SEARCHER MODEL_NAME=convnext_tiny ITER=30.0 ./submit_transfer_learning.sh
 #
 # Environment Variables:
-#   PROFILE:    Model profile from profiles.sh (default: SEARCHER)
-#   MODEL_NAME: Backbone architecture (default: convnext_tiny)
-#   ITER:       Iteration number for tracking (default: 31.0)
+#   PROFILE:              Model profile from profiles.sh (default: SEARCHER)
+#   MODEL_NAME:           Backbone architecture (default: convnext_tiny)
+#   ITER:                 Iteration number for tracking (default: 31.0)
+#   SKIP_PRETRAINING:     Skip Phase 1 if backbone already trained (default: False)
+#   DEEPHP_SUMMARY_JOB_ID: Force specific pre-training job dependency (optional)
+#   FREEZE_BACKBONE:      Keep pre-trained weights frozen (default: False)
 #
 # Timeline:
-#   ~20-22 hours: DeepHP pre-training (5 folds parallel)
-#   ~6-8 hours: HelicoDataSet fine-tuning (5 folds parallel)
-#   Total: ~28 hours
+#   ~20-22 hours: DeepHP pre-training (5 folds parallel) [Phase 1]
+#   ~2-3 hours:  Data sync to scratch                  [Phase 2]
+#   ~6-8 hours:  HelicoDataSet fine-tuning (5 folds)   [Phase 3]
+#   ~30 minutes: Ensemble voting + meta-classifier     [Phase 4]
+#   Total: ~28-34 hours (depending on SKIP_PRETRAINING)
+#
+# Recent Fixes:
+#   - Rsync filter now includes '+ **' rule to ensure all files are copied to scratch
+#   - Consensus files auto-generated from validation set (Step 7.7 in train.py)
+#   - Holdout consensus used for ensemble voting (fixes NaN/mismatch errors)
+#   - Explicit SLURM dependency validation prevents silent job skipping
+#
+# Dependencies:
+#   - submit_train_deepHP.sh (Phase 1)
+#   - train.py (Phase 3)
+#   - ensemble_voting.py (Phase 4)
+#   - config.py (paths configuration)
 
 set -e  # Exit on error
 
@@ -198,14 +222,24 @@ if [ ! -d "$HELICO_ROOT" ]; then
     exit 1
 fi
 
-# Check pre-trained backbone exists
-if [ ! -f "results/deephp_backbone_final_convnext_tiny.pth" ]; then
-    echo "ERROR: Pre-trained backbone not found at results/deephp_backbone_final_convnext_tiny.pth"
-    echo "Please run ./submit_train_deepHP.sh first and wait for completion"
-    exit 1
+# Check pre-trained backbone exists (only required when NOT skipping pre-training)
+# When SKIP_PRETRAINING=True, assume backbone already exists from a previous run
+if [ "$SKIP_PRETRAINING" != "True" ] && [ "$SKIP_PRETRAINING" != "true" ]; then
+    if [ ! -f "results/deephp_backbone_final_convnext_tiny.pth" ]; then
+        echo "ERROR: Pre-trained backbone not found at results/deephp_backbone_final_convnext_tiny.pth"
+        echo "Please run Phase 1 (pre-training) or set SKIP_PRETRAINING=True if using existing backbone"
+        exit 1
+    fi
+    echo "✓ Pre-trained backbone found"
+else
+    echo "[INFO] SKIP_PRETRAINING=True: Assuming backbone exists from previous run"
+    if [ ! -f "results/deephp_backbone_final_convnext_tiny.pth" ]; then
+        echo "WARNING: Pre-trained backbone not found at results/deephp_backbone_final_convnext_tiny.pth"
+        echo "         Fine-tuning will proceed with random initialization if file is missing"
+    else
+        echo "✓ Pre-trained backbone found"
+    fi
 fi
-
-echo "✓ Pre-trained backbone found"
 echo ""
 
 # --- LOCAL SCRATCH SETUP ---
@@ -453,14 +487,24 @@ if [ ! -d "$HELICO_ROOT" ]; then
     exit 1
 fi
 
-# Check pre-trained backbone exists
-if [ ! -f "results/deephp_backbone_final_convnext_tiny.pth" ]; then
-    echo "ERROR: Pre-trained backbone not found at results/deephp_backbone_final_convnext_tiny.pth"
-    echo "Please run ./submit_train_deepHP.sh first and wait for completion"
-    exit 1
+# Check pre-trained backbone exists (only required when NOT skipping pre-training)
+# When SKIP_PRETRAINING=True, assume backbone already exists from a previous run
+if [ "$SKIP_PRETRAINING" != "True" ] && [ "$SKIP_PRETRAINING" != "true" ]; then
+    if [ ! -f "results/deephp_backbone_final_convnext_tiny.pth" ]; then
+        echo "ERROR: Pre-trained backbone not found at results/deephp_backbone_final_convnext_tiny.pth"
+        echo "Please run Phase 1 (pre-training) or set SKIP_PRETRAINING=True if using existing backbone"
+        exit 1
+    fi
+    echo "✓ Pre-trained backbone found"
+else
+    echo "[INFO] SKIP_PRETRAINING=True: Assuming backbone exists from previous run"
+    if [ ! -f "results/deephp_backbone_final_convnext_tiny.pth" ]; then
+        echo "WARNING: Pre-trained backbone not found at results/deephp_backbone_final_convnext_tiny.pth"
+        echo "         Fine-tuning will proceed with random initialization if file is missing"
+    else
+        echo "✓ Pre-trained backbone found"
+    fi
 fi
-
-echo "✓ Pre-trained backbone found"
 echo ""
 
 # --- LOCAL SCRATCH SETUP ---
@@ -718,14 +762,15 @@ do
         --gres=gpu:1 \
         --mem=48G \
         --time=48:00:00 \
-        --export=ALL,FOLD=$FOLD,MODEL_NAME=$MODEL_NAME,ITER=$ITER,NUM_EPOCHS=$NUM_EPOCHS,NEG_WEIGHT=$NEG_WEIGHT,POS_WEIGHT=$POS_WEIGHT,GAMMA=$GAMMA,SAVER_METRIC=$SAVER_METRIC,FREEZE_BN=$FREEZE_BN,CLIP_GRAD=$CLIP_GRAD,PCT_START=$PCT_START,WEIGHT_DECAY=$WEIGHT_DECAY,USE_SWA=$USE_SWA,SWA_START=$SWA_START,JITTER=$JITTER,POOL_TYPE=$POOL_TYPE,FREEZE_BACKBONE=$FREEZE_BACKBONE,SKIP_SYNC=1 \
+        --export=ALL,FOLD=$FOLD,MODEL_NAME=$MODEL_NAME,ITER=$ITER,NUM_EPOCHS=$NUM_EPOCHS,NEG_WEIGHT=$NEG_WEIGHT,POS_WEIGHT=$POS_WEIGHT,GAMMA=$GAMMA,SAVER_METRIC=$SAVER_METRIC,FREEZE_BN=$FREEZE_BN,CLIP_GRAD=$CLIP_GRAD,PCT_START=$PCT_START,WEIGHT_DECAY=$WEIGHT_DECAY,USE_SWA=$USE_SWA,SWA_START=$SWA_START,JITTER=$JITTER,POOL_TYPE=$POOL_TYPE,FREEZE_BACKBONE=$FREEZE_BACKBONE,SKIP_PRETRAINING=$SKIP_PRETRAINING,SKIP_SYNC=1 \
         <<TRAIN_EOF
 #!/bin/bash
 # Dynamically resolve project directory
 PROJECT_DIR=\$(python3 -c "import os; print(os.path.dirname(os.path.abspath('${PWD}/train.py')))" 2>/dev/null || echo "/hhome/tkeating/model/H.-Pylori-Contamination-Detection")
 cd "\$PROJECT_DIR"
 
-python3 train.py \
+# Build train.py command with conditional backbone path
+TRAIN_CMD="python3 train.py \
     --fold \$FOLD \
     --num_folds 5 \
     --model_name \$MODEL_NAME \
@@ -742,9 +787,17 @@ python3 train.py \
     --swa_start \$SWA_START \
     --jitter \$JITTER \
     --pool_type \$POOL_TYPE \
-    --iter \$ITER \
-    --pretrained_backbone_path results/deephp_backbone_final_convnext_tiny.pth \
-    --freeze_backbone \$FREEZE_BACKBONE
+    --iter \$ITER"
+
+# Only include backbone path if not skipping pre-training
+if [ "\$SKIP_PRETRAINING" != "True" ] && [ "\$SKIP_PRETRAINING" != "true" ]; then
+    TRAIN_CMD="\$TRAIN_CMD --pretrained_backbone_path results/deephp_backbone_final_convnext_tiny.pth"
+fi
+
+TRAIN_CMD="\$TRAIN_CMD --freeze_backbone \$FREEZE_BACKBONE"
+
+# Execute the constructed command
+eval \$TRAIN_CMD
 
 echo ""
 echo "✓ Fold \$FOLD fine-tuning complete"
