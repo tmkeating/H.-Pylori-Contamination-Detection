@@ -128,6 +128,7 @@ from pathlib import Path
 from collections import defaultdict
 import pandas as pd
 from datetime import datetime
+from config import DATASET_ROOT, SCRATCH_ROOT
 
 class DatasetAuditor:
     def __init__(self, dataset_root, scratch_root=None):

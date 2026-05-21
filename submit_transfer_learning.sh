@@ -155,16 +155,16 @@ PRE_SYNC_JOB=$(sbatch --dependency=afterok:$DEEPHP_SUMMARY_JOB_ID \
 #SBATCH --mem=8G
 #SBATCH -J transfer_presync
 
-LOCAL_SCRATCH="/tmp/ricse03_h_pylori_data"
-REMOTE_DATA="/export/hhome/ricse03/HelicoDataSet"
+LOCAL_SCRATCH=$(python3 -c "from config import SCRATCH_ROOT; print(SCRATCH_ROOT)" 2>/dev/null || echo "/tmp/tkeating_h_pylori_data")
+REMOTE_DATA=$(python3 -c "from config import DATASET_ROOT; print(DATASET_ROOT)" 2>/dev/null || echo "/export/hhome/tkeating/datasets/HelicoDataSet")
 
-echo "=========================================================================="
+echo "========================================================================="
 echo "Transfer Learning Pre-Sync: Verifying Data and Syncing to Local Scratch"
-echo "=========================================================================="
+echo "========================================================================="
 echo ""
 
 # Check HelicoDataSet
-HELICO_ROOT=$(python3 -c "from config import DATASET_ROOT; print(DATASET_ROOT)" 2>/dev/null || echo "$REMOTE_DATA")
+HELICO_ROOT="$REMOTE_DATA"
 echo "✓ HelicoDataSet root: $HELICO_ROOT"
 
 if [ ! -d "$HELICO_ROOT" ]; then

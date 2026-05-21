@@ -5,16 +5,16 @@ Import this module to access paths consistently across all scripts.
 Example:
     from config import DATASET_ROOT, SCRATCH_ROOT
     
-    base_data_path = DATASET_ROOT  # /export/hhome/ricse03/HelicoDataSet
+    base_data_path = DATASET_ROOT  # /export/hhome/tkeating/datasets/HelicoDataSet
     patient_csv = os.path.join(DATASET_ROOT, "PatientDiagnosis.csv")
 """
 
 import os
 
 # Dataset Storage Paths
-DATASET_ROOT = "/export/hhome/ricse03/HelicoDataSet"
-DEEPHP_DATASET_ROOT = "/export/hhome/ricse03/8117177"  # DeepHP H&E patches (Positive & Negative folders)
-SCRATCH_ROOT = "/tmp/ricse03_h_pylori_data"
+DATASET_ROOT = "/export/hhome/tkeating/datasets/HelicoDataSet"
+DEEPHP_DATASET_ROOT = "/export/hhome/tkeating/datasets/DeepHP"  # DeepHP H&E patches (Positive & Negative folders)
+SCRATCH_ROOT = "/tmp/tkeating_h_pylori_data"
 
 # Allow override via environment variables
 DATASET_ROOT = os.environ.get('DATASET_ROOT', DATASET_ROOT)

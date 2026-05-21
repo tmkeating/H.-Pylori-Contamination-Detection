@@ -37,8 +37,8 @@ mkdir -p results
 
 # --- LOCAL SCRATCH SETUP ---
 # We use /tmp as it's on a local NVMe SSD (faster than network storage)
-LOCAL_SCRATCH="/tmp/ricse03_h_pylori_data"
-REMOTE_DATA="/export/hhome/ricse03/HelicoDataSet"
+LOCAL_SCRATCH=$(python3 -c "from config import SCRATCH_ROOT; print(SCRATCH_ROOT)" 2>/dev/null || echo "/tmp/tkeating_h_pylori_data")
+REMOTE_DATA=$(python3 -c "from config import DATASET_ROOT; print(DATASET_ROOT)" 2>/dev/null || echo "/export/hhome/tkeating/datasets/HelicoDataSet")
 
 echo "Synchronizing dataset to local scratch: $LOCAL_SCRATCH"
 mkdir -p "$LOCAL_SCRATCH"

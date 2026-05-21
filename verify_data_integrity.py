@@ -66,13 +66,14 @@ import os
 import sys
 import torch
 import pandas as pd
+from config import SCRATCH_ROOT
 
 # Add the parent directory to sys.path so we can import 'dataset.py' from the root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from dataset import HPyloriDataset
 
 # Define the root path for dataset access (using local scratch or shared storage)
-root = '/tmp/ricse03_h_pylori_data'
+root = SCRATCH_ROOT
 p_csv = os.path.join(root, 'PatientDiagnosis.csv')
 patch_csv = os.path.join(root, 'HP_WSI-CoordAnnotatedAllPatches.xlsx')
 train_dir = os.path.join(root, 'CrossValidation/Annotated')
