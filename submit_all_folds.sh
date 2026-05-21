@@ -100,7 +100,7 @@ sbatch --dependency=afterok:$DEPENDENCIES \
 #!/bin/bash
 #SBATCH -p dcca40
 
-cd /hhome/ricse03/modelTwyla/H.-Pylori-Contamination-Detection
+cd /hhome/tkeating/model/H.-Pylori-Contamination-Detection
 
 # Get job ID for output filename
 JOB_ID=$SLURM_JOB_ID

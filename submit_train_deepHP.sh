@@ -137,7 +137,7 @@ do
         --export=ALL,FOLD=$FOLD,MODEL_NAME=$MODEL_NAME,DEEPHP_EPOCHS=$DEEPHP_EPOCHS,BATCH_SIZE=$BATCH_SIZE,LEARNING_RATE=$LEARNING_RATE,WEIGHT_DECAY=$WEIGHT_DECAY,POS_WEIGHT=$POS_WEIGHT,USE_FOCAL_LOSS=$USE_FOCAL_LOSS,GAMMA=$GAMMA,ITER=$ITER,DEEPHP_SCRATCH=$DEEPHP_SCRATCH \
         <<TRAIN_EOF
 #!/bin/bash
-cd /hhome/ricse03/modelTwyla/H.-Pylori-Contamination-Detection
+cd /hhome/tkeating/model/H.-Pylori-Contamination-Detection
 
 # Use synced DeepHP dataset from scratch
 export DEEPHP_DATASET_ROOT="\$DEEPHP_SCRATCH"
@@ -192,7 +192,7 @@ SUMMARY_JOB_OUT=$(sbatch --dependency=afterok:$DEPENDENCIES \
     <<'SUMMARY_EOF'
 #!/bin/bash
 #SBATCH -p dcca40
-cd /hhome/ricse03/modelTwyla/H.-Pylori-Contamination-Detection
+cd /hhome/tkeating/model/H.-Pylori-Contamination-Detection
 
 echo "=========================================================================="
 echo "All DeepHP pre-training folds complete. Averaging backbone weights..."

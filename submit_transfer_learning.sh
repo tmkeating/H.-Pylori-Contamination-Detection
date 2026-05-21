@@ -27,6 +27,8 @@ PROFILE=${PROFILE:-"SEARCHER"}
 ITER=${ITER:-"31.0"}
 PRETRAINED_BACKBONE="results/deephp_backbone_final_convnext_tiny.pth"
 FREEZE_BACKBONE=${FREEZE_BACKBONE:-"False"}
+SKIP_PRETRAINING=${SKIP_PRETRAINING:-"False"}
+DEEPHP_SUMMARY_JOB_ID=${DEEPHP_SUMMARY_JOB_ID:-""}
 
 echo "=========================================================================="
 echo "TRANSFER LEARNING: Complete End-to-End Pipeline (Option B)"
@@ -39,39 +41,61 @@ echo ""
 # ===========================================================================
 # PHASE 1: PRE-TRAINING ON DEEPHP
 # ===========================================================================
-echo "=========================================================================="
-echo "PHASE 1: Initiating DeepHP Pre-training Pipeline"
-echo "=========================================================================="
-echo ""
-
-# Call submit_train_deepHP.sh to start pre-training orchestration
-if [ -f "submit_train_deepHP.sh" ]; then
-    chmod +x submit_train_deepHP.sh
-    # Export ITER so submit_train_deepHP.sh picks it up
-    export MODEL_NAME PROFILE ITER
-    PRETRAINING_OUTPUT=$(./submit_train_deepHP.sh 2>&1)
-    echo "$PRETRAINING_OUTPUT"
+if [ "$SKIP_PRETRAINING" = "True" ] || [ "$SKIP_PRETRAINING" = "true" ]; then
+    echo "=========================================================================="
+    echo "PHASE 1: SKIPPED (Pre-training already completed)"
+    echo "=========================================================================="
+    echo ""
     
-    # Extract summary job ID from the output or file
-    if [ -f "results/deephp_summary_job_id.txt" ]; then
-        DEEPHP_SUMMARY_JOB_ID=$(cat results/deephp_summary_job_id.txt)
-        echo ""
-        echo "✓ Pre-training orchestrator started"
-        echo "  Summary Job ID: $DEEPHP_SUMMARY_JOB_ID"
-        echo ""
+    if [ -z "$DEEPHP_SUMMARY_JOB_ID" ]; then
+        # Try to read from file
+        if [ -f "results/deephp_summary_job_id.txt" ]; then
+            DEEPHP_SUMMARY_JOB_ID=$(cat results/deephp_summary_job_id.txt)
+        else
+            echo "WARNING: No DEEPHP_SUMMARY_JOB_ID provided and file not found"
+            echo "Using immediate scheduling (no dependency)"
+            DEEPHP_SUMMARY_JOB_ID="0"  # Will be treated as no dependency
+        fi
+    fi
+    
+    echo "✓ Skipping pre-training"
+    echo "  Summary Job ID: $DEEPHP_SUMMARY_JOB_ID"
+    echo ""
+else
+    echo "=========================================================================="
+    echo "PHASE 1: Initiating DeepHP Pre-training Pipeline"
+    echo "=========================================================================="
+    echo ""
+
+    # Call submit_train_deepHP.sh to start pre-training orchestration
+    if [ -f "submit_train_deepHP.sh" ]; then
+        chmod +x submit_train_deepHP.sh
+        # Export ITER so submit_train_deepHP.sh picks it up
+        export MODEL_NAME PROFILE ITER
+        PRETRAINING_OUTPUT=$(./submit_train_deepHP.sh 2>&1)
+        echo "$PRETRAINING_OUTPUT"
+        
+        # Extract summary job ID from the output or file
+        if [ -f "results/deephp_summary_job_id.txt" ]; then
+            DEEPHP_SUMMARY_JOB_ID=$(cat results/deephp_summary_job_id.txt)
+            echo ""
+            echo "✓ Pre-training orchestrator started"
+            echo "  Summary Job ID: $DEEPHP_SUMMARY_JOB_ID"
+            echo ""
+        else
+            echo "ERROR: submit_train_deepHP.sh did not produce summary job ID file"
+            exit 1
+        fi
     else
-        echo "ERROR: submit_train_deepHP.sh did not produce summary job ID file"
+        echo "ERROR: submit_train_deepHP.sh not found"
         exit 1
     fi
-else
-    echo "ERROR: submit_train_deepHP.sh not found"
-    exit 1
-fi
 
-echo "Waiting for DeepHP pre-training to complete (this will take ~20-22 hours)..."
-echo "You can monitor progress in another terminal:"
-echo "  squeue -u \$USER | grep deephp"
-echo ""
+    echo "Waiting for DeepHP pre-training to complete (this will take ~20-22 hours)..."
+    echo "You can monitor progress in another terminal:"
+    echo "  squeue -u \$USER | grep deephp"
+    echo ""
+fi
 
 # ===========================================================================
 # PHASE 2: FINE-TUNING ON HELICODATASET (depends on Phase 1 completion)
@@ -145,9 +169,11 @@ echo ""
 
 
 # 1. Submit pre-sync job (depends on DeepHP pre-training completing)
-echo "Submitting pre-sync job (will start after DeepHP pre-training completes)..."
-PRE_SYNC_JOB=$(sbatch --dependency=afterok:$DEEPHP_SUMMARY_JOB_ID \
-    -p dcca40 --job-name=transfer_presync --output=results/slurm_transfer_presync_%j.txt <<'PRESYNC_EOF'
+echo "Submitting pre-sync job..."
+if [ "$DEEPHP_SUMMARY_JOB_ID" = "0" ]; then
+    echo "(No dependency - starting immediately)"
+    PRE_SYNC_JOB=$(sbatch \
+        -p dcca40 --job-name=transfer_presync --output=results/slurm_transfer_presync_%j.txt <<'PRESYNC_EOF'
 #!/bin/bash
 #SBATCH -p dcca40
 #SBATCH -t 0-01:00
@@ -399,6 +425,262 @@ echo ""
 echo "✓ Pre-sync complete. Ready for transfer learning fine-tuning."
 PRESYNC_EOF
 )
+else
+    echo "(Dependency on pre-training job: $DEEPHP_SUMMARY_JOB_ID)"
+    PRE_SYNC_JOB=$(sbatch --dependency=afterok:$DEEPHP_SUMMARY_JOB_ID \
+        -p dcca40 --job-name=transfer_presync --output=results/slurm_transfer_presync_%j.txt <<'PRESYNC_EOF'
+#!/bin/bash
+#SBATCH -p dcca40
+#SBATCH -t 0-01:00
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=8G
+#SBATCH -J transfer_presync
+
+LOCAL_SCRATCH=$(python3 -c "from config import SCRATCH_ROOT; print(SCRATCH_ROOT)" 2>/dev/null || echo "/tmp/tkeating_h_pylori_data")
+REMOTE_DATA=$(python3 -c "from config import DATASET_ROOT; print(DATASET_ROOT)" 2>/dev/null || echo "/export/hhome/tkeating/datasets/HelicoDataSet")
+
+echo "========================================================================="
+echo "Transfer Learning Pre-Sync: Verifying Data and Syncing to Local Scratch"
+echo "========================================================================="
+echo ""
+
+# Check HelicoDataSet
+HELICO_ROOT="$REMOTE_DATA"
+echo "✓ HelicoDataSet root: $HELICO_ROOT"
+
+if [ ! -d "$HELICO_ROOT" ]; then
+    echo "ERROR: HelicoDataSet not found at $HELICO_ROOT"
+    exit 1
+fi
+
+# Check pre-trained backbone exists
+if [ ! -f "results/deephp_backbone_final_convnext_tiny.pth" ]; then
+    echo "ERROR: Pre-trained backbone not found at results/deephp_backbone_final_convnext_tiny.pth"
+    echo "Please run ./submit_train_deepHP.sh first and wait for completion"
+    exit 1
+fi
+
+echo "✓ Pre-trained backbone found"
+echo ""
+
+# --- LOCAL SCRATCH SETUP ---
+echo "[PRESYNC] Setting up local scratch at $LOCAL_SCRATCH..."
+mkdir -p "$LOCAL_SCRATCH"
+
+# Copy metadata (fast)
+echo "[PRESYNC] Copying metadata files..."
+cp "$REMOTE_DATA"/*.xlsx "$LOCAL_SCRATCH/" 2>/dev/null || true
+cp "$REMOTE_DATA"/*.csv "$LOCAL_SCRATCH/" 2>/dev/null || true
+
+# Clean up any previously synced blacklisted items from scratch before re-syncing
+BLACKLIST_FILE="./blacklist.json"
+
+echo "[PRESYNC] Cleaning blacklisted items from scratch..."
+python3 << CLEANUP_EOF
+import json
+import shutil
+from pathlib import Path
+import sys
+
+blacklist_path = Path("$BLACKLIST_FILE")
+scratch_path = Path("$LOCAL_SCRATCH")
+
+print(f"[CLEANUP] Checking for blacklisted items to remove...")
+print(f"[CLEANUP] Blacklist file: {blacklist_path}")
+print(f"[CLEANUP] Scratch path: {scratch_path}")
+
+if not blacklist_path.exists():
+    print(f"[CLEANUP] WARNING: Blacklist file not found at {blacklist_path}")
+else:
+    if scratch_path.exists():
+        with open(blacklist_path, 'r') as f:
+            data = json.load(f)
+            conflict_bags = list(data.get('conflict_blacklist', {}).keys())
+            image_blacklist = data.get('image_blacklist', [])
+            
+            bag_removed = 0
+            image_removed = 0
+            
+            if conflict_bags:
+                print(f"[CLEANUP] Found {len(conflict_bags)} blacklisted bags to remove")
+                for bag_id in conflict_bags:
+                    for dir_name in ['CrossValidation/Annotated', 'CrossValidation/Cropped', 'HoldOut']:
+                        bag_path = scratch_path / dir_name / bag_id
+                        if bag_path.exists():
+                            shutil.rmtree(bag_path)
+                            bag_removed += 1
+                print(f"[CLEANUP] Removed {bag_removed} blacklisted bags")
+            
+            if image_blacklist:
+                print(f"[CLEANUP] Found {len(image_blacklist)} image-level blacklist items to clean")
+                for item in image_blacklist:
+                    if isinstance(item, dict):
+                        folder = item.get('folder')
+                        filename = item.get('filename')
+                        for dir_name in ['CrossValidation/Annotated', 'CrossValidation/Cropped', 'HoldOut']:
+                            bag_path = scratch_path / dir_name / folder
+                            if bag_path.exists():
+                                file_path = bag_path / filename
+                                if file_path.exists():
+                                    file_path.unlink()
+                                    image_removed += 1
+                print(f"[CLEANUP] Removed {image_removed} image-level files")
+CLEANUP_EOF
+
+# Generate rsync exclude filters from blacklist.json AND identify orphaned patches
+EXCLUDE_FILTER_FILE="/tmp/h_pylori_exclude_filters_$$.txt"
+export EXCLUDE_FILTER_FILE
+
+echo "[PRESYNC] Generating exclude filters from blacklist..."
+python3 << 'PYTHON_EOF'
+import json
+import os
+from pathlib import Path
+
+exclude_filter_file = os.environ['EXCLUDE_FILTER_FILE']
+remote_data = "$REMOTE_DATA"
+
+excludes = []
+
+# --- PART 1: Blacklist exclusions ---
+with open('./blacklist.json') as f:
+    data = json.load(f)
+
+for bag in data.get('conflict_blacklist', {}).keys():
+    excludes.append(f"- {bag}/")
+for item in data.get('image_blacklist', []):
+    if isinstance(item, dict):
+        excludes.append(f"- {item.get('folder')}/{item.get('filename')}")
+
+print(f"[DEBUG] Blacklist: {len(data.get('conflict_blacklist', {}))} bags + {len(data.get('image_blacklist', []))} images")
+
+# --- PART 2: Detect orphaned patches ---
+try:
+    import pandas as pd
+    p_csv = os.path.join(remote_data, "PatientDiagnosis.csv")
+    patch_xlsx = os.path.join(remote_data, "HP_WSI-CoordAnnotatedAllPatches.xlsx")
+    
+    if os.path.exists(p_csv) and os.path.exists(patch_xlsx):
+        print(f"[DEBUG] Loading clinical metadata...")
+        patient_df = pd.read_csv(p_csv)
+        clinical_patients = set(patient_df['CODI'].unique()) if 'CODI' in patient_df.columns else set()
+        
+        patch_df = pd.read_excel(patch_xlsx)
+        annotated_patients = set()
+        if 'Pat_ID' in patch_df.columns:
+            annotated_patients = set(patch_df['Pat_ID'].dropna().unique())
+        
+        valid_patients = clinical_patients.union(annotated_patients)
+        print(f"[DEBUG] Found {len(valid_patients)} valid patients")
+        
+        orphaned_count = 0
+        remote_path = Path(remote_data)
+        for dir_name in ['CrossValidation/Annotated', 'CrossValidation/Cropped', 'HoldOut']:
+            dir_path = remote_path / dir_name
+            if dir_path.exists():
+                for bag_dir in dir_path.iterdir():
+                    if bag_dir.is_dir():
+                        bag_name = bag_dir.name
+                        patient_id = '_'.join(bag_name.split('_')[:-1]) if '_' in bag_name else bag_name
+                        
+                        if patient_id not in valid_patients:
+                            excludes.append(f"- {bag_name}/")
+                            orphaned_count += 1
+        
+        print(f"[DEBUG] Detected {orphaned_count} orphaned bags to exclude")
+    else:
+        print(f"[DEBUG] Clinical metadata not found - skipping orphan detection")
+except ImportError:
+    print(f"[DEBUG] pandas not available - skipping orphan detection")
+except Exception as e:
+    print(f"[DEBUG] Warning: Could not detect orphaned patches: {e}")
+
+with open(exclude_filter_file, 'w') as out:
+    for exclude in excludes:
+        out.write(exclude + "\n")
+    out.write("+ */\n")
+    out.write("- *\n")
+
+print(f"[DEBUG] Wrote {len(excludes)} total exclusion rules")
+PYTHON_EOF
+
+# Sync folders with filter file using exclusive lock
+echo "[PRESYNC] Syncing HelicoDataSet to local scratch..."
+SYNC_LOCK_FILE="/tmp/h_pylori_sync.lock"
+{
+    flock -x 200
+    mkdir -p "$LOCAL_SCRATCH/CrossValidation"
+    if [ -f "$EXCLUDE_FILTER_FILE" ]; then
+        rsync -aq --filter="merge $EXCLUDE_FILTER_FILE" "$REMOTE_DATA/CrossValidation/Annotated" "$LOCAL_SCRATCH/CrossValidation/"
+        rsync -aq --filter="merge $EXCLUDE_FILTER_FILE" "$REMOTE_DATA/CrossValidation/Cropped" "$LOCAL_SCRATCH/CrossValidation/"
+        rsync -aq --filter="merge $EXCLUDE_FILTER_FILE" "$REMOTE_DATA/HoldOut" "$LOCAL_SCRATCH/"
+        rm -f "$EXCLUDE_FILTER_FILE"
+    else
+        echo "[RSYNC] Filter file not found - syncing all files"
+        rsync -aq "$REMOTE_DATA/CrossValidation/Annotated" "$LOCAL_SCRATCH/CrossValidation/"
+        rsync -aq "$REMOTE_DATA/CrossValidation/Cropped" "$LOCAL_SCRATCH/CrossValidation/"
+        rsync -aq "$REMOTE_DATA/HoldOut" "$LOCAL_SCRATCH/"
+    fi
+} 200>"$SYNC_LOCK_FILE"
+
+echo "[PRESYNC] Sync complete - calculating statistics..."
+echo ""
+
+# Print statistics
+echo "=========================================================================="
+echo "Pre-Sync Statistics"
+echo "=========================================================================="
+echo ""
+
+echo "Scratch Directory: $LOCAL_SCRATCH"
+echo "Total size:"
+du -sh "$LOCAL_SCRATCH" 2>/dev/null || echo "  (unable to calculate)"
+echo ""
+
+echo "Directory breakdown:"
+echo "  CrossValidation/Annotated:"
+du -sh "$LOCAL_SCRATCH/CrossValidation/Annotated" 2>/dev/null | sed 's/^/    /' || echo "    (not found)"
+echo "  CrossValidation/Cropped:"
+du -sh "$LOCAL_SCRATCH/CrossValidation/Cropped" 2>/dev/null | sed 's/^/    /' || echo "    (not found)"
+echo "  HoldOut:"
+du -sh "$LOCAL_SCRATCH/HoldOut" 2>/dev/null | sed 's/^/    /' || echo "    (not found)"
+echo ""
+
+echo "File counts:"
+if [ -d "$LOCAL_SCRATCH/CrossValidation/Annotated" ]; then
+    count=$(find "$LOCAL_SCRATCH/CrossValidation/Annotated" -type f | wc -l)
+    echo "  Annotated: $count files"
+fi
+if [ -d "$LOCAL_SCRATCH/CrossValidation/Cropped" ]; then
+    count=$(find "$LOCAL_SCRATCH/CrossValidation/Cropped" -type f | wc -l)
+    echo "  Cropped: $count files"
+fi
+if [ -d "$LOCAL_SCRATCH/HoldOut" ]; then
+    count=$(find "$LOCAL_SCRATCH/HoldOut" -type f | wc -l)
+    echo "  HoldOut: $count files"
+fi
+echo ""
+
+echo "Blacklist Summary:"
+python3 << STATS_EOF
+import json
+try:
+    with open('./blacklist.json') as f:
+        data = json.load(f)
+    conflict = len(data.get('conflict_blacklist', {}))
+    image = len(data.get('image_blacklist', []))
+    print(f"  Conflict bags excluded: {conflict}")
+    print(f"  Image-level exclusions: {image}")
+    print(f"  Total exclusions: {conflict + image}")
+except Exception as e:
+    print(f"  (Unable to read blacklist: {e})")
+STATS_EOF
+
+echo ""
+echo "✓ Pre-sync complete. Ready for transfer learning fine-tuning."
+PRESYNC_EOF
+)
+fi
 
 PRE_SYNC_ID=$(echo $PRE_SYNC_JOB | awk '{print $4}')
 PRE_SYNC_DEPENDENCY="afterok:$PRE_SYNC_ID"
@@ -428,7 +710,9 @@ do
         --export=ALL,FOLD=$FOLD,MODEL_NAME=$MODEL_NAME,ITER=$ITER,NUM_EPOCHS=$NUM_EPOCHS,NEG_WEIGHT=$NEG_WEIGHT,POS_WEIGHT=$POS_WEIGHT,GAMMA=$GAMMA,SAVER_METRIC=$SAVER_METRIC,FREEZE_BN=$FREEZE_BN,CLIP_GRAD=$CLIP_GRAD,PCT_START=$PCT_START,WEIGHT_DECAY=$WEIGHT_DECAY,USE_SWA=$USE_SWA,SWA_START=$SWA_START,JITTER=$JITTER,POOL_TYPE=$POOL_TYPE,FREEZE_BACKBONE=$FREEZE_BACKBONE,SKIP_SYNC=1 \
         <<TRAIN_EOF
 #!/bin/bash
-cd /hhome/ricse03/modelTwyla/H.-Pylori-Contamination-Detection
+# Dynamically resolve project directory
+PROJECT_DIR=\$(python3 -c "import os; print(os.path.dirname(os.path.abspath('${PWD}/train.py')))" 2>/dev/null || echo "/hhome/tkeating/model/H.-Pylori-Contamination-Detection")
+cd "\$PROJECT_DIR"
 
 python3 train.py \
     --fold \$FOLD \
@@ -489,7 +773,7 @@ sbatch --dependency=afterok:$DEPENDENCIES \
     <<'SUMMARY_EOF'
 #!/bin/bash
 #SBATCH -p dcca40
-cd /hhome/ricse03/modelTwyla/H.-Pylori-Contamination-Detection
+cd /hhome/tkeating/model/H.-Pylori-Contamination-Detection
 
 # Get job ID for output filename
 JOB_ID=$SLURM_JOB_ID

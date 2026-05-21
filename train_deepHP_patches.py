@@ -62,6 +62,7 @@ import torch.nn.functional as F
 from dataset_deepHP import DeepHPDataset, create_deephp_transforms_train, create_deephp_transforms_val
 from model import get_model
 from config import DATASET_ROOT, SCRATCH_ROOT, DEEPHP_DATASET_ROOT
+from normalization import MacenkoNormalizer
 from visualization_utils import plot_learning_curves, plot_confusion_matrix, plot_roc_curve, plot_pr_curve
 
 # Function to get next run number (matching train.py pattern)
@@ -240,6 +241,23 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
     optimizer = AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_epochs)
     
+    # Initialize Macenko normalizer for H&E stain normalization (DeepHP uses H&E)
+    print("Initializing Macenko normalizer for H&E stain normalization...")
+    normalizer = MacenkoNormalizer()
+    
+    # Fit normalizer to a reference patch from training set
+    for ref_images, _ in train_loader:
+        # Use first image as reference for fitting
+        ref_image = ref_images[0].to(device)  # [C, H, W]
+        try:
+            normalizer.fit(ref_image, device=device)
+            print("✓ Macenko normalizer fitted to reference patch")
+            break
+        except Exception as e:
+            print(f"Warning: Macenko fit failed ({e}), continuing without H&E normalization")
+            normalizer = None
+            break
+    
     # Training loop
     history = {'train_loss': [], 'train_acc': [], 'val_loss': [], 'val_acc': []}
     best_loss = float('inf')
@@ -258,6 +276,13 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
         for batch_idx, (images, labels) in enumerate(tqdm(train_loader, desc="Training")):
             images = images.to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)
+            
+            # Apply Macenko H&E normalization for stain consistency
+            if normalizer is not None:
+                try:
+                    images = normalizer.normalize_batch(images, jitter=True)  # jitter=True for augmentation
+                except Exception as e:
+                    print(f"Warning: Macenko normalization failed in batch {batch_idx}: {e}")
             
             optimizer.zero_grad()
             
@@ -298,6 +323,13 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
             for images, labels in tqdm(val_loader, desc="Validation"):
                 images = images.to(device, non_blocking=True)
                 labels = labels.to(device, non_blocking=True)
+                
+                # Apply Macenko H&E normalization for stain consistency (no jitter for validation)
+                if normalizer is not None:
+                    try:
+                        images = normalizer.normalize_batch(images, jitter=False)
+                    except Exception as e:
+                        print(f"Warning: Macenko normalization failed in validation: {e}")
                 
                 with torch.amp.autocast(device_type='cuda' if torch.cuda.is_available() else 'cpu'):
                     # Forward pass for patch-level validation

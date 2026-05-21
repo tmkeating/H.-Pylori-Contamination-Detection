@@ -35,7 +35,7 @@ echo "Expected patches: ~394,926 total (111,005 Positive + 283,921 Negative)"
 echo ""
 
 # Using absolute path for accuracy
-python3 /hhome/ricse03/modelTwyla/H.-Pylori-Contamination-Detection/check_global_duplicates_deepHP.py
+python3 /hhome/tkeating/model/H.-Pylori-Contamination-Detection/check_global_duplicates_deepHP.py
 
 echo ""
 echo "✓ DeepHP duplicate detection audit complete!"
