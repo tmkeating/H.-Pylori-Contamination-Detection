@@ -2291,3 +2291,82 @@ Stratification Quality:
     plt.close()
     
     print(f"  ✓ Class distribution analysis saved: {output_path}")
+
+
+def combine_learning_curves(image_paths, labels, output_path, layout='horizontal', figsize=None):
+    """
+    Combine multiple learning curve PNG images into a single composite visualization.
+    
+    This function stitches together existing learning curve images (e.g., from pre-training 
+    and transfer learning) without regenerating any data.
+    
+    Args:
+        image_paths: List of paths to PNG images (e.g., pre-training curves, dataset curves)
+        labels: List of labels for each image (e.g., ["Pre-training (DeepHP)", "Transfer Learning (HelicoDataSet)"])
+        output_path: Path to save composite PNG
+        layout: 'horizontal' (side-by-side) or 'vertical' (stacked), default 'horizontal'
+        figsize: Optional tuple (width, height) in inches. If None, auto-calculated.
+    
+    Output: Combined learning curves PNG showing all stages side-by-side or stacked
+    """
+    from PIL import Image, ImageDraw, ImageFont
+    import os
+    
+    # Verify all images exist
+    missing_files = [p for p in image_paths if not os.path.exists(p)]
+    if missing_files:
+        raise FileNotFoundError(f"Missing image files: {missing_files}")
+    
+    if len(image_paths) != len(labels):
+        raise ValueError(f"Number of image_paths ({len(image_paths)}) must match labels ({len(labels)})")
+    
+    # Load all images
+    images = [Image.open(p).convert('RGB') for p in image_paths]
+    
+    # Get image dimensions
+    widths = [img.width for img in images]
+    heights = [img.height for img in images]
+    
+    # Calculate composite dimensions
+    if layout == 'horizontal':
+        total_width = sum(widths) + (len(images) - 1) * 20  # 20px spacing
+        total_height = max(heights) + 80  # Extra space for labels
+        composite = Image.new('RGB', (total_width, total_height), color='white')
+        
+        # Paste images
+        x_offset = 0
+        for i, img in enumerate(images):
+            composite.paste(img, (x_offset, 60))
+            x_offset += img.width + 20
+        
+        # Add labels at top
+        draw = ImageDraw.Draw(composite)
+        x_offset = 0
+        for i, label in enumerate(labels):
+            # Approximate position (centered above each image)
+            label_x = x_offset + images[i].width // 2 - 30
+            draw.text((label_x, 15), label, fill='black')
+            x_offset += images[i].width + 20
+    
+    else:  # vertical layout
+        total_width = max(widths) + 40
+        total_height = sum(heights) + (len(images) - 1) * 20 + 80  # Spacing + label space
+        composite = Image.new('RGB', (total_width, total_height), color='white')
+        
+        # Paste images
+        y_offset = 60
+        for i, img in enumerate(images):
+            composite.paste(img, (20, y_offset))
+            y_offset += img.height + 20
+        
+        # Add labels on left
+        draw = ImageDraw.Draw(composite)
+        y_offset = 60
+        for i, label in enumerate(labels):
+            draw.text((5, y_offset + images[i].height // 2 - 15), label, fill='black')
+            y_offset += images[i].height + 20
+    
+    # Save composite
+    composite.save(output_path, dpi=(150, 150))
+    print(f"  ✓ Combined learning curves saved: {output_path}")
+    return output_path

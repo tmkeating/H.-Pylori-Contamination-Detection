@@ -37,8 +37,10 @@ report generation. Four operation modes:
   **STANDARD MODES** (Generate specific analysis groups):
     **Pipeline Mode** (--pipeline_mode, default when called from submit_transfer_learning.sh):
       - Generates comprehensive lightweight visual report for presentations
-      - Includes: calibration curve, performance dashboard, ensemble analysis, CV stability, failure modes,
-        class distribution & stratification, training trajectory, and training efficiency
+      - Includes: calibration curve, performance dashboards, ensemble contribution analysis, CV stability 
+        (box plots + bootstrap CIs for robustness), failure modes, class distribution & stratification, 
+        training trajectory, training efficiency, and combined learning curves
+      - When used with transfer learning: outputs separate pre-training and fine-tuning learning curve files
       - Skips redundant visualizations already created during training (ROC, PR, confusion matrix)
       - Runtime: ~8-12 minutes
 
@@ -214,11 +216,17 @@ EXAMPLES
   # Transfer learning comparison with learning curves
   python generate_visuals.py --run_id 31 --compare_baseline 30 --include_transfer_analysis
   
+  # Pipeline mode with combined learning curves (separate files)
+  python generate_visuals.py --run_id 31 --compare_baseline 30 --pipeline_mode --fold 0
+  
   # Data rigor analysis (audit, hard examples, edge cases, trajectory)
   python generate_visuals.py --run_id 31 --include_data_audit --include_failure_modes --include_training_trajectory
   
   # Custom fold split (10-fold cross-validation)
   python generate_visuals.py --run_id 31 --fold 1 --num_folds 10 --dataset both
+  
+  # Combine learning curves (advanced: manual stitching of images)
+  python generate_visuals.py --combine_learning_curves --pretraining_run 30 --dataset_run 31 --fold 0
 
 OUTPUT
 ------
@@ -235,6 +243,8 @@ All visualizations are saved in: results/{RUN_ID}_*
   **Clinical Validation Visualizations (Pipeline Mode):**
   - {RUN_ID}_*_calibration_curve.png - Model calibration (probability reliability)
   - {RUN_ID}_*_performance_dashboard.png - 4-panel summary (confusion, ROC, PR, metrics)
+  - combined_learning_curves_pretraining_f{FOLD}.png - Pre-training learning curves (when using --compare_baseline)
+  - combined_learning_curves_finetuning_f{FOLD}.png - Fine-tuning learning curves (when using --compare_baseline)
   
   **Standard Visualizations (Full Mode):**
   - {RUN_ID}_*_confusion_matrix.png - Patient-level 2x2 confusion matrix
@@ -252,11 +262,18 @@ All visualizations are saved in: results/{RUN_ID}_*
   - training_trajectory_{RUN_ID}_*.png - Loss/accuracy over epochs with convergence analysis
   - training_efficiency_{RUN_ID}.png - 3-panel: wall-clock time, GPU memory, throughput
   - ensemble_voting_agreement_{RUN_ID}.png - Model agreement heatmap across patients
-  - cross_validation_stability_{RUN_ID}.png - Box plots of metrics across 5 folds
+  - cross_validation_stability_{RUN_ID}.png - Box plots of metrics across 5 folds (robustness)
+  - cross_validation_bootstrap_ci_{RUN_ID}.png - Bootstrap 95% CIs showing robustness across patient populations
   - data_integrity_audit_{RUN_ID}.png - 4-panel audit with leakage detection
   - hard_examples_analysis_{RUN_ID}.png - Lowest confidence correct predictions
   - edge_cases_analysis_{RUN_ID}.png - False positives vs false negatives analysis
   - model_complexity_analysis_{RUN_ID}.png - Architecture justification with measured data
+  
+  **Ensemble Performance Dashboards (4-panel with confusion matrix, ROC, PR, metrics):**
+  - ensemble_voting_{RUN_ID}_performance_dashboard.png - Voting ensemble performance
+  - meta_classifier_{RUN_ID}_performance_dashboard.png - Meta classifier performance
+  - hybrid_ensemble_{RUN_ID}_performance_dashboard.png - Hybrid ensemble performance
+  - grand_cv_averages_performance_dashboard.png - Grand cross-validation averages
 
 REQUIREMENTS
 ------------
@@ -318,7 +335,7 @@ from visualization_utils import (
     plot_ensemble_voting_agreement, plot_cross_validation_stability,
     plot_data_integrity_audit, plot_hard_examples_analysis, plot_edge_cases_analysis,
     plot_training_trajectory, plot_training_efficiency, plot_model_complexity_analysis,
-    plot_class_distribution_analysis
+    plot_class_distribution_analysis, combine_learning_curves, plot_bootstrap_confidence_intervals
 )
 
 # --- Config ---
@@ -699,12 +716,9 @@ def full_visual_report(RUN_ID, MODEL_PATH, MODEL_NAME="convnext_tiny", fold_idx=
     print(f"\n[New Visualization] Generating calibration curve (clinical calibration validation)...")
     plot_calibration_curve(all_labels_bin, all_probs, os.path.join("results", f"{full_prefix}_calibration_curve.png"))
     
-    # 7. Patient-Level Performance Dashboard (ALWAYS generate - comprehensive summary for presentations)
-    print(f"[New Visualization] Generating performance dashboard (4-panel summary for presentations)...")
-    plot_patient_performance_dashboard(
-        all_labels_bin, all_preds_bin, all_probs, fold_metrics, bootstrap_ci, 
-        roc_auc, pr_auc, os.path.join("results", f"{full_prefix}_performance_dashboard.png")
-    )
+    # 7. Patient-Level Performance Dashboard (SKIP per-fold - ensemble dashboards generated separately)
+    # Per-fold dashboards not needed since ensemble/meta/hybrid dashboards provide better aggregated view
+    print(f"[Skipped] Per-fold performance dashboard (generated separately for ensembles)")
     
     # 8. Grad-CAM visualizations (ALWAYS generate - model explainability)
     if not args.pipeline_mode:
@@ -913,6 +927,17 @@ if __name__ == "__main__":
     parser.add_argument("--transfer_learning_comparison_only", action="store_true",
                        help="FAST MODE: Only generate transfer learning comparison visualizations (performance + learning curves). "
                             "Skips all other visualizations. Requires --compare_baseline.")
+    parser.add_argument("--combine_learning_curves", action="store_true",
+                       help="Combine multiple learning curve images into a single composite visualization. "
+                            "Requires --pretraining_run and --dataset_run. Layout controlled by --learning_curves_layout.")
+    parser.add_argument("--pretraining_run", type=str, default=None,
+                       help="Run ID for pre-training learning curves (e.g., DeepHP). Used with --combine_learning_curves.")
+    parser.add_argument("--dataset_run", type=str, default=None,
+                       help="Run ID for dataset learning curves (e.g., HelicoDataSet). Used with --combine_learning_curves.")
+    parser.add_argument("--learning_curves_layout", type=str, default="horizontal", 
+                       choices=["horizontal", "vertical"],
+                       help="Layout for combined learning curves: 'horizontal' (side-by-side) or 'vertical' (stacked). "
+                            "Default: horizontal")
     args = parser.parse_args()
     
     # If no run_id provided, use the latest one
@@ -1036,6 +1061,68 @@ if __name__ == "__main__":
             
         except Exception as e:
             print(f"ERROR: Failed to generate transfer learning comparison: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        sys.exit(0)
+    
+    # ========================================================================
+    # COMBINE LEARNING CURVES MODE: Stitch learning curve images together
+    # ========================================================================
+    if args.combine_learning_curves:
+        print(f"\n{'='*80}")
+        print(f"COMBINE MODE: Stitching Learning Curves Together")
+        print(f"{'='*80}\n")
+        
+        if args.pretraining_run is None or args.dataset_run is None:
+            print("ERROR: --combine_learning_curves requires both --pretraining_run and --dataset_run")
+            print("Example: python generate_visuals.py --combine_learning_curves --pretraining_run 30 --dataset_run 31 --fold 0")
+            sys.exit(1)
+        
+        try:
+            # Find learning curve images for both runs
+            pretraining_curves = f"results/{args.pretraining_run}_30.0_*_f{args.fold}_{args.model_name}_learning_curves.png"
+            dataset_curves = f"results/{args.dataset_run}_*_*_f{args.fold}_{args.model_name}_learning_curves.png"
+            
+            # Use glob to find the actual files (since we don't know the job ID)
+            import glob
+            pretraining_files = glob.glob(pretraining_curves)
+            dataset_files = glob.glob(dataset_curves)
+            
+            if not pretraining_files:
+                print(f"ERROR: No pre-training learning curves found for run {args.pretraining_run}, fold {args.fold}")
+                print(f"  Searched for: {pretraining_curves}")
+                sys.exit(1)
+            
+            if not dataset_files:
+                print(f"ERROR: No dataset learning curves found for run {args.dataset_run}, fold {args.fold}")
+                print(f"  Searched for: {dataset_curves}")
+                sys.exit(1)
+            
+            pretraining_curves_path = pretraining_files[0]
+            dataset_curves_path = dataset_files[0]
+            
+            print(f"Pre-training curves:  {pretraining_curves_path}")
+            print(f"Dataset curves:       {dataset_curves_path}\n")
+            
+            # Get dataset name from run ID if available (else use generic labels)
+            pretraining_label = f"Pre-training\n(Run {args.pretraining_run})"
+            dataset_label = f"Transfer Learning\n(Run {args.dataset_run})"
+            
+            # Combine the images
+            output_path = f"results/combined_learning_curves_{args.pretraining_run}_vs_{args.dataset_run}_f{args.fold}_{args.learning_curves_layout}.png"
+            
+            combine_learning_curves(
+                image_paths=[pretraining_curves_path, dataset_curves_path],
+                labels=[pretraining_label, dataset_label],
+                output_path=output_path,
+                layout=args.learning_curves_layout
+            )
+            
+            print(f"\n✓ Combined learning curves saved: {output_path}\n")
+        
+        except Exception as e:
+            print(f"ERROR: Failed to combine learning curves: {e}")
             import traceback
             traceback.print_exc()
         
@@ -1291,6 +1378,48 @@ if __name__ == "__main__":
             print(f"WARNING: Error generating transfer learning analysis: {e}")
     
     # ========================================================================
+    # COMBINED LEARNING CURVES: Pre-training vs Fine-tuning (Pipeline Mode)
+    # ========================================================================
+    if args.pipeline_mode and args.compare_baseline is not None:
+        print(f"\n{'='*80}")
+        print(f"PIPELINE MODE: Combined Learning Curves (Pre-training vs Fine-tuning)")
+        print(f"{'='*80}\n")
+        
+        try:
+            import glob
+            
+            # Find learning curve images for both baseline (pre-training) and current run (fine-tuning)
+            baseline_curves_pattern = f"results/{args.compare_baseline}_*_*_f{args.fold}_*_learning_curves.png"
+            tl_curves_pattern = f"results/{run_id}_*_*_f{args.fold}_*_learning_curves.png"
+            
+            baseline_curves_files = glob.glob(baseline_curves_pattern)
+            tl_curves_files = glob.glob(tl_curves_pattern)
+            
+            if baseline_curves_files and tl_curves_files:
+                baseline_curves_path = baseline_curves_files[0]
+                tl_curves_path = tl_curves_files[0]
+                
+                # Output 2 separate files: one for pre-training, one for fine-tuning
+                pretraining_output = f"results/combined_learning_curves_pretraining_f{args.fold}.png"
+                finetuning_output = f"results/combined_learning_curves_finetuning_f{args.fold}.png"
+                
+                # Copy/reference the images with consistent naming
+                import shutil
+                shutil.copy(baseline_curves_path, pretraining_output)
+                shutil.copy(tl_curves_path, finetuning_output)
+                
+                print(f"  ✓ Pre-training learning curves saved: {pretraining_output}")
+                print(f"  ✓ Fine-tuning learning curves saved: {finetuning_output}")
+            else:
+                if not baseline_curves_files:
+                    print(f"  INFO: Pre-training learning curves not found for fold {args.fold}")
+                if not tl_curves_files:
+                    print(f"  INFO: Fine-tuning learning curves not found for fold {args.fold}")
+        
+        except Exception as e:
+            print(f"  WARNING: Error generating combined learning curves: {e}")
+    
+    # ========================================================================
     # ENSEMBLE ANALYSIS: Voting Agreement & Model Contribution
     # ========================================================================
     if args.include_ensemble_analysis:
@@ -1299,40 +1428,46 @@ if __name__ == "__main__":
         print(f"{'='*80}\n")
         
         try:
-            # Load ensemble voting results
-            ensemble_results_file = f"results/ensemble_voting_results_{run_id}_all_folds.pkl"
-            ensemble_csv = f"results/ensemble_voting_{run_id}_holdout_predictions.csv"
-            
+            import glob
+            # Load individual fold predictions from holdout consensus files
             fold_predictions = []
             labels = None
+            fold_names = []
             
-            # Try to load from ensemble voting results
-            if os.path.exists(ensemble_csv):
-                import pickle
-                
-                # Load individual fold predictions
+            # Use glob to find all holdout_consensus files for this run_id
+            holdout_pattern = f"results/{run_id}_*_*_f*_{args.model_name}_holdout_consensus.csv"
+            holdout_files = sorted(glob.glob(holdout_pattern))
+            
+            if holdout_files:
                 for fold_idx in range(args.num_folds):
-                    fold_csv = f"results/{run_id}_f{fold_idx}_{args.model_name}_predictions.csv"
-                    if os.path.exists(fold_csv):
-                        df = pd.read_csv(fold_csv)
-                        fold_predictions.append(df['Prediction'].values)
-                        if labels is None:
-                            labels = df['Label'].values
+                    # Find the file for this specific fold
+                    fold_pattern = f"results/{run_id}_*_*_f{fold_idx}_{args.model_name}_holdout_consensus.csv"
+                    fold_files = glob.glob(fold_pattern)
+                    if fold_files:
+                        df = pd.read_csv(fold_files[0])
+                        # holdout_consensus files use 'Predicted' column
+                        if 'Predicted' in df.columns:
+                            fold_predictions.append(df['Predicted'].values)
+                            fold_names.append(f"Fold {fold_idx}")
+                        if labels is None and 'Actual' in df.columns:
+                            labels = df['Actual'].values
                 
-                if fold_predictions and labels is not None:
+                if fold_predictions and labels is not None and len(fold_predictions) >= 2:
                     plot_ensemble_voting_agreement(
                         fold_predictions,
                         labels,
                         output_path=f"results/ensemble_voting_agreement_{run_id}.png",
-                        model_names=[f"Fold {i}" for i in range(args.num_folds)],
+                        model_names=fold_names,
                         figsize=(12, 8)
                     )
+                    print(f"  ✓ Ensemble contribution analysis complete ({len(fold_predictions)} folds)")
                 else:
-                    print(f"INFO: Individual fold prediction files not found for ensemble analysis")
+                    print(f"  INFO: Ensemble analysis skipped - need at least 2 folds with holdout data")
             else:
-                print(f"INFO: Ensemble voting results not available: {ensemble_csv}")
+                print(f"  INFO: Ensemble analysis skipped.")
+                print(f"      (Requires holdout_consensus.csv files from training - check if training completed)")
         except Exception as e:
-            print(f"WARNING: Error generating ensemble analysis: {e}")
+            print(f"  INFO: Ensemble analysis skipped - {e}")
     
     # ========================================================================
     # CROSS-VALIDATION STABILITY: Performance Across Folds
@@ -1343,13 +1478,19 @@ if __name__ == "__main__":
         print(f"{'='*80}\n")
         
         try:
-            # Load evaluation reports from each fold
+            import glob
+            # Load evaluation reports from any available folds
+            # (CV stability can work with partial fold data, doesn't need all 5)
             fold_metrics = []
+            folds_found = 0
             
             for fold_idx in range(args.num_folds):
-                eval_report = f"results/{run_id}_{run_id}_f{fold_idx}_{args.model_name}_evaluation_report.csv"
+                # Use glob pattern to find evaluation report with any job_id
+                eval_pattern = f"results/{run_id}_*_*_f{fold_idx}_{args.model_name}_evaluation_report.csv"
+                eval_files = glob.glob(eval_pattern)
+                eval_report = eval_files[0] if eval_files else None
                 
-                if os.path.exists(eval_report):
+                if eval_report and os.path.exists(eval_report):
                     df = pd.read_csv(eval_report)
                     # Extract metrics from the evaluation report
                     metrics_dict = {}
@@ -1362,20 +1503,37 @@ if __name__ == "__main__":
                     
                     if metrics_dict:
                         fold_metrics.append(metrics_dict)
-                else:
-                    print(f"  Note: Evaluation report not found for fold {fold_idx}: {eval_report}")
+                        folds_found += 1
             
-            if fold_metrics and len(fold_metrics) >= args.num_folds // 2:
+            if fold_metrics and folds_found >= 2:  # Need at least 2 folds for stability analysis
                 plot_cross_validation_stability(
                     fold_metrics,
                     metric_names=['Accuracy', 'Sensitivity', 'Specificity', 'F1-Score'],
                     output_path=f"results/cross_validation_stability_{run_id}.png",
                     figsize=(14, 8)
                 )
+                print(f"  ✓ CV stability box plots generated")
+                
+                # Also generate bootstrap CI visualization from grand CV averages
+                # This shows confidence intervals across all patient populations
+                grand_cv_ci_csv = f"results/grand_cv_bootstrap_ci_1-1.csv"
+                if os.path.exists(grand_cv_ci_csv):
+                    try:
+                        plot_bootstrap_confidence_intervals(
+                            grand_cv_ci_csv,
+                            output_path=f"results/cross_validation_bootstrap_ci_{run_id}.png",
+                            figsize=(14, 6)
+                        )
+                        print(f"  ✓ CV bootstrap CI visualization generated (robustness across patient populations)")
+                    except Exception as e:
+                        print(f"  INFO: Could not generate bootstrap CI visualization - {e}")
+                else:
+                    print(f"  INFO: Grand CV bootstrap CI not available - skipping robustness visualization")
             else:
-                print(f"INFO: Insufficient fold metrics for CV stability analysis. Found {len(fold_metrics)} of {args.num_folds} folds.")
+                print(f"INFO: CV stability analysis skipped - found {folds_found} of {args.num_folds} folds.")
+                print(f"      (Requires evaluation reports from at least 2 folds)")
         except Exception as e:
-            print(f"WARNING: Error generating cross-validation stability analysis: {e}")
+            print(f"INFO: CV stability analysis skipped - {e}")
     
     # ========================================================================
     # DATA INTEGRITY & AUDIT: Cross-Leakage Detection
@@ -1411,10 +1569,13 @@ if __name__ == "__main__":
         print(f"{'='*80}\n")
         
         try:
-            # Look for predictions CSV from any fold
-            predictions_file = f"results/{run_id}_f{args.fold}_{args.model_name}_predictions.csv"
+            import glob
+            # Look for predictions CSV from any fold using glob
+            predictions_pattern = f"results/{run_id}_*_*_f{args.fold}_{args.model_name}_predictions.csv"
+            predictions_files = glob.glob(predictions_pattern)
+            predictions_file = predictions_files[0] if predictions_files else None
             
-            if os.path.exists(predictions_file):
+            if predictions_file and os.path.exists(predictions_file):
                 pred_df = pd.read_csv(predictions_file)
                 
                 # Ensure required columns exist
@@ -1457,10 +1618,13 @@ if __name__ == "__main__":
         print(f"{'='*80}\n")
         
         try:
-            # Load predictions CSV from current fold to get labels
-            predictions_file = f"results/{run_id}_f{args.fold}_{args.model_name}_predictions.csv"
+            import glob
+            # Load predictions CSV from current fold using glob to find actual file
+            predictions_pattern = f"results/{run_id}_*_*_f{args.fold}_{args.model_name}_predictions.csv"
+            predictions_files = glob.glob(predictions_pattern)
+            predictions_file = predictions_files[0] if predictions_files else None
             
-            if os.path.exists(predictions_file):
+            if predictions_file and os.path.exists(predictions_file):
                 pred_df = pd.read_csv(predictions_file)
                 
                 if 'Label' in pred_df.columns:
@@ -1500,10 +1664,14 @@ if __name__ == "__main__":
         print(f"{'='*80}\n")
         
         try:
-            # Look for learning curves JSON from training
-            learning_curves_file = f"results/{run_id}_f{args.fold}_{args.model_name}_learning_curves.json"
+            import glob
+            # Look for learning curves JSON from training using glob pattern
+            # Note: These are only available if train.py saved them during training
+            learning_curves_pattern = f"results/{run_id}_*_*_f{args.fold}_{args.model_name}_learning_curves.json"
+            learning_curves_files = glob.glob(learning_curves_pattern)
+            learning_curves_file = learning_curves_files[0] if learning_curves_files else None
             
-            if os.path.exists(learning_curves_file):
+            if learning_curves_file and os.path.exists(learning_curves_file):
                 import json
                 with open(learning_curves_file, 'r') as f:
                     learning_data = json.load(f)
@@ -1523,15 +1691,11 @@ if __name__ == "__main__":
                         output_path=f"results/training_trajectory_{run_id}_f{args.fold}.png",
                         figsize=(14, 5)
                     )
-                else:
-                    print(f"INFO: Learning curves JSON missing required keys: "
-                         f"train_loss={len(train_losses)}, val_loss={len(val_losses)}, "
-                         f"train_acc={len(train_accs)}, val_acc={len(val_accs)}")
             else:
-                print(f"INFO: Learning curves file not found: {learning_curves_file}")
-                print(f"      Training trajectory requires learning curves to be saved during training")
+                print(f"INFO: Training trajectory analysis skipped.")
+                print(f"      (Requires learning_curves.json from training phase - not available for this model)") 
         except Exception as e:
-            print(f"WARNING: Error generating training trajectory analysis: {e}")
+            print(f"INFO: Training trajectory analysis skipped - {e}")
     
     # ========================================================================
     # TRAINING EFFICIENCY: Resource Utilization & Throughput
@@ -1709,6 +1873,162 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"WARNING: Error generating model complexity analysis: {e}")
     
+    # ========================================================================
+    # ENSEMBLE PERFORMANCE DASHBOARDS: Grand CV, Voting, Meta, Hybrid
+    # ========================================================================
+    print(f"\n{'='*80}")
+    print(f"ENSEMBLE PERFORMANCE DASHBOARDS")
+    print(f"{'='*80}\n")
+    
+    # Helper function to generate dashboard from results CSV
+    def generate_ensemble_dashboard(results_csv, bootstrap_ci_csv, dashboard_name, output_prefix):
+        """Generate performance dashboard for ensemble/meta/hybrid results"""
+        try:
+            # Try primary filename first, fall back to alternative names if needed
+            csv_file = results_csv
+            if not os.path.exists(csv_file):
+                # Try alternate naming conventions
+                if 'holdout_predictions' in results_csv:
+                    # Try the report/results variant
+                    csv_file = results_csv.replace('holdout_predictions', 'report' if 'ensemble_voting' in results_csv else 'results')
+                elif 'report' in results_csv or 'results' in results_csv:
+                    # Try the holdout_predictions variant
+                    if 'ensemble_voting' in results_csv:
+                        csv_file = results_csv.replace('report', 'holdout_predictions')
+                    else:
+                        csv_file = results_csv.replace('results', 'holdout_predictions')
+                
+                if not os.path.exists(csv_file):
+                    print(f"  INFO: {dashboard_name} results not available: {results_csv}")
+                    return
+            
+            import glob
+            # Load results
+            results_df = pd.read_csv(csv_file)
+            
+            # Extract labels and predictions
+            if 'Actual' in results_df.columns:
+                labels = results_df['Actual'].values
+            elif 'Label' in results_df.columns:
+                labels = results_df['Label'].values
+            else:
+                print(f"  INFO: Could not find label column in {results_csv}")
+                return
+            
+            # Extract predictions (different column names for different ensemble types)
+            if 'Ensemble_Pred' in results_df.columns:
+                preds = results_df['Ensemble_Pred'].values
+                probs = results_df['Max_Ensemble_Prob'].values
+            elif 'Meta_Pred' in results_df.columns:
+                preds = results_df['Meta_Pred'].values
+                probs = results_df['Meta_Prob'].values
+            elif 'Hybrid_Pred' in results_df.columns:
+                preds = results_df['Hybrid_Pred'].values
+                probs = results_df['Hybrid_Prob'].values
+            elif 'Consensus_Pred' in results_df.columns:  # Grand CV
+                preds = results_df['Consensus_Pred'].values
+                probs = results_df['Consensus_Prob'].values
+            else:
+                print(f"  INFO: Could not find prediction column in {results_csv}")
+                return
+            
+            # Compute ROC-AUC and PR-AUC
+            roc_auc = roc_auc_score(labels, probs)
+            pr_auc = average_precision_score(labels, probs)
+            
+            # Load bootstrap CIs
+            bootstrap_ci = {}
+            if os.path.exists(bootstrap_ci_csv):
+                ci_df = pd.read_csv(bootstrap_ci_csv)
+                for _, row in ci_df.iterrows():
+                    metric_name = row['Metric'].lower()
+                    if metric_name == 'recall':
+                        bootstrap_ci['sensitivity'] = {
+                            'ci_lower': row['CI_Lower_95%'],
+                            'ci_upper': row['CI_Upper_95%']
+                        }
+                    elif metric_name == 'precision':
+                        bootstrap_ci['precision'] = {
+                            'ci_lower': row['CI_Lower_95%'],
+                            'ci_upper': row['CI_Upper_95%']
+                        }
+                    elif metric_name == 'accuracy':
+                        bootstrap_ci['accuracy'] = {
+                            'ci_lower': row['CI_Lower_95%'],
+                            'ci_upper': row['CI_Upper_95%']
+                        }
+                    elif metric_name == 'f1':
+                        bootstrap_ci['f1'] = {
+                            'ci_lower': row['CI_Lower_95%'],
+                            'ci_upper': row['CI_Upper_95%']
+                        }
+                    elif metric_name == 'specificity':
+                        bootstrap_ci['specificity'] = {
+                            'ci_lower': row['CI_Lower_95%'],
+                            'ci_upper': row['CI_Upper_95%']
+                        }
+            else:
+                print(f"  INFO: Bootstrap CI file not found: {bootstrap_ci_csv}")
+            
+            # Compute fold metrics
+            from sklearn.metrics import recall_score, precision_score, accuracy_score, f1_score, confusion_matrix
+            cm = confusion_matrix(labels, preds)
+            tn, fp, fn, tp = cm.ravel() if len(cm.ravel()) == 4 else (0, 0, 0, 0)
+            
+            fold_metrics = {
+                'sensitivity': recall_score(labels, preds, zero_division=0),
+                'specificity': tn / (tn + fp) if (tn + fp) > 0 else 0,
+                'precision': precision_score(labels, preds, zero_division=0),
+                'accuracy': accuracy_score(labels, preds),
+                'f1': f1_score(labels, preds, zero_division=0)
+            }
+            
+            # Generate dashboard
+            plot_patient_performance_dashboard(
+                labels,
+                preds,
+                probs,
+                fold_metrics,
+                bootstrap_ci,
+                roc_auc,
+                pr_auc,
+                output_path=f"results/{output_prefix}_performance_dashboard.png"
+            )
+            print(f"  ✓ {dashboard_name} dashboard saved")
+        
+        except Exception as e:
+            print(f"  INFO: Could not generate {dashboard_name} dashboard - {e}")
+    
+    # Generate ensemble performance dashboards
+    generate_ensemble_dashboard(
+        f"results/ensemble_voting_holdout_predictions_{run_id}-{run_id}.csv",
+        f"results/ensemble_voting_bootstrap_ci_{run_id}-{run_id}.csv",
+        "Ensemble Voting",
+        f"ensemble_voting_{run_id}"
+    )
+    
+    generate_ensemble_dashboard(
+        f"results/meta_classifier_holdout_predictions_{run_id}-{run_id}.csv",
+        f"results/meta_classifier_bootstrap_ci_{run_id}-{run_id}.csv",
+        "Meta Classifier",
+        f"meta_classifier_{run_id}"
+    )
+    
+    generate_ensemble_dashboard(
+        f"results/hybrid_ensemble_holdout_predictions_{run_id}-{run_id}.csv",
+        f"results/hybrid_ensemble_bootstrap_ci_{run_id}-{run_id}.csv",
+        "Hybrid Ensemble",
+        f"hybrid_ensemble_{run_id}"
+    )
+    
+    # Grand CV averages (use 1-1 for combined fold analysis)
+    generate_ensemble_dashboard(
+        f"results/grand_cv_averages_1-1.csv",
+        f"results/grand_cv_bootstrap_ci_1-1.csv",
+        "Grand CV Averages",
+        f"grand_cv_averages"
+    )
+
     print(f"\n{'='*80}")
     print(f"Visual generation complete!")
     print(f"{'='*80}")

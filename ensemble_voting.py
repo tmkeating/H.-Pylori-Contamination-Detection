@@ -17,12 +17,32 @@
 #      C. Hybrid Ensemble: Intelligent combination of A & B (RECOMMENDED ⭐)
 #   3. Produces clinical reports with 95% confidence intervals and statistical rigor
 #
+# Generated Output Files:
+#   **Ensemble Voting:**
+#   - ensemble_voting_report_{run_label}.csv - Main predictions report
+#   - ensemble_voting_holdout_predictions_{run_label}.csv - Explicit holdout predictions (same as report)
+#   - ensemble_voting_bootstrap_ci_{run_label}.csv - Bootstrap CI metrics
+#   - ensemble_voting_summary_{run_label}.csv - Concise metrics summary
+#
+#   **Meta-Classifier:**
+#   - meta_classifier_results_{run_label}.csv - Main predictions report
+#   - meta_classifier_holdout_predictions_{run_label}.csv - Explicit holdout predictions (same as results)
+#   - meta_classifier_bootstrap_ci_{run_label}.csv - Bootstrap CI metrics
+#   - meta_classifier_summary_{run_label}.csv - Concise metrics summary
+#
+#   **Hybrid Ensemble:**
+#   - hybrid_ensemble_results_{run_label}.csv - Main predictions report
+#   - hybrid_ensemble_holdout_predictions_{run_label}.csv - Explicit holdout predictions (same as results)
+#   - hybrid_ensemble_bootstrap_ci_{run_label}.csv - Bootstrap CI metrics
+#   - hybrid_ensemble_summary_{run_label}.csv - Concise metrics summary
+#
 # What's New (v3.0 - Hybrid Integration):
 #   - Hybrid Ensemble: Combines best of both worlds (precision + recall balance)
 #   - 92.11% Accuracy: 0.88% improvement over base methods
 #   - 100% Precision: Zero false positives for clinical safety
 #   - Comprehensive comparison: All three methods analyzed side-by-side
 #   - Bootstrap CI + threshold optimization for all methods
+#   - Explicit holdout_predictions files for clarity
 #
 # Usage:
 #   python3 ensemble_voting.py --runs 297-301
@@ -759,6 +779,11 @@ def main():
     })
     ensemble_df.to_csv(out_name, index=False)
     print(f"\nDetailed report saved to [{out_name}]({out_name})")
+    
+    # Also save with explicit holdout_predictions name for clarity
+    holdout_pred_name = f"results/ensemble_voting_holdout_predictions_{run_label}.csv"
+    ensemble_df.to_csv(holdout_pred_name, index=False)
+    print(f"Holdout predictions also saved to [{holdout_pred_name}]({holdout_pred_name})")
 
 
     # Iteration 24.9: Save a concise summary for easy automated consumption
@@ -958,6 +983,11 @@ def main():
     meta_results['results_df'].to_csv(meta_fusion_name, index=False)
     print(f"✓ Meta-Classifier results saved: {meta_fusion_name}")
     
+    # Also save with explicit holdout_predictions name for clarity
+    meta_holdout_name = f"results/meta_classifier_holdout_predictions_{run_label}.csv"
+    meta_results['results_df'].to_csv(meta_holdout_name, index=False)
+    print(f"✓ Meta-Classifier holdout predictions also saved: {meta_holdout_name}")
+    
     # Save meta_classifier summary with same format as ensemble_voting
     meta_summary_name = f"results/meta_classifier_summary_{run_label}.csv"
     meta_summary_data = {
@@ -1085,6 +1115,11 @@ def main():
     hybrid_fusion_name = f"results/hybrid_ensemble_results_{run_label}.csv"
     hybrid_results['results_df'].to_csv(hybrid_fusion_name, index=False)
     print(f"✓ Hybrid Ensemble results saved: {hybrid_fusion_name}")
+    
+    # Also save with explicit holdout_predictions name for clarity
+    hybrid_holdout_name = f"results/hybrid_ensemble_holdout_predictions_{run_label}.csv"
+    hybrid_results['results_df'].to_csv(hybrid_holdout_name, index=False)
+    print(f"✓ Hybrid Ensemble holdout predictions also saved: {hybrid_holdout_name}")
     
     # Save hybrid ensemble summary
     hybrid_summary_name = f"results/hybrid_ensemble_summary_{run_label}.csv"

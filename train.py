@@ -885,6 +885,11 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
         'train_loss': [], 'train_acc': [],
         'val_loss': [], 'val_acc': []
     }
+    
+    # Track efficiency metrics for later reporting
+    import time
+    training_start_time = time.time()
+    peak_gpu_memory = 0  # Will track peak GPU memory during training
 
     # Create a wrapper for autocast that identifies the actual device type
     def get_autocast_device():
@@ -1060,6 +1065,11 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
         history['train_acc'].append(epoch_acc)
         history['val_loss'].append(val_epoch_loss)
         history['val_acc'].append(val_epoch_acc)
+        
+        # Track peak GPU memory usage for efficiency reporting
+        if torch.cuda.is_available():
+            current_gpu_memory = torch.cuda.max_memory_allocated() / (1024**3)  # Convert to GB
+            peak_gpu_memory = max(peak_gpu_memory, current_gpu_memory)
 
         # --- Report Card: Save the best version ---
         # Strategy selection based on saver_metric. We implement "Tie-Breaking" logic
@@ -1241,9 +1251,37 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
     # Visualizing the convergence behavior is critical for diagnosing 'Recall Oscillations'.
     plot_learning_curves(history, history_path)
     print(f"Saved clinical learning curves to {history_path}")
+    
+    # --- Save Learning Curves as JSON for post-training analysis ---
+    # This allows generate_visuals.py to load and replot learning curves
+    learning_curves_json_path = os.path.join(results_dir, f"{prefix}_learning_curves.json")
+    import json
+    with open(learning_curves_json_path, 'w') as f:
+        json.dump(history, f, indent=2)
+    print(f"Saved learning curves data to {learning_curves_json_path}")
 
     # Step 7.11: Use Best Metric Model for final validation if SWA degraded performance
-    model_selection_metadata = {"use_swa": True, "best_recall": best_recall, "last_val_recall": val_recall}
+    # Calculate training time and efficiency metrics
+    training_end_time = time.time()
+    total_training_time_seconds = training_end_time - training_start_time
+    total_training_time_hours = total_training_time_seconds / 3600
+    
+    # Estimate throughput: patches per second across all training
+    total_training_samples = len(train_indices) * num_epochs  # Approximate
+    throughput_patches_per_sec = total_training_samples / max(total_training_time_seconds, 1)
+    
+    model_selection_metadata = {
+        "use_swa": True, 
+        "best_recall": best_recall, 
+        "last_val_recall": val_recall,
+        # Efficiency metrics
+        "training_time_hours": round(total_training_time_hours, 2),
+        "training_time_seconds": round(total_training_time_seconds, 1),
+        "peak_gpu_memory_gb": round(peak_gpu_memory, 2),
+        "throughput_patches_per_sec": round(throughput_patches_per_sec, 1),
+        "num_epochs": num_epochs,
+        "fold": fold_idx
+    }
     
     if use_swa:
         # Check if Best Recall from loop is higher than SWA's current state
