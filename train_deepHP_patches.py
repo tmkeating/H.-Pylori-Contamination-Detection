@@ -347,6 +347,7 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
         train_loss = 0.0
         train_correct = 0
         train_total = 0
+        epoch_valid_batches = 0  # Track valid batches (exclude those with NaN loss)
         
         for batch_idx, (images, labels) in enumerate(tqdm(train_loader, desc="Training")):
             images = images.to(device, non_blocking=True)
@@ -356,8 +357,14 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
             if normalizer is not None:
                 try:
                     images = normalizer.normalize_batch(images, jitter=True)  # jitter=True for augmentation
+                    # Sanity check: ensure no NaN values after normalization
+                    if torch.isnan(images).any():
+                        print(f"WARNING: Macenko produced NaN values in batch {batch_idx}, using original images")
+                        images = images.to(device, non_blocking=True)  # Reload original from previous state
+                        normalizer = None  # Disable normalizer to prevent future NaN
                 except Exception as e:
                     print(f"Warning: Macenko normalization failed in batch {batch_idx}: {e}")
+                    normalizer = None  # Disable normalizer on error
             
             optimizer.zero_grad()
             
@@ -367,7 +374,15 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
                 logits = model(images)  # [batch_size, num_classes]
                 loss = criterion(logits, labels)
             
+            # Sanity check: ensure loss is valid (not NaN or Inf)
+            if torch.isnan(loss) or torch.isinf(loss):
+                print(f"ERROR: Loss is {loss.item()} in batch {batch_idx} (NaN or Inf detected)")
+                print(f"       Disabling Macenko normalizer and skipping this batch")
+                normalizer = None
+                continue  # Skip this batch to prevent propagation of invalid values
+            
             train_loss += loss.item()
+            epoch_valid_batches += 1
             
             _, predicted = torch.max(logits, 1)
             train_correct += (predicted == labels).sum().item()
@@ -383,7 +398,7 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
                 loss.backward()
                 optimizer.step()
         
-        train_loss /= len(train_loader)
+        train_loss /= max(epoch_valid_batches, 1)  # Avoid division by zero
         train_acc = 100.0 * train_correct / train_total
         
         # Validation
@@ -403,8 +418,13 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
                 if normalizer is not None:
                     try:
                         images = normalizer.normalize_batch(images, jitter=False)
+                        # Sanity check: ensure no NaN values after normalization
+                        if torch.isnan(images).any():
+                            print(f"WARNING: Macenko produced NaN values in validation, disabling normalizer")
+                            normalizer = None  # Disable normalizer to prevent future NaN
                     except Exception as e:
                         print(f"Warning: Macenko normalization failed in validation: {e}")
+                        normalizer = None  # Disable normalizer on error
                 
                 with torch.amp.autocast(device_type='cuda' if torch.cuda.is_available() else 'cpu'):
                     # Forward pass for patch-level validation
@@ -435,11 +455,15 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
         history['val_loss'].append(val_loss)
         history['val_acc'].append(val_acc)
         
-        # Save best model
-        if val_loss < best_loss:
+        # Save best model (defensive: always save on last epoch as fallback)
+        is_best = val_loss < best_loss
+        is_last_epoch = (epoch == num_epochs - 1)
+        
+        if is_best or is_last_epoch:
             best_loss = val_loss
             torch.save(model.state_dict(), best_model_path)
-            print(f"✓ Saved best model to {best_model_path}")
+            status = "best (lowest val loss)" if is_best else "final epoch (fallback)"
+            print(f"✓ Saved {status} model to {best_model_path}")
         
         scheduler.step()
     
@@ -451,6 +475,14 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
     print(f"\n{'='*80}")
     print(f"Final Evaluation (Fold {fold_idx + 1}/{num_folds})")
     print(f"{'='*80}")
+    
+    # Defensive: If best model wasn't saved during training (e.g., due to crash),
+    # save the current model state as fallback
+    if not os.path.exists(best_model_path):
+        print(f"WARNING: Best model checkpoint not found at {best_model_path}")
+        print(f"         This typically means training completed without any validation improvement.")
+        print(f"         Saving current model state as checkpoint...")
+        torch.save(model.state_dict(), best_model_path)
     
     model.load_state_dict(torch.load(best_model_path))
     model.eval()
