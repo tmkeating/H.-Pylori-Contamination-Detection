@@ -15,6 +15,16 @@ Differences from train.py (patient-level MIL training):
 4. Output: Pre-trained backbone weights only
 5. H&E-specific normalization (Macenko or ImageNet)
 
+Macenko Normalization:
+---------------------
+Macenko normalization standardizes H&E color appearance across slides to improve
+model generalization. However, it requires raw RGB patches to work properly.
+
+** NEW FIX (Iteration 25.5): Macenko fitting now uses a separate loader with raw
+patches (NO ImageNet normalization) to preserve H&E color information for fitting.
+ImageNet normalization destroys color information needed for H&E vector extraction,
+causing fitting to fail with ill-conditioned matrices. **
+
 Configuration:
     DeepHP dataset path is set via config.py (DEEPHP_DATASET_ROOT).
     Default: /export/hhome/tkeating/8117177
@@ -245,16 +255,42 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
     print("Initializing Macenko normalizer for H&E stain normalization...")
     normalizer = MacenkoNormalizer()
     
-    # Fit normalizer to a reference patch from training set
+    # Create a minimal transform just for Macenko fitting (raw patches without ImageNet norm)
+    # This is needed because ImageNet normalization destroys H&E color information
+    fit_transform = T.Compose([
+        T.PILToTensor(),  # PIL → uint8 tensor [0, 255]
+        T.ConvertImageDtype(torch.float32),  # uint8 → float32, auto-scales to [0,1]
+        # Note: NO ImageNet normalization here - we need raw colors for Macenko
+    ])
+    
+    # Create a temporary dataset with minimal transforms for fitting
+    fit_dataset = DeepHPDataset(
+        root_dir=deephp_root,
+        transform=fit_transform,
+        fold=fold_idx,
+        num_folds=num_folds,
+        train=True
+    )
+    
+    fit_loader = DataLoader(
+        fit_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=0,  # Minimal parallel loading for quicker fitting
+        pin_memory=False
+    )
+    
+    # Fit normalizer to a reference patch from training set (using raw, unnormalized patches)
     # Try multiple images to find a valid reference (handles corrupted/empty patches)
     fit_successful = False
     attempted_refs = 0
     max_attempts = 10  # Try up to 10 images
     
-    for ref_images, _ in train_loader:
+    print("  Attempting to fit on raw patches (without ImageNet normalization)...")
+    for ref_images, _ in fit_loader:
         for idx in range(min(len(ref_images), 5)):  # Try up to 5 images per batch
             attempted_refs += 1
-            ref_image = ref_images[idx].to(device)  # [C, H, W]
+            ref_image = ref_images[idx].to(device)  # [C, H, W], values in [0, 1]
             
             # Sanity check: Skip mostly white/empty patches (no color information)
             # If image is mostly white (all channels > 0.95), it won't have enough H&E signal
@@ -272,7 +308,9 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
                 error_msg = str(e)
                 # Check for specific convergence issues
                 if "ill-conditioned" in error_msg.lower() or "eigh" in error_msg.lower():
-                    print(f"  [Skip {attempted_refs}] Reference patch ill-conditioned (weak H&E signal): {error_msg}")
+                    print(f"  [Skip {attempted_refs}] Reference patch ill-conditioned (weak H&E signal)")
+                elif "insufficient" in error_msg.lower():
+                    print(f"  [Skip {attempted_refs}] Reference patch has insufficient color variation")
                 else:
                     print(f"  [Skip {attempted_refs}] Macenko fit failed: {error_msg}")
         
@@ -280,17 +318,20 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
             break
         if attempted_refs >= max_attempts:
             print(f"\nWarning: Could not find a valid reference patch after {attempted_refs} attempts")
-            print("  This can happen if:")
-            print("  - All training patches are too bright/empty (no tissue stain)")
-            print("  - Reference patches have inadequate H&E color variation")
-            print("  - Dataset might be preprocessed or degraded")
-            print("Continuing without H&E normalization")
+            print("  This indicates the dataset patches may have:")
+            print("  - Insufficient tissue staining (mostly empty/white regions)")
+            print("  - Poor H&E color variation")
+            print("  - Pre-degraded image quality")
+            print("\nStrategy: Using ImageNet normalization without Macenko (sufficient for backbone pre-training)")
             normalizer = None
             break
     
     if not fit_successful and normalizer is not None:
-        print("Warning: Macenko normalizer fit failed, continuing without H&E normalization")
+        print("Warning: Macenko normalizer fit failed, using ImageNet normalization instead")
         normalizer = None
+    
+    # Clean up fit_loader to free memory
+    del fit_loader, fit_dataset
     
     # Training loop
     history = {'train_loss': [], 'train_acc': [], 'val_loss': [], 'val_acc': []}
