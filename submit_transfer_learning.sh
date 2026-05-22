@@ -839,14 +839,16 @@ echo "Execution Order:"
 echo "  1. Pre-sync ($PRE_SYNC_ID) - Syncs data to scratch"
 echo "  2. Fine-tuning folds (parallel, wait for step 1)"
 echo "  3. Summary & ensemble (waits for step 2)"
+echo "  4. Visualization generation (waits for step 3)"
 echo ""
 echo "=========================================================================="
 echo ""
 
-# 3. Submit final summary job (depends on all 5 folds)
-#    This job runs summarize_results.py, ensemble_voting.py, and meta-classifier
-#    to generate complete performance analysis with confidence intervals
-sbatch --dependency=afterok:$DEPENDENCIES \
+# 3 & 4. Submit summary + visualization jobs (with dependency chain)
+#    Summary job: runs summarize_results.py, ensemble_voting.py
+#    Visualization job: runs generate_visuals.py to create calibration curves and dashboards
+
+SUMMARY_JOB_ID=$(sbatch --dependency=afterok:$DEPENDENCIES \
     -p dcca40 \
     --time=0-02:00 \
     --mem=24G \
@@ -910,20 +912,114 @@ echo "Summary report available at: $SUMMARY_FILE"
 echo ""
 
 SUMMARY_EOF
+)
+
+SUMMARY_JOB_ID=$(echo $SUMMARY_JOB_ID | awk '{print $4}')
+
+echo "=========================================================================="
+echo "✓ Ensemble voting job submitted!"
+echo "  Job ID: $SUMMARY_JOB_ID"
+echo "=========================================================================="
+echo ""
+
+# 4. Submit visualization generation job (depends on ensemble job)
+#    Generates calibration curves, performance dashboards, and optional TL comparison
+echo "Submitting automatic visualization generation job..."
+echo ""
+
+VISUAL_JOB_ID=$(sbatch --dependency=afterok:$SUMMARY_JOB_ID \
+    -p dcca40 \
+    --time=0-02:00 \
+    --mem=16G \
+    --cpus-per-task=4 \
+    --job-name=transfer_visuals \
+    --output=results/slurm_transfer_visuals_%j.txt \
+    --error=results/slurm_transfer_visuals_error_%j.txt \
+    <<'VISUAL_EOF'
+#!/bin/bash
+#SBATCH -p dcca40
+cd /hhome/tkeating/model/H.-Pylori-Contamination-Detection
+
+JOB_ID=$SLURM_JOB_ID
+
+echo "=========================================================================="
+echo "Generating comprehensive visual reports for model analysis..."
+echo "=========================================================================="
+echo ""
+
+# Extract run ID (iteration) from latest checkpoint
+RUN_ID=$(python3 -c "
+import glob
+from pathlib import Path
+# Search for model files matching the current model architecture
+model_pattern = 'results/*_${MODEL_NAME}_model_brain.pth'
+files = sorted(glob.glob(model_pattern))
+if files:
+    # Extract run_id from filename like: 31_25.0_107840_f0_convnext_tiny_model_brain.pth
+    filename = Path(files[-1]).stem
+    parts = filename.split('_')
+    if len(parts) >= 2:
+        print(parts[0])  # This is the run_id (31, 30, etc)
+    else:
+        print('31')
+else:
+    print('31')
+")
+
+echo "Generating visuals for run: $RUN_ID"
+echo ""
+
+# Generate calibration curve + performance dashboard automatically (skip redundant visualizations)
+echo "Step 1: Generating novel visualizations (calibration curve + performance dashboard)..."
+echo "  (Skipping ROC/PR/confusion matrix - already generated during training)"
+python3 generate_visuals.py --run_id $RUN_ID --dataset helicodataset --pipeline_mode 2>&1
+
+echo ""
+echo "=========================================================================="
+echo "✅ Visual reports completed!"
+echo "=========================================================================="
+echo ""
+echo "Generated NEW visualizations (for presentation & clinical validation):"
+echo "  - Calibration Curve: results/${RUN_ID}_*_calibration_curve.png"
+echo "  - Performance Dashboard: results/${RUN_ID}_*_performance_dashboard.png"
+echo ""
+echo "Already generated during training (available in results/):"
+echo "  - Confusion Matrix"
+echo "  - ROC Curve"
+echo "  - PR Curve"
+echo "  - Threshold Analysis"
+echo "  - Probability Histogram"
+echo "  - Learning Curves"
+echo "  - Per-fold metrics CSV"
+echo ""
+echo "To generate full visualizations including Grad-CAM (larger file set):"
+echo "  python3 generate_visuals.py --run_id $RUN_ID  # without --pipeline_mode"
+echo ""
+
+VISUAL_EOF
+)
+
+VISUAL_JOB_ID=$(echo $VISUAL_JOB_ID | awk '{print $4}')
 
 echo "=========================================================================="
 echo "✓ All jobs submitted successfully!"
 echo "=========================================================================="
 echo ""
+echo "Job dependency chain:"
+echo "  1. Summary/Ensemble ($SUMMARY_JOB_ID)"
+echo "  2. Visualizations ($VISUAL_JOB_ID) ← depends on step 1"
+echo ""
 echo "Monitor progress with:"
 echo "  squeue -u $USER | grep transfer"
 echo ""
 echo "View logs with:"
-echo "  tail -f results/slurm_transfer_f*_*.txt"
+echo "  tail -f results/slurm_transfer_summary_*.txt"
+echo "  tail -f results/slurm_transfer_visuals_*.txt"
 echo ""
 echo "Expected timeline:"
 echo "  - Pre-sync: ~2 minutes"
 echo "  - Fine-tuning (5 folds parallel): ~6-8 hours"
-echo "  - Summary job: ~10 minutes"
+echo "  - Ensemble/Summary: ~10 minutes"
+echo "  - Visualization generation: ~10 minutes"
 echo "  Total: ~6-8 hours"
 echo ""
