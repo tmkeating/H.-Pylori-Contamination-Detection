@@ -48,6 +48,7 @@ FOLD=${FOLD:-0}
 NUM_FOLDS=${NUM_FOLDS:-5}
 DATASET=${DATASET:-helicodataset}
 MODEL=${MODEL:-convnext_tiny}
+PIPELINE_MODE=${PIPELINE_MODE:-false}  # true = calibration curve + dashboard only
 
 # Create results directory
 mkdir -p results
@@ -60,6 +61,7 @@ echo "FOLD: $FOLD"
 echo "NUM_FOLDS: $NUM_FOLDS"
 echo "DATASET: $DATASET"
 echo "MODEL: $MODEL"
+echo "PIPELINE_MODE: $PIPELINE_MODE"
 echo "========================================================================="
 echo ""
 
@@ -78,6 +80,10 @@ PYTHON_CMD="$PYTHON_CMD --model_name $MODEL"
 
 if [ -n "$RUN_ID" ]; then
     PYTHON_CMD="$PYTHON_CMD --run_id $RUN_ID"
+fi
+
+if [ "$PIPELINE_MODE" = "true" ]; then
+    PYTHON_CMD="$PYTHON_CMD --pipeline_mode"
 fi
 
 echo "Running: $PYTHON_CMD"

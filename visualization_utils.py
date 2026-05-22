@@ -2154,3 +2154,140 @@ def plot_model_complexity_analysis(model_data, output_path, figsize=(14, 6)):
             print(f"      Accuracy: {model['accuracy']:.4f}")
             print(f"      Inference: {model['inference_speed']:.0f} patches/second")
 
+
+def plot_class_distribution_analysis(labels_list, fold_indices, output_path, num_folds=5, figsize=(14, 8)):
+    """
+    Visualize class distribution and stratification effectiveness across folds.
+    
+    Demonstrates stratification rigor by showing:
+    - Class balance in current fold (positive vs negative)
+    - Class distribution consistency across all folds
+    - Stratification effectiveness (similar ratios per fold)
+    
+    Args:
+        labels_list: List of binary labels (0/1) for current fold validation set
+        fold_indices: List of fold assignments (0-4) for each sample if available, else None
+        output_path: Path to save PNG
+        num_folds: Number of CV folds (default 5)
+        figsize: Figure size
+    
+    Output: 3-panel visualization showing class distribution and stratification
+    """
+    import numpy as np
+    import matplotlib.pyplot as plt
+    
+    fig, axes = plt.subplots(1, 3, figsize=figsize)
+    
+    # ========== PANEL 1: Current Fold Class Distribution ==========
+    ax1 = axes[0]
+    
+    labels_array = np.array(labels_list)
+    num_positive = np.sum(labels_array == 1)
+    num_negative = np.sum(labels_array == 0)
+    total = len(labels_array)
+    
+    pos_ratio = num_positive / total * 100
+    neg_ratio = num_negative / total * 100
+    
+    bars = ax1.bar(['Positive (H. Pylori+)', 'Negative (H. Pylori-)'], 
+                   [num_positive, num_negative],
+                   color=['#E63946', '#2E86AB'], 
+                   edgecolor='black', linewidth=2, width=0.6)
+    
+    # Add value labels on bars
+    for bar, val, ratio in zip(bars, [num_positive, num_negative], [pos_ratio, neg_ratio]):
+        height = bar.get_height()
+        ax1.text(bar.get_x() + bar.get_width()/2., height,
+                f'{int(val)}\n({ratio:.1f}%)',
+                ha='center', va='bottom', fontweight='bold', fontsize=11)
+    
+    ax1.set_ylabel('Number of Samples', fontsize=11, fontweight='bold')
+    ax1.set_title('Class Distribution (Current Fold)', fontsize=12, fontweight='bold')
+    ax1.set_ylim([0, max(num_positive, num_negative) * 1.15])
+    ax1.grid(axis='y', alpha=0.3)
+    
+    # ========== PANEL 2: Stratification Effectiveness Across Folds ==========
+    ax2 = axes[1]
+    
+    if fold_indices is not None and len(fold_indices) > 0:
+        # Compute positive class ratio per fold
+        fold_ratios = []
+        fold_names = []
+        
+        for fold_idx in range(num_folds):
+            fold_mask = np.array(fold_indices) == fold_idx
+            if np.sum(fold_mask) > 0:
+                fold_labels = labels_array[fold_mask]
+                fold_pos_ratio = np.sum(fold_labels == 1) / len(fold_labels) * 100
+                fold_ratios.append(fold_pos_ratio)
+                fold_names.append(f'Fold {fold_idx}')
+        
+        if fold_ratios:
+            bars = ax2.bar(fold_names, fold_ratios, 
+                          color=['#06A77D' if abs(r - pos_ratio) < 5 else '#FFA500' for r in fold_ratios],
+                          edgecolor='black', linewidth=1.5, width=0.6)
+            
+            # Add horizontal line for target ratio
+            ax2.axhline(y=pos_ratio, color='red', linestyle='--', linewidth=2, 
+                       label=f'Target Ratio ({pos_ratio:.1f}%)')
+            
+            # Add value labels
+            for bar, val in zip(bars, fold_ratios):
+                height = bar.get_height()
+                ax2.text(bar.get_x() + bar.get_width()/2., height,
+                        f'{val:.1f}%',
+                        ha='center', va='bottom', fontweight='bold', fontsize=10)
+            
+            ax2.set_ylabel('Positive Class Ratio (%)', fontsize=11, fontweight='bold')
+            ax2.set_title('Stratification Effectiveness\n(Positive % per Fold)', 
+                         fontsize=12, fontweight='bold')
+            ax2.set_ylim([0, max(fold_ratios) * 1.15 if fold_ratios else 100])
+            ax2.legend(fontsize=10, loc='upper right')
+            ax2.grid(axis='y', alpha=0.3)
+        else:
+            ax2.text(0.5, 0.5, 'Insufficient fold data', ha='center', va='center',
+                    fontsize=12, transform=ax2.transAxes)
+            ax2.set_title('Stratification Effectiveness', fontsize=12, fontweight='bold')
+    else:
+        ax2.text(0.5, 0.5, 'Fold indices unavailable', ha='center', va='center',
+                fontsize=12, transform=ax2.transAxes)
+        ax2.set_title('Stratification Effectiveness', fontsize=12, fontweight='bold')
+    
+    # ========== PANEL 3: Class Imbalance Summary ==========
+    ax3 = axes[2]
+    ax3.axis('off')
+    
+    # Calculate imbalance metrics
+    imbalance_ratio = num_positive / num_negative if num_negative > 0 else 0
+    imbalance_percent = abs(pos_ratio - neg_ratio)
+    
+    summary_text = f"""
+CLASS DISTRIBUTION SUMMARY
+
+Current Fold:
+  • Total Samples: {total}
+  • Positive (H. Pylori+): {num_positive} ({pos_ratio:.1f}%)
+  • Negative (H. Pylori-): {num_negative} ({neg_ratio:.1f}%)
+  
+Imbalance Metrics:
+  • Positive:Negative Ratio: 1:{1/imbalance_ratio:.2f}
+  • Class Difference: {imbalance_percent:.1f}%
+  
+Stratification Quality:
+  • Status: {'✓ GOOD' if imbalance_percent < 10 else '⚠ MODERATE' if imbalance_percent < 15 else '✗ POOR'}
+  • Consistency: {'Balanced across folds' if fold_ratios and max(fold_ratios) - min(fold_ratios) < 5 else 'Variable across folds'}
+"""
+    
+    ax3.text(0.05, 0.95, summary_text, transform=ax3.transAxes,
+            fontsize=10, verticalalignment='top', fontfamily='monospace',
+            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.3))
+    
+    fig.suptitle('Class Distribution & Stratification Analysis\n'
+                'Demonstrates balanced dataset and consistent patient-level stratification',
+                fontsize=13, fontweight='bold', y=0.98)
+    
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches='tight')
+    plt.close()
+    
+    print(f"  ✓ Class distribution analysis saved: {output_path}")

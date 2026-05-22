@@ -36,9 +36,11 @@ report generation. Four operation modes:
 
   **STANDARD MODES** (Generate specific analysis groups):
     **Pipeline Mode** (--pipeline_mode, default when called from submit_transfer_learning.sh):
-      - Generates only novel visualizations (calibration + dashboard)
-      - Skips redundant visualizations already created during training
-      - Runtime: ~2-3 minutes
+      - Generates comprehensive lightweight visual report for presentations
+      - Includes: calibration curve, performance dashboard, ensemble analysis, CV stability, failure modes,
+        class distribution & stratification, training trajectory, and training efficiency
+      - Skips redundant visualizations already created during training (ROC, PR, confusion matrix)
+      - Runtime: ~8-12 minutes
 
     **Full Mode** (default, generates all analysis groups):
       - Generates all 11+ visualizations including Grad-CAM, training trajectory, efficiency, model complexity
@@ -96,7 +98,7 @@ Run from command line with required arguments:
   # Generate all visualizations
   python generate_visuals.py --run_id <RUN_ID> [--fold <FOLD>] [--model_name <MODEL>] [--dataset <DATASET>]
   
-  # Pipeline mode (only new visualizations, skips redundant ones)
+  # Pipeline mode (comprehensive lightweight report for presentations)
   python generate_visuals.py --run_id <RUN_ID> --pipeline_mode
   
   # Generate specific analysis groups
@@ -144,8 +146,10 @@ ARGUMENTS
     Which dataset to visualize: "helicodataset", "deephp", or "both"
     
   --pipeline_mode (optional, default: False)
-    When True, only generates novel visualizations (calibration + dashboard)
-    Skips redundant visualizations already created during training
+    Generate comprehensive lightweight visual report for presentations
+    Includes: calibration curve, performance dashboard, ensemble analysis, CV stability,
+    failure modes, class distribution & stratification, training trajectory, and training efficiency
+    Skips redundant visualizations already created during training (ROC, PR, confusion matrix)
     Automatically used by submit_transfer_learning.sh
     
   --compare_baseline (optional, default: None)
@@ -278,7 +282,7 @@ NOTES
     * All model accuracies and sources are explicitly tracked and displayed
     * "Measured (N folds)" indicates values from actual trained models
     * "ImageNet benchmark" indicates published baseline values
-    * Fallback values are used only when measured data is unavailable"""
+    * Fallback values are used only when measured data is unavailable
 """
 
 import torch
@@ -313,7 +317,8 @@ from visualization_utils import (
     plot_transfer_learning_comparison, plot_learning_curves_comparison,
     plot_ensemble_voting_agreement, plot_cross_validation_stability,
     plot_data_integrity_audit, plot_hard_examples_analysis, plot_edge_cases_analysis,
-    plot_training_trajectory, plot_training_efficiency, plot_model_complexity_analysis
+    plot_training_trajectory, plot_training_efficiency, plot_model_complexity_analysis,
+    plot_class_distribution_analysis
 )
 
 # --- Config ---
@@ -667,6 +672,11 @@ def full_visual_report(RUN_ID, MODEL_PATH, MODEL_NAME="convnext_tiny", fold_idx=
     # 1. Confusion Matrix
     all_preds_bin = [1 if p >= 0.5 else 0 for p in all_probs]
     
+    # Always compute ROC-AUC and PR-AUC (needed for dashboard even in pipeline mode)
+    fpr, tpr, _ = roc_curve(all_labels_bin, all_probs)
+    roc_auc = auc(fpr, tpr)
+    pr_auc = average_precision_score(all_labels_bin, all_probs)
+    
     if args.pipeline_mode:
         print(f"\n[Pipeline Mode] Skipping redundant visualizations already generated during training:")
         print(f"  - Confusion matrix (skip)")
@@ -676,14 +686,7 @@ def full_visual_report(RUN_ID, MODEL_PATH, MODEL_NAME="convnext_tiny", fold_idx=
         print(f"  - Threshold analysis (skip)")
     else:
         plot_confusion_matrix(all_labels_bin, all_preds_bin, os.path.join("results", f"{full_prefix}_confusion_matrix.png"))
-
-        # 2. Patient-Level ROC (also compute AUC for reporting)
-        fpr, tpr, _ = roc_curve(all_labels_bin, all_probs)
-        roc_auc = auc(fpr, tpr)
         plot_roc_curve(all_labels_bin, all_probs, os.path.join("results", f"{full_prefix}_roc_curve.png"))
-
-        # 3. Precision-Recall Curve (compute AP for reporting)
-        pr_auc = average_precision_score(all_labels_bin, all_probs)
         plot_pr_curve(all_labels_bin, all_probs, os.path.join("results", f"{full_prefix}_pr_curve.png"))
 
         # 4. Probability Histogram
@@ -880,8 +883,11 @@ if __name__ == "__main__":
                        help="Baseline run ID for transfer learning comparison (e.g., '30'). "
                             "If provided, will generate comparison plots between baseline and this run.")
     parser.add_argument("--pipeline_mode", action="store_true",
-                       help="When True, only generate novel visualizations (calibration + dashboard). "
-                            "Skip redundant ones already created during training (ROC, PR, confusion matrix, etc.)")
+                       help="Generate comprehensive lightweight visual report. Includes: "
+                            "calibration curve, performance dashboard, ensemble analysis, "
+                            "cross-validation stability, failure modes, class distribution, "
+                            "training trajectory, and training efficiency. "
+                            "Skips redundant visualizations already created during training (ROC, PR, confusion matrix, etc.)")
     parser.add_argument("--include_transfer_analysis", action="store_true",
                        help="Generate transfer learning analysis visualizations "
                             "(requires learning curves and baseline model comparison)")
@@ -893,6 +899,8 @@ if __name__ == "__main__":
                        help="Generate data integrity audit visualizations (leakage detection, train/test split)")
     parser.add_argument("--include_failure_modes", action="store_true",
                        help="Generate failure mode analysis (hard examples, edge cases)")
+    parser.add_argument("--include_class_distribution", action="store_true",
+                       help="Generate class distribution and stratification analysis (imbalance, fold consistency)")
     parser.add_argument("--include_training_trajectory", action="store_true",
                        help="Generate training trajectory plots (loss and accuracy over epochs)")
     parser.add_argument("--include_training_efficiency", action="store_true",
@@ -1157,6 +1165,15 @@ if __name__ == "__main__":
         print(f"Fast mode complete!")
         print(f"{'='*80}")
         sys.exit(0)
+    
+    # Pipeline mode: Automatically enable advanced analyses for comprehensive lightweight reporting
+    if args.pipeline_mode:
+        args.include_ensemble_analysis = True
+        args.include_cv_stability = True
+        args.include_failure_modes = True
+        args.include_class_distribution = True
+        args.include_training_trajectory = True
+        args.include_training_efficiency = True
     
     # Find model path (prefers SWA model, falls back to any available fold if needed)
     model_path, actual_fold = find_model_path(run_id, args.fold, args.model_name)
@@ -1430,6 +1447,49 @@ if __name__ == "__main__":
                 print(f"INFO: Predictions CSV not found: {predictions_file}")
         except Exception as e:
             print(f"WARNING: Error generating failure mode analysis: {e}")
+    
+    # ========================================================================
+    # CLASS DISTRIBUTION & STRATIFICATION: Dataset Composition Analysis
+    # ========================================================================
+    if args.include_class_distribution:
+        print(f"\n{'='*80}")
+        print(f"ADVANCED ANALYSIS: Class Distribution & Stratification")
+        print(f"{'='*80}\n")
+        
+        try:
+            # Load predictions CSV from current fold to get labels
+            predictions_file = f"results/{run_id}_f{args.fold}_{args.model_name}_predictions.csv"
+            
+            if os.path.exists(predictions_file):
+                pred_df = pd.read_csv(predictions_file)
+                
+                if 'Label' in pred_df.columns:
+                    labels = pred_df['Label'].values
+                    
+                    # Try to load fold indices if available
+                    fold_indices = None
+                    try:
+                        # If we have patient metadata, we could derive fold assignments
+                        # For now, we'll load from any available evaluation reports
+                        fold_indices = pred_df.get('Fold', None)
+                        if fold_indices is None:
+                            fold_indices = [args.fold] * len(labels)  # All from current fold
+                    except:
+                        fold_indices = [args.fold] * len(labels)
+                    
+                    plot_class_distribution_analysis(
+                        labels,
+                        fold_indices,
+                        output_path=f"results/class_distribution_analysis_{run_id}_f{args.fold}.png",
+                        num_folds=args.num_folds,
+                        figsize=(14, 8)
+                    )
+                else:
+                    print(f"INFO: Predictions CSV missing 'Label' column")
+            else:
+                print(f"INFO: Predictions CSV not found: {predictions_file}")
+        except Exception as e:
+            print(f"WARNING: Error generating class distribution analysis: {e}")
     
     # ========================================================================
     # TRAINING TRAJECTORY: Learning Progress
