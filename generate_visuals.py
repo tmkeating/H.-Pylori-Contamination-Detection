@@ -442,41 +442,23 @@ def full_visual_report(RUN_ID, MODEL_PATH, MODEL_NAME="convnext_tiny", fold_idx=
     vram_bag_limit = 250  # Reduced from 500 to save VRAM, process smaller chunks
     
     print(f"Running Inference on {len(full_dataset)} Validation Patients...")
-    print(f"(Using smaller chunks: max_bag_size=1000, vram_limit={vram_bag_limit}, max_patches_for_gradcam=100)")
+    print(f"(Using efficient MIL aggregation on full bags)")
     
     with torch.no_grad():
         # Also need to track the index in the dataset
         for dataset_idx, (bags, labels, p_ids) in enumerate(tqdm(val_loader, desc="Patient Inference", file=sys.stderr)):
             # bags: (1, bag_size, C, H, W), labels: (1,), p_ids: (1,)
-            bags = bags.squeeze(0)  # (bag_size, C, H, W)
+            bags = bags.squeeze(0).to(DEVICE)  # (bag_size, C, H, W)
             label = labels.item()
             p_id = p_ids[0]
             
             # Store dataset index for later reloading (not the bags themselves)
             pat_to_dataset_idx[p_id] = dataset_idx
             
-            # Divide bag into chunks for VRAM (use 1000 patch chunks for better throughput)
-            bag_size = bags.size(0)
-            bag_probs_list = []
-            chunk_size = 1000  # Process 1000 patches at a time (was 250, too small)
-            
-            if bag_size <= chunk_size:
-                chunk_ranges = [(0, bag_size)]
-            else:
-                chunk_ranges = [(i, min(i + chunk_size, bag_size)) for i in range(0, bag_size, chunk_size)]
-            
-            for start_idx, end_idx in chunk_ranges:
-                chunk = bags[start_idx:end_idx].to(DEVICE)
-                logits, _ = model.forward_bag(chunk)
-                prob = torch.softmax(logits, dim=1)[0, 1].item()
-                bag_probs_list.append(prob)
-                del chunk
-            
-            # Clear cache once per patient (not per chunk) for better throughput
-            torch.cuda.empty_cache()
-            
-            # Average across chunks
-            prob = np.mean(bag_probs_list)
+            # Process entire bag via forward_bag (which handles internal chunking with chunk_size=64)
+            # This preserves proper MIL aggregation across the entire bag
+            logits, _ = model.forward_bag(bags, chunk_size=64)
+            prob = torch.softmax(logits, dim=1)[0, 1].item()
             
             all_probs.append(prob)
             all_labels.append(label)
@@ -491,6 +473,7 @@ def full_visual_report(RUN_ID, MODEL_PATH, MODEL_NAME="convnext_tiny", fold_idx=
             
             # Free bag memory after processing
             del bags
+            torch.cuda.empty_cache()
     all_labels_bin = [1 if l != 0 else 0 for l in all_labels]
     
     # Create performance dataframe for Grad-CAM selection
