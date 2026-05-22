@@ -446,7 +446,7 @@ def full_visual_report(RUN_ID, MODEL_PATH, MODEL_NAME="convnext_tiny", fold_idx=
     
     with torch.no_grad():
         # Also need to track the index in the dataset
-        for dataset_idx, (bags, labels, p_ids) in enumerate(tqdm(val_loader, desc="Patient Inference")):
+        for dataset_idx, (bags, labels, p_ids) in enumerate(tqdm(val_loader, desc="Patient Inference", file=sys.stderr)):
             # bags: (1, bag_size, C, H, W), labels: (1,), p_ids: (1,)
             bags = bags.squeeze(0)  # (bag_size, C, H, W)
             label = labels.item()
@@ -455,29 +455,25 @@ def full_visual_report(RUN_ID, MODEL_PATH, MODEL_NAME="convnext_tiny", fold_idx=
             # Store dataset index for later reloading (not the bags themselves)
             pat_to_dataset_idx[p_id] = dataset_idx
             
-            # Divide bag into chunks for VRAM
+            # Divide bag into chunks for VRAM (use 1000 patch chunks for better throughput)
             bag_size = bags.size(0)
             bag_probs_list = []
+            chunk_size = 1000  # Process 1000 patches at a time (was 250, too small)
             
-            if bag_size <= vram_bag_limit:
+            if bag_size <= chunk_size:
                 chunk_ranges = [(0, bag_size)]
             else:
-                chunk_ranges = []
-                for s in range(0, bag_size - vram_bag_limit + 1, 250):
-                    chunk_ranges.append((s, s + vram_bag_limit))
-                if chunk_ranges[-1][1] < bag_size:
-                    chunk_ranges.append((bag_size - vram_bag_limit, bag_size))
+                chunk_ranges = [(i, min(i + chunk_size, bag_size)) for i in range(0, bag_size, chunk_size)]
             
             for start_idx, end_idx in chunk_ranges:
                 chunk = bags[start_idx:end_idx].to(DEVICE)
                 logits, _ = model.forward_bag(chunk)
                 prob = torch.softmax(logits, dim=1)[0, 1].item()
                 bag_probs_list.append(prob)
-                
-                # Free chunk memory immediately and aggressively clear cache
                 del chunk
-                torch.cuda.empty_cache()
-                gc.collect()
+            
+            # Clear cache once per patient (not per chunk) for better throughput
+            torch.cuda.empty_cache()
             
             # Average across chunks
             prob = np.mean(bag_probs_list)
@@ -495,7 +491,6 @@ def full_visual_report(RUN_ID, MODEL_PATH, MODEL_NAME="convnext_tiny", fold_idx=
             
             # Free bag memory after processing
             del bags
-            torch.cuda.empty_cache()
     all_labels_bin = [1 if l != 0 else 0 for l in all_labels]
     
     # Create performance dataframe for Grad-CAM selection
