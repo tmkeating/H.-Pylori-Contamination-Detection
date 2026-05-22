@@ -270,6 +270,10 @@ class MacenkoNormalizer:
         """
         Fits the normalizer to a reference image to extract target stain vectors.
         reference_img: PIL image or torch.Tensor (C, H, W)
+        
+        Raises:
+            RuntimeError: If reference image is too uniform (ill-conditioned)
+            ValueError: If reference image has insufficient H&E signal
         """
         if isinstance(reference_img, Image.Image):
             # Convert PIL RGB image to a (Channels, Height, Width) Tensor and move to target device
@@ -277,10 +281,50 @@ class MacenkoNormalizer:
         else:
             # If already a tensor, just ensure it is on the correct device (GPU/CPU)
             ref = reference_img.to(device)
+        
+        # Ensure tensor is float type for numerical stability
+        if ref.dtype != torch.float32 and ref.dtype != torch.float64:
+            ref = ref.float()
+            
+        # VALIDATION: Check if reference has sufficient color variation
+        # If the image is mostly uniform (low std), Macenko will fail with ill-conditioned matrix
+        if ref.max() <= 1.0:  # Normalized range [0, 1]
+            std_per_channel = ref.std(dim=[1, 2])
+            mean_intensity = ref.mean()
+        else:  # Range [0, 255]
+            std_per_channel = ref.std(dim=[1, 2])
+            mean_intensity = ref.mean() / 255.0
+        
+        # Check for problematic patterns
+        if std_per_channel.max() < 0.05:
+            raise ValueError(
+                f"Reference patch has insufficient color variation (std={std_per_channel.max():.4f}). "
+                f"Likely an empty/uniform patch with weak H&E signal. "
+                f"Please provide a reference with more staining variation."
+            )
+        
+        if mean_intensity > 0.95:
+            raise ValueError(
+                f"Reference patch is too bright (mean intensity={mean_intensity:.3f}). "
+                f"Likely a mostly white/empty patch with no tissue. "
+                f"Please provide a reference with actual tissue staining."
+            )
             
         # Extract the HE vectors and maximum concentrations from the reference
-        self.normalizer.fit(ref)
-        self.fitted = True
+        try:
+            self.normalizer.fit(ref)
+            self.fitted = True
+        except RuntimeError as e:
+            # Torchstain eigenvalue decomposition failed (ill-conditioned covariance matrix)
+            error_msg = str(e)
+            if "eigh" in error_msg or "singular" in error_msg.lower():
+                raise RuntimeError(
+                    f"Macenko fit failed due to ill-conditioned reference image (eigenvalue decomposition failed). "
+                    f"This usually means the reference patch lacks sufficient H&E color structure. "
+                    f"Original error: {error_msg}"
+                ) from e
+            else:
+                raise RuntimeError(f"Macenko fit failed: {error_msg}") from e
 
     def __call__(self, img):
         # If no reference has been fitted, return the original image as a safety fallback

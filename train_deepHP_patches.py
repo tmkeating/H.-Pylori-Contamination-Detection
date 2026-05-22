@@ -246,17 +246,51 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
     normalizer = MacenkoNormalizer()
     
     # Fit normalizer to a reference patch from training set
+    # Try multiple images to find a valid reference (handles corrupted/empty patches)
+    fit_successful = False
+    attempted_refs = 0
+    max_attempts = 10  # Try up to 10 images
+    
     for ref_images, _ in train_loader:
-        # Use first image as reference for fitting
-        ref_image = ref_images[0].to(device)  # [C, H, W]
-        try:
-            normalizer.fit(ref_image, device=device)
-            print("✓ Macenko normalizer fitted to reference patch")
+        for idx in range(min(len(ref_images), 5)):  # Try up to 5 images per batch
+            attempted_refs += 1
+            ref_image = ref_images[idx].to(device)  # [C, H, W]
+            
+            # Sanity check: Skip mostly white/empty patches (no color information)
+            # If image is mostly white (all channels > 0.95), it won't have enough H&E signal
+            mean_intensity = ref_image.mean()
+            if mean_intensity > 0.95:
+                print(f"  [Skip {attempted_refs}] Reference patch too bright (mean={mean_intensity:.3f}), likely empty/white")
+                continue
+            
+            try:
+                normalizer.fit(ref_image, device=device)
+                print(f"✓ Macenko normalizer fitted to reference patch (attempt {attempted_refs})")
+                fit_successful = True
+                break
+            except Exception as e:
+                error_msg = str(e)
+                # Check for specific convergence issues
+                if "ill-conditioned" in error_msg.lower() or "eigh" in error_msg.lower():
+                    print(f"  [Skip {attempted_refs}] Reference patch ill-conditioned (weak H&E signal): {error_msg}")
+                else:
+                    print(f"  [Skip {attempted_refs}] Macenko fit failed: {error_msg}")
+        
+        if fit_successful:
             break
-        except Exception as e:
-            print(f"Warning: Macenko fit failed ({e}), continuing without H&E normalization")
+        if attempted_refs >= max_attempts:
+            print(f"\nWarning: Could not find a valid reference patch after {attempted_refs} attempts")
+            print("  This can happen if:")
+            print("  - All training patches are too bright/empty (no tissue stain)")
+            print("  - Reference patches have inadequate H&E color variation")
+            print("  - Dataset might be preprocessed or degraded")
+            print("Continuing without H&E normalization")
             normalizer = None
             break
+    
+    if not fit_successful and normalizer is not None:
+        print("Warning: Macenko normalizer fit failed, continuing without H&E normalization")
+        normalizer = None
     
     # Training loop
     history = {'train_loss': [], 'train_acc': [], 'val_loss': [], 'val_acc': []}
