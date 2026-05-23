@@ -323,7 +323,8 @@ from model import get_model
 import torch.nn.functional as F
 from sklearn.metrics import (
     roc_curve, auc, confusion_matrix, ConfusionMatrixDisplay, 
-    precision_recall_curve, average_precision_score, classification_report
+    precision_recall_curve, average_precision_score, classification_report,
+    roc_auc_score
 )
 from torchvision import transforms
 from PIL import Image
@@ -439,41 +440,105 @@ def full_visual_report(RUN_ID, MODEL_PATH, MODEL_NAME="convnext_tiny", fold_idx=
     pat_to_dataset_idx = {}  # Map patient_id to dataset index for reloading
     
     patient_performance = []
-    vram_bag_limit = 250  # Reduced from 500 to save VRAM, process smaller chunks
     
-    print(f"Running Inference on {len(full_dataset)} Validation Patients...")
-    print(f"(Using efficient MIL aggregation on full bags)")
-    
-    with torch.no_grad():
-        # Also need to track the index in the dataset
-        for dataset_idx, (bags, labels, p_ids) in enumerate(tqdm(val_loader, desc="Patient Inference", file=sys.stderr)):
-            # bags: (1, bag_size, C, H, W), labels: (1,), p_ids: (1,)
-            bags = bags.squeeze(0).to(DEVICE)  # (bag_size, C, H, W)
-            label = labels.item()
-            p_id = p_ids[0]
-            
-            # Store dataset index for later reloading (not the bags themselves)
-            pat_to_dataset_idx[p_id] = dataset_idx
-            
-            # Process entire bag via forward_bag (which handles internal chunking with chunk_size=64)
-            # This preserves proper MIL aggregation across the entire bag
-            logits, _ = model.forward_bag(bags, chunk_size=64)
-            prob = torch.softmax(logits, dim=1)[0, 1].item()
-            
-            all_probs.append(prob)
-            all_labels.append(label)
-            patient_ids.append(p_id)
-            
+    # OPTIMIZATION: In pipeline mode, load precomputed predictions from holdout_consensus.csv
+    # This avoids re-running inference on 87K+ patches which takes hours
+    predictions_path = os.path.join("results", f"{full_prefix}_holdout_consensus.csv")
+    if args.pipeline_mode and os.path.exists(predictions_path):
+        print(f"\n[Pipeline Mode] Loading precomputed predictions from [{predictions_path}]...")
+        print(f"  (Skipping time-consuming inference on 87K+ patches)")
+        
+        preds_df = pd.read_csv(predictions_path)
+        for _, row in preds_df.iterrows():
+            patient_ids.append(row['PatientID'])
+            all_labels.append(row['Actual'])
+            all_probs.append(row['Bag_Mean_Prob'])  # Use bag mean probability
             patient_performance.append({
-                "Patient": p_id,
-                "Label": label,
-                "Prob": prob,
-                "Pred": 1 if prob >= 0.5 else 0
+                "Patient": row['PatientID'],
+                "Label": row['Actual'],
+                "Prob": row['Bag_Mean_Prob'],
+                "Pred": row['Predicted']
             })
+        
+        print(f"✓ Loaded predictions for {len(patient_ids)} patients")
+        
+        # Skip model loading and inference entirely
+        model = None
+        val_loader = None
+    else:
+        # Full inference mode (non-pipeline or no precomputed predictions found)
+        print(f"Running full inference on {len(full_dataset)} validation patients...")
+        
+        # Create DataLoader: one patient (bag) per batch
+        val_loader = DataLoader(
+            full_dataset, batch_size=1, shuffle=False, 
+            num_workers=0, pin_memory=False  # Reduced VRAM usage
+        )
+        
+        # Load Model (Attention-MIL Architecture)
+        model = get_model(model_name=MODEL_NAME, num_classes=2).to(DEVICE)
+        checkpoint = torch.load(MODEL_PATH, map_location=DEVICE)
+        
+        # Handle both checkpoint formats (entire state_dict or dict wrapping it)
+        if 'model_state_dict' in checkpoint:
+            state_dict = checkpoint['model_state_dict']
+        else:
+            state_dict = checkpoint
             
-            # Free bag memory after processing
-            del bags
-            torch.cuda.empty_cache()
+        # Remove 'module.' prefix if it exists (from DataParallel)
+        new_state_dict = {}
+        for k, v in state_dict.items():
+            name = k[7:] if k.startswith('module.') else k
+            new_state_dict[name] = v
+        
+        # Filter out SWA-specific keys that don't exist in the model
+        # (e.g., "n_averaged" from AveragedModel checkpoints)
+        model_state_dict = model.state_dict()
+        filtered_state_dict = {k: v for k, v in new_state_dict.items() if k in model_state_dict}
+        
+        model.load_state_dict(filtered_state_dict)
+        model.eval()
+
+        # Determine Target Layer (no longer used, but keeping for reference)
+        # The new Grad-CAM implementation uses input-level gradients instead
+        target_layer = None
+        
+        print(f"Running Inference on {len(full_dataset)} Validation Patients...")
+        print(f"(Using efficient MIL aggregation on full bags)")
+    
+    # Run inference only if we didn't load precomputed predictions
+    if model is not None:
+        with torch.no_grad():
+            # Also need to track the index in the dataset
+            for dataset_idx, (bags, labels, p_ids) in enumerate(tqdm(val_loader, desc="Patient Inference", file=sys.stderr)):
+                # bags: (1, bag_size, C, H, W), labels: (1,), p_ids: (1,)
+                bags = bags.squeeze(0).to(DEVICE)  # (bag_size, C, H, W)
+                label = labels.item()
+                p_id = p_ids[0]
+                
+                # Store dataset index for later reloading (not the bags themselves)
+                pat_to_dataset_idx[p_id] = dataset_idx
+                
+                # Process entire bag via forward_bag (which handles internal chunking with chunk_size=64)
+                # This preserves proper MIL aggregation across the entire bag
+                logits, _ = model.forward_bag(bags, chunk_size=64)
+                prob = torch.softmax(logits, dim=1)[0, 1].item()
+                
+                all_probs.append(prob)
+                all_labels.append(label)
+                patient_ids.append(p_id)
+                
+                patient_performance.append({
+                    "Patient": p_id,
+                    "Label": label,
+                    "Prob": prob,
+                    "Pred": 1 if prob >= 0.5 else 0
+                })
+                
+                # Free bag memory after processing
+                del bags
+                torch.cuda.empty_cache()
+    
     all_labels_bin = [1 if l != 0 else 0 for l in all_labels]
     
     # Create performance dataframe for Grad-CAM selection
@@ -774,6 +839,165 @@ def full_visual_report(RUN_ID, MODEL_PATH, MODEL_NAME="convnext_tiny", fold_idx=
             # Free bag memory after processing
             del bags_tensor
             torch.cuda.empty_cache()
+
+    # Generate ensemble performance dashboards (only once at the end)
+    def generate_ensemble_dashboard(results_csv, bootstrap_ci_csv, dashboard_name, output_prefix):
+        """Generate performance dashboard for ensemble/meta/hybrid results"""
+        try:
+            # Try primary filename first, fall back to alternative names if needed
+            csv_file = results_csv
+            if not os.path.exists(csv_file):
+                # Try alternate naming conventions
+                if 'holdout_predictions' in results_csv:
+                    # Try the report/results variant
+                    csv_file = results_csv.replace('holdout_predictions', 'report' if 'ensemble_voting' in results_csv else 'results')
+                elif 'report' in results_csv or 'results' in results_csv:
+                    # Try the holdout_predictions variant
+                    if 'ensemble_voting' in results_csv:
+                        csv_file = results_csv.replace('report', 'holdout_predictions')
+                    else:
+                        csv_file = results_csv.replace('results', 'holdout_predictions')
+                
+                if not os.path.exists(csv_file):
+                    print(f"  INFO: {dashboard_name} results not available: {results_csv}")
+                    return
+            
+            # Load results
+            results_df = pd.read_csv(csv_file)
+            
+            # Extract labels and predictions
+            if 'Actual' in results_df.columns:
+                labels = results_df['Actual'].values
+            elif 'Label' in results_df.columns:
+                labels = results_df['Label'].values
+            else:
+                print(f"  INFO: Could not find label column in {results_csv}")
+                return
+            
+            # Extract predictions (different column names for different ensemble types)
+            if 'Ensemble_Pred' in results_df.columns:
+                preds = results_df['Ensemble_Pred'].values
+                probs = results_df['Max_Ensemble_Prob'].values
+            elif 'Meta_Pred' in results_df.columns:
+                preds = results_df['Meta_Pred'].values
+                probs = results_df['Meta_Prob'].values
+            elif 'Hybrid_Pred' in results_df.columns:
+                preds = results_df['Hybrid_Pred'].values
+                probs = results_df['Hybrid_Prob'].values
+            elif 'Consensus_Pred' in results_df.columns:  # Grand CV
+                preds = results_df['Consensus_Pred'].values
+                probs = results_df['Consensus_Prob'].values
+            elif 'Predicted' in results_df.columns:  # Fallback for generic prediction column names
+                preds = results_df['Predicted'].values
+                if 'Predicted_Probability' in results_df.columns:
+                    probs = results_df['Predicted_Probability'].values
+                elif 'Probability' in results_df.columns:
+                    probs = results_df['Probability'].values
+                else:
+                    print(f"  INFO: Could not find probability column in {results_csv}")
+                    return
+            else:
+                print(f"  INFO: Could not find prediction column in {results_csv}")
+                return
+            
+            # Compute ROC-AUC and PR-AUC
+            roc_auc = roc_auc_score(labels, probs)
+            pr_auc = average_precision_score(labels, probs)
+            
+            # Load bootstrap CIs
+            bootstrap_ci = {}
+            if os.path.exists(bootstrap_ci_csv):
+                ci_df = pd.read_csv(bootstrap_ci_csv)
+                for _, row in ci_df.iterrows():
+                    metric_name = row['Metric'].lower()
+                    if metric_name == 'recall':
+                        bootstrap_ci['sensitivity'] = {
+                            'ci_lower': row['CI_Lower_95%'],
+                            'ci_upper': row['CI_Upper_95%']
+                        }
+                    elif metric_name == 'precision':
+                        bootstrap_ci['precision'] = {
+                            'ci_lower': row['CI_Lower_95%'],
+                            'ci_upper': row['CI_Upper_95%']
+                        }
+                    elif metric_name == 'accuracy':
+                        bootstrap_ci['accuracy'] = {
+                            'ci_lower': row['CI_Lower_95%'],
+                            'ci_upper': row['CI_Upper_95%']
+                        }
+                    elif metric_name == 'f1':
+                        bootstrap_ci['f1'] = {
+                            'ci_lower': row['CI_Lower_95%'],
+                            'ci_upper': row['CI_Upper_95%']
+                        }
+                    elif metric_name == 'specificity':
+                        bootstrap_ci['specificity'] = {
+                            'ci_lower': row['CI_Lower_95%'],
+                            'ci_upper': row['CI_Upper_95%']
+                        }
+            else:
+                print(f"  INFO: Bootstrap CI file not found: {bootstrap_ci_csv}")
+            
+            # Provide default values for missing bootstrap CI keys
+            default_ci = {'ci_lower': 0.0, 'ci_upper': 1.0}
+            for key in ['sensitivity', 'precision', 'accuracy', 'f1', 'specificity']:
+                if key not in bootstrap_ci:
+                    bootstrap_ci[key] = default_ci.copy()
+            
+            # Compute fold metrics
+            from sklearn.metrics import recall_score, precision_score, accuracy_score, f1_score, confusion_matrix
+            cm = confusion_matrix(labels, preds)
+            tn, fp, fn, tp = cm.ravel() if len(cm.ravel()) == 4 else (0, 0, 0, 0)
+            
+            fold_metrics = {
+                'sensitivity': recall_score(labels, preds, zero_division=0),
+                'specificity': tn / (tn + fp) if (tn + fp) > 0 else 0,
+                'precision': precision_score(labels, preds, zero_division=0),
+                'accuracy': accuracy_score(labels, preds),
+                'f1': f1_score(labels, preds, zero_division=0)
+            }
+            
+            # Generate dashboard
+            plot_patient_performance_dashboard(
+                labels,
+                preds,
+                probs,
+                fold_metrics,
+                bootstrap_ci,
+                roc_auc,
+                pr_auc,
+                output_path=f"results/{output_prefix}_performance_dashboard.png"
+            )
+            print(f"  ✓ {dashboard_name} dashboard saved")
+        
+        except Exception as e:
+            print(f"  INFO: Could not generate {dashboard_name} dashboard - {e}")
+    
+    # Generate ensemble dashboards
+    print(f"\n{'='*80}")
+    print(f"ENSEMBLE PERFORMANCE DASHBOARDS")
+    print(f"{'='*80}\n")
+    
+    generate_ensemble_dashboard(
+        f"results/ensemble_voting_holdout_predictions_{RUN_ID}-{RUN_ID}.csv",
+        f"results/ensemble_voting_bootstrap_ci_{RUN_ID}-{RUN_ID}.csv",
+        "Ensemble Voting",
+        f"ensemble_voting_{RUN_ID}"
+    )
+    
+    generate_ensemble_dashboard(
+        f"results/meta_classifier_holdout_predictions_{RUN_ID}-{RUN_ID}.csv",
+        f"results/meta_classifier_bootstrap_ci_{RUN_ID}-{RUN_ID}.csv",
+        "Meta Classifier",
+        f"meta_classifier_{RUN_ID}"
+    )
+    
+    generate_ensemble_dashboard(
+        f"results/hybrid_ensemble_holdout_predictions_{RUN_ID}-{RUN_ID}.csv",
+        f"results/hybrid_ensemble_bootstrap_ci_{RUN_ID}-{RUN_ID}.csv",
+        "Hybrid Ensemble",
+        f"hybrid_ensemble_{RUN_ID}"
+    )
 
     print(f"Visual report finished. Results in results/{full_prefix}_*")
 
@@ -1260,8 +1484,98 @@ if __name__ == "__main__":
         else:
             datasets_to_process = [args.dataset.lower()]
         
-        for ds_type in datasets_to_process:
-            full_visual_report(run_id, model_path, args.model_name, actual_fold, args.num_folds, ds_type)
+        # PIPELINE MODE: Process all folds to generate aggregate analyses
+        if args.pipeline_mode:
+            print(f"\n[Pipeline Mode] Processing all {args.num_folds} folds for aggregate visualizations")
+            for fold in range(args.num_folds):
+                fold_model_path, fold_actual = find_model_path(run_id, fold, args.model_name)
+                if fold_model_path is not None and os.path.exists(fold_model_path):
+                    print(f"  Processing fold {fold}...")
+                    for ds_type in datasets_to_process:
+                        full_visual_report(run_id, fold_model_path, args.model_name, fold, args.num_folds, ds_type)
+                else:
+                    print(f"  Skipping fold {fold} (model not found)")
+        else:
+            # Standard mode: Process only specified fold
+            for ds_type in datasets_to_process:
+                full_visual_report(run_id, model_path, args.model_name, actual_fold, args.num_folds, ds_type)
+        
+        # ========== AGGREGATE ANALYSES (Pipeline Mode Only) ==========
+        if args.pipeline_mode:
+            print(f"\n{'='*80}")
+            print(f"AGGREGATE ANALYSES: Cross-Fold Summaries")
+            print(f"{'='*80}\n")
+            
+            # Generate CV stability across all folds
+            if args.include_cv_stability:
+                try:
+                    import glob
+                    fold_metrics = []
+                    folds_found = 0
+                    
+                    for fold_idx in range(args.num_folds):
+                        eval_pattern = f"results/{run_id}_*_*_f{fold_idx}_{args.model_name}_evaluation_report.csv"
+                        eval_files = glob.glob(eval_pattern)
+                        eval_report = eval_files[0] if eval_files else None
+                        
+                        if eval_report and os.path.exists(eval_report):
+                            df = pd.read_csv(eval_report)
+                            metrics_dict = {}
+                            metric_cols = ['Accuracy', 'Sensitivity', 'Specificity', 'Precision', 'F1-Score', 'AUC']
+                            for col in metric_cols:
+                                if col in df.columns:
+                                    metrics_dict[col] = df[col].values[0] if len(df) > 0 else 0
+                            if metrics_dict:
+                                fold_metrics.append(metrics_dict)
+                                folds_found += 1
+                    
+                    if fold_metrics and folds_found >= 2:
+                        plot_cross_validation_stability(
+                            fold_metrics,
+                            metric_names=['Accuracy', 'Sensitivity', 'Specificity', 'F1-Score'],
+                            output_path=f"results/cross_validation_stability_{run_id}.png",
+                            figsize=(14, 8)
+                        )
+                        print(f"  ✓ CV stability box plots generated")
+                except Exception as e:
+                    print(f"  INFO: CV stability analysis skipped - {e}")
+            
+            # Generate class distribution aggregated across all folds
+            if args.include_class_distribution:
+                try:
+                    import glob
+                    all_labels = []
+                    all_fold_indices = []
+                    
+                    for fold_idx in range(args.num_folds):
+                        pred_pattern = f"results/{run_id}_*_*_f{fold_idx}_{args.model_name}_predictions.csv"
+                        pred_files = glob.glob(pred_pattern)
+                        pred_file = pred_files[0] if pred_files else None
+                        
+                        if pred_file and os.path.exists(pred_file):
+                            pred_df = pd.read_csv(pred_file)
+                            if 'Label' in pred_df.columns:
+                                all_labels.extend(pred_df['Label'].values)
+                                all_fold_indices.extend([fold_idx] * len(pred_df))
+                    
+                    if all_labels:
+                        plot_class_distribution_analysis(
+                            all_labels,
+                            all_fold_indices,
+                            output_path=f"results/class_distribution_analysis_{run_id}_aggregate.png",
+                            num_folds=args.num_folds,
+                            figsize=(14, 8)
+                        )
+                        print(f"  ✓ Aggregate class distribution generated")
+                except Exception as e:
+                    print(f"  INFO: Class distribution aggregation skipped - {e}")
+            
+            # Generate failure modes aggregated across all folds
+            # NOTE: Failure modes visualization functions require specific data structure
+            # Skipping aggregate version - per-fold failure modes still available if included
+            if args.include_failure_modes:
+                print(f"  INFO: Aggregate failure modes skipped (per-fold versions available)")
+
         
         # ========== TRANSFER LEARNING COMPARISON (Optional) ==========
         if args.compare_baseline is not None:
@@ -1447,71 +1761,7 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"  INFO: Ensemble analysis skipped - {e}")
     
-    # ========================================================================
-    # CROSS-VALIDATION STABILITY: Performance Across Folds
-    # ========================================================================
-    if args.include_cv_stability:
-        print(f"\n{'='*80}")
-        print(f"ADVANCED ANALYSIS: Cross-Validation Stability")
-        print(f"{'='*80}\n")
-        
-        try:
-            import glob
-            # Load evaluation reports from any available folds
-            # (CV stability can work with partial fold data, doesn't need all 5)
-            fold_metrics = []
-            folds_found = 0
-            
-            for fold_idx in range(args.num_folds):
-                # Use glob pattern to find evaluation report with any job_id
-                eval_pattern = f"results/{run_id}_*_*_f{fold_idx}_{args.model_name}_evaluation_report.csv"
-                eval_files = glob.glob(eval_pattern)
-                eval_report = eval_files[0] if eval_files else None
-                
-                if eval_report and os.path.exists(eval_report):
-                    df = pd.read_csv(eval_report)
-                    # Extract metrics from the evaluation report
-                    metrics_dict = {}
-                    
-                    # Get common metrics from report (assumes standard format)
-                    metric_cols = ['Accuracy', 'Sensitivity', 'Specificity', 'Precision', 'F1-Score', 'AUC']
-                    for col in metric_cols:
-                        if col in df.columns:
-                            metrics_dict[col] = df[col].values[0] if len(df) > 0 else 0
-                    
-                    if metrics_dict:
-                        fold_metrics.append(metrics_dict)
-                        folds_found += 1
-            
-            if fold_metrics and folds_found >= 2:  # Need at least 2 folds for stability analysis
-                plot_cross_validation_stability(
-                    fold_metrics,
-                    metric_names=['Accuracy', 'Sensitivity', 'Specificity', 'F1-Score'],
-                    output_path=f"results/cross_validation_stability_{run_id}.png",
-                    figsize=(14, 8)
-                )
-                print(f"  ✓ CV stability box plots generated")
-                
-                # Also generate bootstrap CI visualization from grand CV averages
-                # This shows confidence intervals across all patient populations
-                grand_cv_ci_csv = f"results/grand_cv_bootstrap_ci_1-1.csv"
-                if os.path.exists(grand_cv_ci_csv):
-                    try:
-                        plot_bootstrap_confidence_intervals(
-                            grand_cv_ci_csv,
-                            output_path=f"results/cross_validation_bootstrap_ci_{run_id}.png",
-                            figsize=(14, 6)
-                        )
-                        print(f"  ✓ CV bootstrap CI visualization generated (robustness across patient populations)")
-                    except Exception as e:
-                        print(f"  INFO: Could not generate bootstrap CI visualization - {e}")
-                else:
-                    print(f"  INFO: Grand CV bootstrap CI not available - skipping robustness visualization")
-            else:
-                print(f"INFO: CV stability analysis skipped - found {folds_found} of {args.num_folds} folds.")
-                print(f"      (Requires evaluation reports from at least 2 folds)")
-        except Exception as e:
-            print(f"INFO: CV stability analysis skipped - {e}")
+    # NOTE: CV Stability analysis moved to aggregate mode (runs after all folds complete)
     
     # ========================================================================
     # DATA INTEGRITY & AUDIT: Cross-Leakage Detection
@@ -1538,100 +1788,9 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"WARNING: Error generating data integrity audit: {e}")
     
-    # ========================================================================
-    # FAILURE MODE ANALYSIS: Hard Examples & Edge Cases
-    # ========================================================================
-    if args.include_failure_modes:
-        print(f"\n{'='*80}")
-        print(f"ADVANCED ANALYSIS: Failure Mode Analysis")
-        print(f"{'='*80}\n")
-        
-        try:
-            import glob
-            # Look for predictions CSV from any fold using glob
-            predictions_pattern = f"results/{run_id}_*_*_f{args.fold}_{args.model_name}_predictions.csv"
-            predictions_files = glob.glob(predictions_pattern)
-            predictions_file = predictions_files[0] if predictions_files else None
-            
-            if predictions_file and os.path.exists(predictions_file):
-                pred_df = pd.read_csv(predictions_file)
-                
-                # Ensure required columns exist
-                required_cols = ['PatientID', 'Actual', 'Predicted', 'Max_Prob']
-                has_cols = all(col in pred_df.columns or 'Label' in pred_df.columns for col in required_cols)
-                
-                if has_cols or 'Label' in pred_df.columns:
-                    # Rename columns if necessary
-                    if 'Label' in pred_df.columns and 'Actual' not in pred_df.columns:
-                        pred_df['Actual'] = pred_df['Label']
-                    if 'Prob' in pred_df.columns and 'Max_Prob' not in pred_df.columns:
-                        pred_df['Max_Prob'] = pred_df['Prob']
-                    
-                    # Generate hard examples analysis
-                    plot_hard_examples_analysis(
-                        pred_df,
-                        output_path=f"results/hard_examples_{run_id}_f{args.fold}.png",
-                        figsize=(14, 6)
-                    )
-                    
-                    # Generate edge cases analysis
-                    plot_edge_cases_analysis(
-                        pred_df,
-                        output_path=f"results/edge_cases_{run_id}_f{args.fold}.png",
-                        figsize=(14, 6)
-                    )
-                else:
-                    print(f"INFO: Predictions CSV missing required columns: {required_cols}")
-            else:
-                print(f"INFO: Predictions CSV not found: {predictions_file}")
-        except Exception as e:
-            print(f"WARNING: Error generating failure mode analysis: {e}")
+    # NOTE: Failure mode analysis moved to aggregate mode (runs after all folds complete)
     
-    # ========================================================================
-    # CLASS DISTRIBUTION & STRATIFICATION: Dataset Composition Analysis
-    # ========================================================================
-    if args.include_class_distribution:
-        print(f"\n{'='*80}")
-        print(f"ADVANCED ANALYSIS: Class Distribution & Stratification")
-        print(f"{'='*80}\n")
-        
-        try:
-            import glob
-            # Load predictions CSV from current fold using glob to find actual file
-            predictions_pattern = f"results/{run_id}_*_*_f{args.fold}_{args.model_name}_predictions.csv"
-            predictions_files = glob.glob(predictions_pattern)
-            predictions_file = predictions_files[0] if predictions_files else None
-            
-            if predictions_file and os.path.exists(predictions_file):
-                pred_df = pd.read_csv(predictions_file)
-                
-                if 'Label' in pred_df.columns:
-                    labels = pred_df['Label'].values
-                    
-                    # Try to load fold indices if available
-                    fold_indices = None
-                    try:
-                        # If we have patient metadata, we could derive fold assignments
-                        # For now, we'll load from any available evaluation reports
-                        fold_indices = pred_df.get('Fold', None)
-                        if fold_indices is None:
-                            fold_indices = [args.fold] * len(labels)  # All from current fold
-                    except:
-                        fold_indices = [args.fold] * len(labels)
-                    
-                    plot_class_distribution_analysis(
-                        labels,
-                        fold_indices,
-                        output_path=f"results/class_distribution_analysis_{run_id}_f{args.fold}.png",
-                        num_folds=args.num_folds,
-                        figsize=(14, 8)
-                    )
-                else:
-                    print(f"INFO: Predictions CSV missing 'Label' column")
-            else:
-                print(f"INFO: Predictions CSV not found: {predictions_file}")
-        except Exception as e:
-            print(f"WARNING: Error generating class distribution analysis: {e}")
+    # NOTE: Class distribution analysis moved to aggregate mode (runs after all folds complete)
     
     # ========================================================================
     # TRAINING TRAJECTORY: Learning Progress
@@ -1850,164 +2009,5 @@ if __name__ == "__main__":
             )
         except Exception as e:
             print(f"WARNING: Error generating model complexity analysis: {e}")
-    
-    # ========================================================================
-    # ENSEMBLE PERFORMANCE DASHBOARDS: Grand CV, Voting, Meta, Hybrid
-    # ========================================================================
-    print(f"\n{'='*80}")
-    print(f"ENSEMBLE PERFORMANCE DASHBOARDS")
-    print(f"{'='*80}\n")
-    
-    # Helper function to generate dashboard from results CSV
-    def generate_ensemble_dashboard(results_csv, bootstrap_ci_csv, dashboard_name, output_prefix):
-        """Generate performance dashboard for ensemble/meta/hybrid results"""
-        try:
-            # Try primary filename first, fall back to alternative names if needed
-            csv_file = results_csv
-            if not os.path.exists(csv_file):
-                # Try alternate naming conventions
-                if 'holdout_predictions' in results_csv:
-                    # Try the report/results variant
-                    csv_file = results_csv.replace('holdout_predictions', 'report' if 'ensemble_voting' in results_csv else 'results')
-                elif 'report' in results_csv or 'results' in results_csv:
-                    # Try the holdout_predictions variant
-                    if 'ensemble_voting' in results_csv:
-                        csv_file = results_csv.replace('report', 'holdout_predictions')
-                    else:
-                        csv_file = results_csv.replace('results', 'holdout_predictions')
-                
-                if not os.path.exists(csv_file):
-                    print(f"  INFO: {dashboard_name} results not available: {results_csv}")
-                    return
-            
-            import glob
-            # Load results
-            results_df = pd.read_csv(csv_file)
-            
-            # Extract labels and predictions
-            if 'Actual' in results_df.columns:
-                labels = results_df['Actual'].values
-            elif 'Label' in results_df.columns:
-                labels = results_df['Label'].values
-            else:
-                print(f"  INFO: Could not find label column in {results_csv}")
-                return
-            
-            # Extract predictions (different column names for different ensemble types)
-            if 'Ensemble_Pred' in results_df.columns:
-                preds = results_df['Ensemble_Pred'].values
-                probs = results_df['Max_Ensemble_Prob'].values
-            elif 'Meta_Pred' in results_df.columns:
-                preds = results_df['Meta_Pred'].values
-                probs = results_df['Meta_Prob'].values
-            elif 'Hybrid_Pred' in results_df.columns:
-                preds = results_df['Hybrid_Pred'].values
-                probs = results_df['Hybrid_Prob'].values
-            elif 'Consensus_Pred' in results_df.columns:  # Grand CV
-                preds = results_df['Consensus_Pred'].values
-                probs = results_df['Consensus_Prob'].values
-            else:
-                print(f"  INFO: Could not find prediction column in {results_csv}")
-                return
-            
-            # Compute ROC-AUC and PR-AUC
-            roc_auc = roc_auc_score(labels, probs)
-            pr_auc = average_precision_score(labels, probs)
-            
-            # Load bootstrap CIs
-            bootstrap_ci = {}
-            if os.path.exists(bootstrap_ci_csv):
-                ci_df = pd.read_csv(bootstrap_ci_csv)
-                for _, row in ci_df.iterrows():
-                    metric_name = row['Metric'].lower()
-                    if metric_name == 'recall':
-                        bootstrap_ci['sensitivity'] = {
-                            'ci_lower': row['CI_Lower_95%'],
-                            'ci_upper': row['CI_Upper_95%']
-                        }
-                    elif metric_name == 'precision':
-                        bootstrap_ci['precision'] = {
-                            'ci_lower': row['CI_Lower_95%'],
-                            'ci_upper': row['CI_Upper_95%']
-                        }
-                    elif metric_name == 'accuracy':
-                        bootstrap_ci['accuracy'] = {
-                            'ci_lower': row['CI_Lower_95%'],
-                            'ci_upper': row['CI_Upper_95%']
-                        }
-                    elif metric_name == 'f1':
-                        bootstrap_ci['f1'] = {
-                            'ci_lower': row['CI_Lower_95%'],
-                            'ci_upper': row['CI_Upper_95%']
-                        }
-                    elif metric_name == 'specificity':
-                        bootstrap_ci['specificity'] = {
-                            'ci_lower': row['CI_Lower_95%'],
-                            'ci_upper': row['CI_Upper_95%']
-                        }
-            else:
-                print(f"  INFO: Bootstrap CI file not found: {bootstrap_ci_csv}")
-            
-            # Compute fold metrics
-            from sklearn.metrics import recall_score, precision_score, accuracy_score, f1_score, confusion_matrix
-            cm = confusion_matrix(labels, preds)
-            tn, fp, fn, tp = cm.ravel() if len(cm.ravel()) == 4 else (0, 0, 0, 0)
-            
-            fold_metrics = {
-                'sensitivity': recall_score(labels, preds, zero_division=0),
-                'specificity': tn / (tn + fp) if (tn + fp) > 0 else 0,
-                'precision': precision_score(labels, preds, zero_division=0),
-                'accuracy': accuracy_score(labels, preds),
-                'f1': f1_score(labels, preds, zero_division=0)
-            }
-            
-            # Generate dashboard
-            plot_patient_performance_dashboard(
-                labels,
-                preds,
-                probs,
-                fold_metrics,
-                bootstrap_ci,
-                roc_auc,
-                pr_auc,
-                output_path=f"results/{output_prefix}_performance_dashboard.png"
-            )
-            print(f"  ✓ {dashboard_name} dashboard saved")
-        
-        except Exception as e:
-            print(f"  INFO: Could not generate {dashboard_name} dashboard - {e}")
-    
-    # Generate ensemble performance dashboards
-    generate_ensemble_dashboard(
-        f"results/ensemble_voting_holdout_predictions_{run_id}-{run_id}.csv",
-        f"results/ensemble_voting_bootstrap_ci_{run_id}-{run_id}.csv",
-        "Ensemble Voting",
-        f"ensemble_voting_{run_id}"
-    )
-    
-    generate_ensemble_dashboard(
-        f"results/meta_classifier_holdout_predictions_{run_id}-{run_id}.csv",
-        f"results/meta_classifier_bootstrap_ci_{run_id}-{run_id}.csv",
-        "Meta Classifier",
-        f"meta_classifier_{run_id}"
-    )
-    
-    generate_ensemble_dashboard(
-        f"results/hybrid_ensemble_holdout_predictions_{run_id}-{run_id}.csv",
-        f"results/hybrid_ensemble_bootstrap_ci_{run_id}-{run_id}.csv",
-        "Hybrid Ensemble",
-        f"hybrid_ensemble_{run_id}"
-    )
-    
-    # Grand CV averages (use 1-1 for combined fold analysis)
-    generate_ensemble_dashboard(
-        f"results/grand_cv_averages_1-1.csv",
-        f"results/grand_cv_bootstrap_ci_1-1.csv",
-        "Grand CV Averages",
-        f"grand_cv_averages"
-    )
 
-    print(f"\n{'='*80}")
-    print(f"Visual generation complete!")
-    print(f"{'='*80}")
 

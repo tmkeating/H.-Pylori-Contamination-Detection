@@ -21,8 +21,15 @@
 # Usage:
 #   sbatch run_visuals.sh [OPTIONS]
 #   
-#   Or submit with custom parameters:
-#   sbatch --export=RUN_ID=62_102498,DATASET=both,FOLD=0,MODEL=convnext_tiny run_visuals.sh
+#   Or submit with custom parameters (command-line style):
+#   sbatch run_visuals.sh --RUN_ID=62_102498 --FOLD=0 --PIPELINE_MODE
+#   
+#   Or via environment variables (sbatch --export):
+#   sbatch --export=RUN_ID=62_102498,FOLD=0,PIPELINE_MODE=true run_visuals.sh
+#   
+#   Or set environment variables then submit:
+#   export RUN_ID=62_102498 PIPELINE_MODE=true
+#   sbatch run_visuals.sh
 #
 # Environment Variables:
 #   RUN_ID (optional)      - Experiment run ID (e.g., "62_102498"). Defaults to latest run.
@@ -42,13 +49,47 @@
 #SBATCH -o results/visuals_output_%j.txt
 #SBATCH -e results/visuals_error_%j.txt
 
-# Set defaults for optional parameters
+# Set defaults for optional parameters (from environment variables)
 RUN_ID=${RUN_ID:-}           # Empty = use latest run
 FOLD=${FOLD:-0}
 NUM_FOLDS=${NUM_FOLDS:-5}
 DATASET=${DATASET:-helicodataset}
 MODEL=${MODEL:-convnext_tiny}
 PIPELINE_MODE=${PIPELINE_MODE:-false}  # true = calibration curve + dashboard only
+
+# Parse command-line arguments (override environment variables)
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --RUN_ID=*|--run_id=*)
+            RUN_ID="${1#*=}"
+            shift
+            ;;
+        --FOLD=*|--fold=*)
+            FOLD="${1#*=}"
+            shift
+            ;;
+        --NUM_FOLDS=*|--num_folds=*)
+            NUM_FOLDS="${1#*=}"
+            shift
+            ;;
+        --DATASET=*|--dataset=*)
+            DATASET="${1#*=}"
+            shift
+            ;;
+        --MODEL=*|--model=*)
+            MODEL="${1#*=}"
+            shift
+            ;;
+        --PIPELINE_MODE|--pipeline_mode)
+            PIPELINE_MODE="true"
+            shift
+            ;;
+        *)
+            echo "Unknown option: $1"
+            shift
+            ;;
+    esac
+done
 
 # Create results directory
 mkdir -p results
