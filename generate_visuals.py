@@ -1575,6 +1575,90 @@ if __name__ == "__main__":
             # Skipping aggregate version - per-fold failure modes still available if included
             if args.include_failure_modes:
                 print(f"  INFO: Aggregate failure modes skipped (per-fold versions available)")
+            
+            # Generate combined training trajectories dashboard
+            if args.include_training_trajectory:
+                try:
+                    import glob
+                    import json
+                    from matplotlib.gridspec import GridSpec
+                    
+                    all_learning_curves = {}
+                    curves_found = 0
+                    
+                    for fold_idx in range(args.num_folds):
+                        learning_curves_pattern = f"results/{run_id}_*_*_f{fold_idx}_{args.model_name}_learning_curves.json"
+                        learning_curves_files = glob.glob(learning_curves_pattern)
+                        learning_curves_file = learning_curves_files[0] if learning_curves_files else None
+                        
+                        if learning_curves_file and os.path.exists(learning_curves_file):
+                            with open(learning_curves_file, 'r') as f:
+                                learning_data = json.load(f)
+                            
+                            train_losses = learning_data.get('train_loss', [])
+                            val_losses = learning_data.get('val_loss', [])
+                            train_accs = learning_data.get('train_acc', [])
+                            val_accs = learning_data.get('val_acc', [])
+                            
+                            if all([train_losses, val_losses, train_accs, val_accs]):
+                                all_learning_curves[fold_idx] = {
+                                    'train_loss': train_losses,
+                                    'val_loss': val_losses,
+                                    'train_acc': train_accs,
+                                    'val_acc': val_accs
+                                }
+                                curves_found += 1
+                    
+                    if curves_found > 0:
+                        # Create dashboard-style combined visualization
+                        import matplotlib.pyplot as plt
+                        
+                        fig = plt.figure(figsize=(16, 10))
+                        gs = GridSpec(3, 2, figure=fig, hspace=0.35, wspace=0.3)
+                        
+                        fold_axes = []
+                        for idx in range(min(5, args.num_folds)):
+                            row = idx // 2
+                            col = idx % 2
+                            ax = fig.add_subplot(gs[row, col])
+                            fold_axes.append(ax)
+                        
+                        # Plot individual fold trajectories
+                        for fold_idx, fold_data in sorted(all_learning_curves.items()):
+                            if fold_idx < len(fold_axes):
+                                ax = fold_axes[fold_idx]
+                                epochs = range(1, len(fold_data['train_loss']) + 1)
+                                
+                                ax.plot(epochs, fold_data['train_loss'], 'o-', label='Train Loss', linewidth=2, markersize=4)
+                                ax.plot(epochs, fold_data['val_loss'], 's-', label='Val Loss', linewidth=2, markersize=4)
+                                ax.set_xlabel('Epoch', fontsize=10)
+                                ax.set_ylabel('Loss', fontsize=10)
+                                ax.set_title(f'Fold {fold_idx}: Loss Trajectory', fontsize=11, fontweight='bold')
+                                ax.legend(fontsize=9)
+                                ax.grid(True, alpha=0.3)
+                        
+                        # Add aggregate/summary subplot
+                        ax_summary = fig.add_subplot(gs[2, 1])
+                        for fold_idx, fold_data in sorted(all_learning_curves.items()):
+                            epochs = range(1, len(fold_data['val_loss']) + 1)
+                            ax_summary.plot(epochs, fold_data['val_loss'], 'o-', label=f'Fold {fold_idx}', linewidth=1.5, alpha=0.7)
+                        
+                        ax_summary.set_xlabel('Epoch', fontsize=10)
+                        ax_summary.set_ylabel('Validation Loss', fontsize=10)
+                        ax_summary.set_title('All Folds: Validation Loss Comparison', fontsize=11, fontweight='bold')
+                        ax_summary.legend(fontsize=8, loc='best')
+                        ax_summary.grid(True, alpha=0.3)
+                        
+                        fig.suptitle(f'Training Trajectories - Run {run_id} (All Folds)', fontsize=14, fontweight='bold', y=0.995)
+                        
+                        output_path = f"results/training_trajectory_combined_{run_id}.png"
+                        plt.savefig(output_path, dpi=150, bbox_inches='tight')
+                        plt.close()
+                        print(f"  ✓ Combined training trajectory dashboard generated ({curves_found} folds)")
+                    else:
+                        print(f"  INFO: No learning curves found for training trajectory")
+                except Exception as e:
+                    print(f"  INFO: Training trajectory aggregation skipped - {e}")
 
         
         # ========== TRANSFER LEARNING COMPARISON (Optional) ==========
@@ -1795,44 +1879,7 @@ if __name__ == "__main__":
     # ========================================================================
     # TRAINING TRAJECTORY: Learning Progress
     # ========================================================================
-    if args.include_training_trajectory:
-        print(f"\n{'='*80}")
-        print(f"ADVANCED ANALYSIS: Training Trajectory")
-        print(f"{'='*80}\n")
-        
-        try:
-            import glob
-            # Look for learning curves JSON from training using glob pattern
-            # Note: These are only available if train.py saved them during training
-            learning_curves_pattern = f"results/{run_id}_*_*_f{args.fold}_{args.model_name}_learning_curves.json"
-            learning_curves_files = glob.glob(learning_curves_pattern)
-            learning_curves_file = learning_curves_files[0] if learning_curves_files else None
-            
-            if learning_curves_file and os.path.exists(learning_curves_file):
-                import json
-                with open(learning_curves_file, 'r') as f:
-                    learning_data = json.load(f)
-                
-                # Extract learning curves
-                train_losses = learning_data.get('train_loss', [])
-                val_losses = learning_data.get('val_loss', [])
-                train_accs = learning_data.get('train_acc', [])
-                val_accs = learning_data.get('val_acc', [])
-                
-                if all([train_losses, val_losses, train_accs, val_accs]):
-                    plot_training_trajectory(
-                        train_losses,
-                        val_losses,
-                        train_accs,
-                        val_accs,
-                        output_path=f"results/training_trajectory_{run_id}_f{args.fold}.png",
-                        figsize=(14, 5)
-                    )
-            else:
-                print(f"INFO: Training trajectory analysis skipped.")
-                print(f"      (Requires learning_curves.json from training phase - not available for this model)") 
-        except Exception as e:
-            print(f"INFO: Training trajectory analysis skipped - {e}")
+    # NOTE: Training trajectory moved to aggregate mode (combines all folds into single dashboard)
     
     # ========================================================================
     # TRAINING EFFICIENCY: Resource Utilization & Throughput
@@ -1843,45 +1890,49 @@ if __name__ == "__main__":
         print(f"{'='*80}\n")
         
         try:
+            import glob
             # Collect efficiency metrics across all folds
             fold_metrics_eff = []
+            metrics_found = 0
             
             for fold_idx in range(args.num_folds):
-                eval_report = f"results/{run_id}_{run_id}_f{fold_idx}_{args.model_name}_evaluation_report.csv"
+                # Use glob to find actual metadata file with any timestamp/seed
+                metadata_pattern = f"results/{run_id}_*_*_f{fold_idx}_{args.model_name}_model_selection.json"
+                metadata_files = glob.glob(metadata_pattern)
+                metadata_file = metadata_files[0] if metadata_files else None
                 
-                if os.path.exists(eval_report):
-                    # Look for metadata files that might contain timing/memory info
-                    metadata_file = f"results/{run_id}_f{fold_idx}_{args.model_name}_model_selection.json"
-                    
-                    fold_metric = {
-                        'fold': fold_idx,
-                        'wall_clock_time': 6.5,  # Default estimate (can be overridden from metadata)
-                        'peak_gpu_memory': 24.0,  # Default estimate
-                        'batch_throughput': 250.0  # Default estimate
-                    }
-                    
-                    # Try to load actual metrics from metadata
-                    if os.path.exists(metadata_file):
-                        try:
-                            import json
-                            with open(metadata_file, 'r') as f:
-                                metadata = json.load(f)
-                                fold_metric['wall_clock_time'] = metadata.get('training_time_hours', 6.5)
-                                fold_metric['peak_gpu_memory'] = metadata.get('peak_gpu_memory_gb', 24.0)
-                                fold_metric['batch_throughput'] = metadata.get('batch_throughput_patches_per_sec', 250.0)
-                        except:
-                            pass  # Use defaults if parsing fails
-                    
-                    fold_metrics_eff.append(fold_metric)
+                fold_metric = {
+                    'fold': fold_idx,
+                    'wall_clock_time': 6.5,  # Default estimate (can be overridden from metadata)
+                    'peak_gpu_memory': 24.0,  # Default estimate
+                    'batch_throughput': 250.0  # Default estimate
+                }
+                
+                # Try to load actual metrics from metadata
+                if metadata_file and os.path.exists(metadata_file):
+                    try:
+                        import json
+                        with open(metadata_file, 'r') as f:
+                            metadata = json.load(f)
+                            # Use actual training metrics from model_selection.json
+                            fold_metric['wall_clock_time'] = metadata.get('training_time_hours', 6.5)
+                            fold_metric['peak_gpu_memory'] = metadata.get('peak_gpu_memory_gb', 24.0)
+                            fold_metric['batch_throughput'] = metadata.get('throughput_patches_per_sec', 250.0)
+                            metrics_found += 1
+                    except Exception as e:
+                        print(f"    WARNING: Could not load metadata from {metadata_file}: {e}")
+                
+                fold_metrics_eff.append(fold_metric)
             
-            if fold_metrics_eff and len(fold_metrics_eff) >= args.num_folds // 2:
+            if fold_metrics_eff and metrics_found > 0:
                 plot_training_efficiency(
                     fold_metrics_eff,
                     output_path=f"results/training_efficiency_{run_id}.png",
                     figsize=(14, 6)
                 )
+                print(f"  ✓ Training efficiency plot saved ({metrics_found} folds with actual metrics)")
             else:
-                print(f"INFO: Using default efficiency estimates (metadata not available in model_selection.json)")
+                print(f"INFO: Using default efficiency estimates (metadata not available)")
                 default_metrics = [
                     {'fold': i, 'wall_clock_time': 6.5, 'peak_gpu_memory': 24.0, 'batch_throughput': 250.0}
                     for i in range(args.num_folds)

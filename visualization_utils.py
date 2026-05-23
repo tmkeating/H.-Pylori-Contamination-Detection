@@ -1891,7 +1891,7 @@ def plot_training_trajectory(train_losses, val_losses, train_accs, val_accs,
 # TRAINING EFFICIENCY: Resource Usage & Processing Throughput
 # ============================================================================
 
-def plot_training_efficiency(fold_metrics, output_path, figsize=(14, 6)):
+def plot_training_efficiency(fold_metrics, output_path, figsize=(14, 4.5)):
     """
     Visualize training efficiency metrics: wall-clock time, GPU memory, throughput.
     
@@ -1927,26 +1927,22 @@ def plot_training_efficiency(fold_metrics, output_path, figsize=(14, 6)):
     # Add total time
     total_time = sum(times)
     ax1.axhline(np.mean(times), color='red', linestyle='--', linewidth=2, 
-               label=f'Average: {np.mean(times):.2f}h')
+               label=f'Avg: {np.mean(times):.2f}h')
     
     ax1.set_xticks(range(len(folds)))
-    ax1.set_xticklabels([f'F{int(f)}' for f in folds], fontsize=10)
-    ax1.set_ylabel('Training Time (Hours)', fontsize=11, fontweight='bold')
-    ax1.set_title('Wall-Clock Training Time per Fold',
-                 fontsize=12, fontweight='bold')
-    ax1.legend(fontsize=10)
-    ax1.grid(axis='y', alpha=0.3)
+    ax1.set_xticklabels([f'F{int(f)}' for f in folds], fontsize=9)
+    ax1.set_ylabel('Time (Hours)', fontsize=10, fontweight='bold')
+    ax1.set_title('Wall-Clock Training Time',
+                 fontsize=11, fontweight='bold', pad=8)
+    ax1.legend(fontsize=9, loc='upper left')
+    ax1.grid(axis='y', alpha=0.3, linestyle=':')
+    ax1.set_ylim(0, max(times) * 1.2)
     
-    # Add value labels
+    # Add value labels on bars
     for bar, time in zip(bars1, times):
         if time > 0:
-            ax1.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.1,
-                    f'{time:.2f}h', ha='center', va='bottom', fontweight='bold', fontsize=9)
-    
-    # Add total time text
-    ax1.text(0.98, 0.97, f'Total: {total_time:.2f}h', transform=ax1.transAxes,
-            fontsize=10, verticalalignment='top', horizontalalignment='right',
-            bbox=dict(boxstyle='round', facecolor='yellow', alpha=0.7))
+            ax1.text(bar.get_x() + bar.get_width()/2, bar.get_height(),
+                    f'{time:.2f}h', ha='center', va='bottom', fontweight='bold', fontsize=8)
     
     # ========== PANEL 2: GPU Memory Usage ==========
     ax2 = axes[1]
@@ -1954,21 +1950,22 @@ def plot_training_efficiency(fold_metrics, output_path, figsize=(14, 6)):
     bars2 = ax2.bar(range(len(folds)), memories, color=colors_mem, edgecolor='black', linewidth=1.5)
     
     ax2.axhline(np.mean(memories), color='blue', linestyle='--', linewidth=2,
-               label=f'Average: {np.mean(memories):.2f}GB')
+               label=f'Avg: {np.mean(memories):.2f}GB')
     
     ax2.set_xticks(range(len(folds)))
-    ax2.set_xticklabels([f'F{int(f)}' for f in folds], fontsize=10)
-    ax2.set_ylabel('Peak GPU Memory (GB)', fontsize=11, fontweight='bold')
-    ax2.set_title('GPU Memory Usage per Fold',
-                 fontsize=12, fontweight='bold')
-    ax2.legend(fontsize=10)
-    ax2.grid(axis='y', alpha=0.3)
+    ax2.set_xticklabels([f'F{int(f)}' for f in folds], fontsize=9)
+    ax2.set_ylabel('Memory (GB)', fontsize=10, fontweight='bold')
+    ax2.set_title('Peak GPU Memory',
+                 fontsize=11, fontweight='bold', pad=8)
+    ax2.legend(fontsize=9, loc='upper left')
+    ax2.grid(axis='y', alpha=0.3, linestyle=':')
+    ax2.set_ylim(0, max(memories) * 1.2)
     
-    # Add value labels
+    # Add value labels on bars
     for bar, mem in zip(bars2, memories):
         if mem > 0:
-            ax2.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.5,
-                    f'{mem:.1f}GB', ha='center', va='bottom', fontweight='bold', fontsize=9)
+            ax2.text(bar.get_x() + bar.get_width()/2, bar.get_height(),
+                    f'{mem:.2f}GB', ha='center', va='bottom', fontweight='bold', fontsize=8)
     
     # ========== PANEL 3: Batch Processing Throughput ==========
     ax3 = axes[2]
@@ -1976,27 +1973,27 @@ def plot_training_efficiency(fold_metrics, output_path, figsize=(14, 6)):
     bars3 = ax3.bar(range(len(folds)), throughputs, color=colors_tput, edgecolor='black', linewidth=1.5)
     
     ax3.axhline(np.mean(throughputs), color='purple', linestyle='--', linewidth=2,
-               label=f'Average: {np.mean(throughputs):.0f} patches/s')
+               label=f'Avg: {np.mean(throughputs):.2f} p/s')
     
     ax3.set_xticks(range(len(folds)))
-    ax3.set_xticklabels([f'F{int(f)}' for f in folds], fontsize=10)
-    ax3.set_ylabel('Throughput (Patches/Second)', fontsize=11, fontweight='bold')
+    ax3.set_xticklabels([f'F{int(f)}' for f in folds], fontsize=9)
+    ax3.set_ylabel('Throughput (patches/sec)', fontsize=10, fontweight='bold')
     ax3.set_title('Batch Processing Efficiency',
-                 fontsize=12, fontweight='bold')
-    ax3.legend(fontsize=10)
-    ax3.grid(axis='y', alpha=0.3)
+                 fontsize=11, fontweight='bold', pad=8)
+    ax3.legend(fontsize=9, loc='upper left')
+    ax3.grid(axis='y', alpha=0.3, linestyle=':')
+    ax3.set_ylim(0, max(throughputs) * 1.2)
     
-    # Add value labels
+    # Add value labels on bars
     for bar, tput in zip(bars3, throughputs):
         if tput > 0:
-            ax3.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 10,
-                    f'{tput:.0f}', ha='center', va='bottom', fontweight='bold', fontsize=9)
+            ax3.text(bar.get_x() + bar.get_width()/2, bar.get_height(),
+                    f'{tput:.2f}', ha='center', va='bottom', fontweight='bold', fontsize=8)
     
-    fig.suptitle('Training Efficiency Metrics Across Folds\n'
-                f'Total Time: {total_time:.2f}h | Avg Memory: {np.mean(memories):.2f}GB | Avg Throughput: {np.mean(throughputs):.0f} patches/s',
-                fontsize=13, fontweight='bold', y=0.98)
+    fig.suptitle(f'Training Efficiency: Total {total_time:.2f}h | Avg Memory {np.mean(memories):.2f}GB | Avg Throughput {np.mean(throughputs):.2f} patches/s',
+                fontsize=11, fontweight='bold', y=0.98)
     
-    plt.tight_layout()
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
     plt.savefig(output_path, dpi=150, bbox_inches='tight')
     plt.close()
     
