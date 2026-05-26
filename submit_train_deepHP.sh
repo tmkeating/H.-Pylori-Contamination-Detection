@@ -65,7 +65,7 @@ PRE_SYNC_JOB=$(sbatch -p dcca40 --job-name=deephp_presync --output=results/slurm
 #!/bin/bash
 #SBATCH -p dcca40
 #SBATCH -t 0-02:00
-#SBATCH --cpus-per-task=8
+#SBATCH --cpus-per-task=6
 #SBATCH --mem=8G
 #SBATCH -J deephp_presync
 
@@ -130,7 +130,7 @@ do
         --output=results/slurm_deephp_f${FOLD}_%j.txt \
         --error=results/slurm_deephp_error_f${FOLD}_%j.txt \
         --ntasks=1 \
-        --cpus-per-task=8 \
+        --cpus-per-task=6 \
         --gres=gpu:1 \
         --mem=8G \
         --time=36:00:00 \

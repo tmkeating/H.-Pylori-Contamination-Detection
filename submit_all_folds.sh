@@ -92,7 +92,7 @@ sbatch --dependency=afterok:$DEPENDENCIES \
     -p dcca40 \
     --time=0-12:00 \
     --mem=8G \
-    --cpus-per-task=8 \
+    --cpus-per-task=6 \
     --job-name=HPy_FinalSummary \
     --output=results/slurm_summary_%j.txt \
     --error=results/slurm_summary_error_%j.txt \

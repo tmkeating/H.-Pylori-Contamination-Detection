@@ -758,7 +758,7 @@ do
         --output=results/slurm_transfer_f${FOLD}_%j.txt \
         --error=results/slurm_transfer_error_f${FOLD}_%j.txt \
         --ntasks=1 \
-        --cpus-per-task=8 \
+        --cpus-per-task=6 \
         --gres=gpu:1 \
         --mem=8G \
         --time=48:00:00 \
@@ -852,7 +852,7 @@ SUMMARY_JOB_ID=$(sbatch --dependency=afterok:$DEPENDENCIES \
     -p dcca40 \
     --time=0-02:00 \
     --mem=8G \
-    --cpus-per-task=8 \
+    --cpus-per-task=6 \
     --job-name=transfer_summary \
     --output=results/slurm_transfer_summary_%j.txt \
     --error=results/slurm_transfer_summary_error_%j.txt \
