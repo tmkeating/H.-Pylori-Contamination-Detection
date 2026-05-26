@@ -91,7 +91,7 @@ echo "Submitting Global Attention-MIL final summary as dependent job..."
 sbatch --dependency=afterok:$DEPENDENCIES \
     -p dcca40 \
     --time=0-12:00 \
-    --mem=24G \
+    --mem=8G \
     --cpus-per-task=8 \
     --job-name=HPy_FinalSummary \
     --output=results/slurm_summary_%j.txt \

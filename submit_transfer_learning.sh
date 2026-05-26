@@ -760,7 +760,7 @@ do
         --ntasks=1 \
         --cpus-per-task=8 \
         --gres=gpu:1 \
-        --mem=48G \
+        --mem=8G \
         --time=48:00:00 \
         --export=ALL,FOLD=$FOLD,MODEL_NAME=$MODEL_NAME,ITER=$ITER,NUM_EPOCHS=$NUM_EPOCHS,NEG_WEIGHT=$NEG_WEIGHT,POS_WEIGHT=$POS_WEIGHT,GAMMA=$GAMMA,SAVER_METRIC=$SAVER_METRIC,FREEZE_BN=$FREEZE_BN,CLIP_GRAD=$CLIP_GRAD,PCT_START=$PCT_START,WEIGHT_DECAY=$WEIGHT_DECAY,USE_SWA=$USE_SWA,SWA_START=$SWA_START,JITTER=$JITTER,POOL_TYPE=$POOL_TYPE,FREEZE_BACKBONE=$FREEZE_BACKBONE,SKIP_PRETRAINING=$SKIP_PRETRAINING,SKIP_SYNC=1 \
         <<TRAIN_EOF
@@ -851,7 +851,7 @@ echo ""
 SUMMARY_JOB_ID=$(sbatch --dependency=afterok:$DEPENDENCIES \
     -p dcca40 \
     --time=0-02:00 \
-    --mem=24G \
+    --mem=8G \
     --cpus-per-task=8 \
     --job-name=transfer_summary \
     --output=results/slurm_transfer_summary_%j.txt \
