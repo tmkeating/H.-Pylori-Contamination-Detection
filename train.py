@@ -1501,9 +1501,15 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
             patient_ids_list.append(patient_ids[0])
             all_max_probs[i] = max_chunk_prob
             
-            # Periodic VRAM flush to maintain stability during long 5-fold CV runs
+            # AGGRESSIVE memory cleanup after each patient to prevent OOM on large bags
+            # Critical: Prevents memory fragmentation during 114-patient holdout evaluation
+            del bag_probs_list
+            del all_chunks_probs
+            torch.cuda.empty_cache()
+            gc.collect()
+            
+            # Periodic deeper VRAM flush every 5 patients for extra safety
             if i % 5 == 0:
-                torch.cuda.empty_cache()
                 gc.collect()
 
     # --- Step 9: Detailed Reporting (Patient Level Focused) ---
