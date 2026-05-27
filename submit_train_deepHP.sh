@@ -66,7 +66,7 @@ PRE_SYNC_JOB=$(sbatch -p dcca40 --job-name=deephp_presync --output=results/slurm
 #SBATCH -p dcca40
 #SBATCH -t 0-02:00
 #SBATCH --cpus-per-task=6
-#SBATCH --mem=8G
+#SBATCH --mem=16G
 #SBATCH -J deephp_presync
 
 echo "Pre-sync job: Setting up DeepHP dataset for training..."
@@ -132,7 +132,7 @@ do
         --ntasks=1 \
         --cpus-per-task=6 \
         --gres=gpu:1 \
-        --mem=8G \
+        --mem=16G \
         --time=36:00:00 \
         --export=ALL,FOLD=$FOLD,MODEL_NAME=$MODEL_NAME,DEEPHP_EPOCHS=$DEEPHP_EPOCHS,BATCH_SIZE=$BATCH_SIZE,LEARNING_RATE=$LEARNING_RATE,WEIGHT_DECAY=$WEIGHT_DECAY,POS_WEIGHT=$POS_WEIGHT,USE_FOCAL_LOSS=$USE_FOCAL_LOSS,GAMMA=$GAMMA,ITER=$ITER,DEEPHP_SCRATCH=$DEEPHP_SCRATCH \
         <<TRAIN_EOF
