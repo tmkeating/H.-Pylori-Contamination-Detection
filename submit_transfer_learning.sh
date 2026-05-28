@@ -851,6 +851,13 @@ echo ""
 # Convert colon-separated job IDs to SLURM dependency format (comma-separated with afterok: prefix)
 DEPENDENCY_STRING=$(echo "$DEPENDENCIES" | sed 's/:/ /g' | awk '{for(i=1;i<=NF;i++) printf "%safterok:%s", (i>1?",":""), $i}')
 
+# Final validation of dependency string (prevent invalid sbatch syntax)
+if [ -z "$DEPENDENCY_STRING" ]; then
+    echo "ERROR: Failed to generate valid dependency string from fold jobs!"
+    echo "Fold job IDs: $DEPENDENCIES"
+    exit 1
+fi
+
 SUMMARY_JOB_ID=$(sbatch --dependency=$DEPENDENCY_STRING \
     -p dcca40 \
     --time=0-02:00 \

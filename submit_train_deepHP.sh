@@ -179,10 +179,23 @@ echo "All 5 fold jobs submitted. Scheduling final averaging + summary job..."
 echo "=========================================================================="
 echo ""
 
+# Validate that all folds were successfully submitted
+if [ -z "$DEPENDENCIES" ]; then
+    echo "ERROR: No fold jobs were successfully submitted!"
+    echo "Cannot proceed with summary job."
+    exit 1
+fi
+
 # 3. Submit final summary job (depends on all 5 folds)
 #    This job averages the backbone and prepares for fine-tuning
 # Convert colon-separated job IDs to SLURM dependency format (comma-separated with afterok: prefix)
 DEPENDENCY_STRING=$(echo "$DEPENDENCIES" | sed 's/:/ /g' | awk '{for(i=1;i<=NF;i++) printf "%safterok:%s", (i>1?",":""), $i}')
+
+# Final validation of dependency string
+if [ -z "$DEPENDENCY_STRING" ]; then
+    echo "ERROR: Failed to generate valid dependency string from: $DEPENDENCIES"
+    exit 1
+fi
 
 SUMMARY_JOB_OUT=$(sbatch --dependency=$DEPENDENCY_STRING \
     -p dcca40 \
