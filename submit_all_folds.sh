@@ -88,7 +88,10 @@ done
 echo "-------------------------------------------"
 echo "Submitting Global Attention-MIL final summary as dependent job..."
 # This job will only start once all 5 folds have successfully completed
-sbatch --dependency=afterok:$DEPENDENCIES \
+# Convert colon-separated job IDs to SLURM dependency format (comma-separated with afterok: prefix)
+DEPENDENCY_STRING=$(echo "$DEPENDENCIES" | sed 's/:/ /g' | awk '{for(i=1;i<=NF;i++) printf "%safterok:%s", (i>1?",":""), $i}')
+
+sbatch --dependency=$DEPENDENCY_STRING \
     -p dcca40 \
     --time=0-12:00 \
     --mem=20G \

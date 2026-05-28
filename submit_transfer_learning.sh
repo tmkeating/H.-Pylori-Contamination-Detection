@@ -848,7 +848,10 @@ echo ""
 #    Summary job: runs summarize_results.py, ensemble_voting.py
 #    Visualization job: runs generate_visuals.py to create calibration curves and dashboards
 
-SUMMARY_JOB_ID=$(sbatch --dependency=afterok:$DEPENDENCIES \
+# Convert colon-separated job IDs to SLURM dependency format (comma-separated with afterok: prefix)
+DEPENDENCY_STRING=$(echo "$DEPENDENCIES" | sed 's/:/ /g' | awk '{for(i=1;i<=NF;i++) printf "%safterok:%s", (i>1?",":""), $i}')
+
+SUMMARY_JOB_ID=$(sbatch --dependency=$DEPENDENCY_STRING \
     -p dcca40 \
     --time=0-02:00 \
     --mem=8G \

@@ -27,7 +27,7 @@
 #SBATCH -N 1
 #SBATCH -t 0-06:00                     # It will likely finish in < 6 hours now
 #SBATCH -p dcca40
-#SBATCH --mem=48G                      # Increased to 48GB as requested
+#SBATCH --mem=20G                      # Reduced from 48GB to prevent cluster starvation (5×20G=100GB acceptable)
 #SBATCH --gres=gpu:1
 #SBATCH -o results/output_%j.txt
 #SBATCH -e results/error_%j.txt

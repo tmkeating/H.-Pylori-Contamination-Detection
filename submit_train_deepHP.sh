@@ -181,7 +181,10 @@ echo ""
 
 # 3. Submit final summary job (depends on all 5 folds)
 #    This job averages the backbone and prepares for fine-tuning
-SUMMARY_JOB_OUT=$(sbatch --dependency=afterok:$DEPENDENCIES \
+# Convert colon-separated job IDs to SLURM dependency format (comma-separated with afterok: prefix)
+DEPENDENCY_STRING=$(echo "$DEPENDENCIES" | sed 's/:/ /g' | awk '{for(i=1;i<=NF;i++) printf "%safterok:%s", (i>1?",":""), $i}')
+
+SUMMARY_JOB_OUT=$(sbatch --dependency=$DEPENDENCY_STRING \
     -p dcca40 \
     --time=0-00:30 \
     --mem=16G \
