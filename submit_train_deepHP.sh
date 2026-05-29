@@ -19,6 +19,7 @@ set -e  # Exit on error
 MODEL_NAME=${MODEL_NAME:-"convnext_tiny"}
 PROFILE=${PROFILE:-"SEARCHER"}
 ITER=${ITER:-"31.0"}
+BATCH_SIZE=${BATCH_SIZE:-"0"}  # 0=all parallel (default), N=batch in groups of N
 
 # Source the Model Profiles (for consistency with HelicoDataSet training)
 if [ -f "profiles.sh" ]; then
@@ -111,12 +112,19 @@ PRE_SYNC_JOB_ID=$(echo $PRE_SYNC_JOB | awk '{print $4}')
 echo "Pre-sync job ID: $PRE_SYNC_JOB_ID"
 PRE_SYNC_DEPENDENCY="afterok:$PRE_SYNC_JOB_ID"
 
-# 2. Submit 5 fold training jobs (dependent on pre-sync)
+# 2. Submit 5 fold training jobs (parallel or batched based on BATCHED flag)
 echo ""
 echo "Submitting DeepHP pre-training jobs for all 5 folds..."
+if [ "$BATCHED" = "1" ]; then
+    echo "Mode: SEQUENTIAL BATCHING (each fold waits for previous)"
+else
+    echo "Mode: PARALLEL (all folds run simultaneously)"
+fi
 echo "=========================================================================="
 
 DEPENDENCIES=""
+FOLD_DEPENDENCY="$PRE_SYNC_DEPENDENCY"  # Start all folds depending on pre-sync
+
 for FOLD in {0..4}
 do
     echo "Submitting fold $FOLD..."
@@ -125,7 +133,7 @@ do
     DEEPHP_SCRATCH="/tmp/$(whoami)_deephp_data"
     
     JOB_OUT=$(sbatch -p dcca40 \
-        --dependency=$PRE_SYNC_DEPENDENCY \
+        --dependency=$FOLD_DEPENDENCY \
         --job-name=deephp_f${FOLD} \
         --output=results/slurm_deephp_f${FOLD}_%j.txt \
         --error=results/slurm_deephp_error_f${FOLD}_%j.txt \
@@ -161,13 +169,21 @@ TRAIN_EOF
 )
     
     JOB_ID=$(echo $JOB_OUT | awk '{print $4}')
+    FOLD_IDS[$FOLD]="$JOB_ID"  # Store for batch dependency lookup
     echo "  → Job ID: $JOB_ID"
     
-    # Add to dependency list
-    if [ -z "$DEPENDENCIES" ]; then
-        DEPENDENCIES="$JOB_ID"
+    if [ "$BATCH_SIZE" != "0" ]; then
+        # Batching enabled: show which batch this fold belongs to
+        BATCH_NUM=$((FOLD / BATCH_SIZE))
+        BATCH_POS=$((FOLD % BATCH_SIZE))
+        echo "    (Batch $((BATCH_NUM + 1)), Position $((BATCH_POS + 1)))"
     else
-        DEPENDENCIES="$DEPENDENCIES:$JOB_ID"
+        # All parallel: accumulate dependencies for final summary
+        if [ -z "$DEPENDENCIES" ]; then
+            DEPENDENCIES="$JOB_ID"
+        else
+            DEPENDENCIES="$DEPENDENCIES:$JOB_ID"
+        fi
     fi
     
     sleep 1  # Prevent race conditions
@@ -177,6 +193,22 @@ echo ""
 echo "=========================================================================="
 echo "All 5 fold jobs submitted. Scheduling final averaging + summary job..."
 echo "=========================================================================="
+
+# Set final dependency string for summary job
+if [ "$BATCH_SIZE" != "0" ]; then
+    # Batching: summary depends on ALL folds (prevent race conditions if later folds finish first)
+    DEPENDENCY_STRING=""
+    for i in {0..4}; do
+        if [ -z "$DEPENDENCY_STRING" ]; then
+            DEPENDENCY_STRING="afterok:${FOLD_IDS[$i]}"
+        else
+            DEPENDENCY_STRING="$DEPENDENCY_STRING,afterok:${FOLD_IDS[$i]}"
+        fi
+    done
+else
+    # Parallel: convert colon-separated job IDs to SLURM dependency format
+    DEPENDENCY_STRING=$(echo "$DEPENDENCIES" | sed 's/:/ /g' | awk '{for(i=1;i<=NF;i++) printf "%safterok:%s", (i>1?",":""), $i}')
+fi
 echo ""
 
 # Validate that all folds were successfully submitted
@@ -188,8 +220,6 @@ fi
 
 # 3. Submit final summary job (depends on all 5 folds)
 #    This job averages the backbone and prepares for fine-tuning
-# Convert colon-separated job IDs to SLURM dependency format (comma-separated with afterok: prefix)
-DEPENDENCY_STRING=$(echo "$DEPENDENCIES" | sed 's/:/ /g' | awk '{for(i=1;i<=NF;i++) printf "%safterok:%s", (i>1?",":""), $i}')
 
 # Final validation of dependency string
 if [ -z "$DEPENDENCY_STRING" ]; then

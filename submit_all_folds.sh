@@ -26,6 +26,7 @@
 MODEL_NAME=${MODEL_NAME:-"convnext_tiny"}
 PROFILE=${PROFILE:-"AUDITOR"}
 ITER=${ITER:-"26.0"}
+BATCH_SIZE=${BATCH_SIZE:-"0"}  # 0=all parallel (default), N=batch in groups of N
 
 # 1. Source the Model Profiles (Central Source of Truth)
 if [ -f "profiles.sh" ]; then
@@ -60,44 +61,88 @@ PRE_SYNC_JOB_ID=$(echo $PRE_SYNC_JOB | awk '{print $4}')
 echo "Pre-sync job ID: $PRE_SYNC_JOB_ID"
 PRE_SYNC_DEPENDENCY="afterok:$PRE_SYNC_JOB_ID"
 
+echo ""
+echo "Submitting training jobs for all 5 folds..."
+if [ "$BATCH_SIZE" != "0" ]; then
+    echo "Mode: BATCH PROCESSING (groups of $BATCH_SIZE folds)"
+else
+    echo "Mode: PARALLEL (all folds run simultaneously)"
+fi
+echo ""
+
+DEPENDENCIES=""
+declare -a FOLD_IDS  # Array to track job IDs for batch dependencies
+
 for FOLD in {0..4}
 do
+    # Determine this fold's dependency based on batch size
+    if [ "$BATCH_SIZE" != "0" ] && [ $FOLD -ge $BATCH_SIZE ]; then
+        # Not in first batch; depends on last fold of previous batch
+        BATCH_LAST_FOLD=$(((FOLD / BATCH_SIZE) * BATCH_SIZE - 1))
+        FOLD_DEPENDENCY="afterok:${FOLD_IDS[$BATCH_LAST_FOLD]}"
+    else
+        # First batch or all-parallel mode: depend on pre-sync
+        FOLD_DEPENDENCY="$PRE_SYNC_DEPENDENCY"
+    fi
+    
     echo "-------------------------------------------"
     echo "Submitting SLURM job for Fold $FOLD using $MODEL_NAME ($PROFILE Profile, Iter $ITER)..."
     # Capture the job ID
     # Iteration 21.3: Expanded export list to include Stability parameters
     # CHANGE: Fold jobs now depend on pre-sync job to avoid concurrent rsync operations
     # CHANGE: Added SKIP_SYNC=1 for fold jobs so they don't re-sync (pre-sync job already did it)
-    JOB_OUT=$(sbatch -p dcca40 --dependency=$PRE_SYNC_DEPENDENCY --export=ALL,FOLD=$FOLD,MODEL_NAME=$MODEL_NAME,NEG_WEIGHT=$NEG_WEIGHT,POS_WEIGHT=$POS_WEIGHT,GAMMA=$GAMMA,NUM_EPOCHS=$NUM_EPOCHS,FREEZE_BN=$FREEZE_BN,CLIP_GRAD=$CLIP_GRAD,PCT_START=$PCT_START,SAVER_METRIC=$SAVER_METRIC,WEIGHT_DECAY=$WEIGHT_DECAY,USE_SWA=$USE_SWA,SWA_START=$SWA_START,JITTER=$JITTER,ITER=$ITER,SKIP_SYNC=1 run_h_pylori.sh)
+    JOB_OUT=$(sbatch -p dcca40 --dependency=$FOLD_DEPENDENCY --export=ALL,FOLD=$FOLD,MODEL_NAME=$MODEL_NAME,NEG_WEIGHT=$NEG_WEIGHT,POS_WEIGHT=$POS_WEIGHT,GAMMA=$GAMMA,NUM_EPOCHS=$NUM_EPOCHS,FREEZE_BN=$FREEZE_BN,CLIP_GRAD=$CLIP_GRAD,PCT_START=$PCT_START,SAVER_METRIC=$SAVER_METRIC,WEIGHT_DECAY=$WEIGHT_DECAY,USE_SWA=$USE_SWA,SWA_START=$SWA_START,JITTER=$JITTER,ITER=$ITER,SKIP_SYNC=1 run_h_pylori.sh)
     echo "$JOB_OUT"
     JOB_ID=$(echo $JOB_OUT | awk '{print $4}')
+    FOLD_IDS[$FOLD]="$JOB_ID"  # Store for batch dependency lookup
     
-    # Add to dependency list
-    if [ -z "$DEPENDENCIES" ]; then
-        DEPENDENCIES="$JOB_ID"
-        MIN_JOB="$JOB_ID"
+    if [ "$BATCH_SIZE" != "0" ]; then
+        # Batching enabled: show which batch this fold belongs to
+        BATCH_NUM=$((FOLD / BATCH_SIZE))
+        BATCH_POS=$((FOLD % BATCH_SIZE))
+        echo "  (Batch $((BATCH_NUM + 1)), Position $((BATCH_POS + 1)))"
     else
-        DEPENDENCIES="$DEPENDENCIES:$JOB_ID"
-        MAX_JOB="$JOB_ID"
+        # All parallel: accumulate dependencies for final summary
+        if [ -z "$DEPENDENCIES" ]; then
+            DEPENDENCIES="$JOB_ID"
+            MIN_JOB="$JOB_ID"
+        else
+            DEPENDENCIES="$DEPENDENCIES:$JOB_ID"
+            MAX_JOB="$JOB_ID"
+        fi
     fi
     
     # Wait 1 second to ensure sequential submission and prevent race conditions
     sleep 1
 done
 
+# Set final dependency string for summary job
+if [ "$BATCH_SIZE" != "0" ]; then
+    # Batching: summary depends on ALL folds (prevent race conditions if later folds finish first)
+    DEPENDENCY_STRING=""
+    for i in {0..4}; do
+        if [ -z "$DEPENDENCY_STRING" ]; then
+            DEPENDENCY_STRING="afterok:${FOLD_IDS[$i]}"
+        else
+            DEPENDENCY_STRING="$DEPENDENCY_STRING,afterok:${FOLD_IDS[$i]}"
+        fi
+    done
+else
+    # Parallel: convert colon-separated job IDs to SLURM dependency format
+    DEPENDENCY_STRING=$(echo "$DEPENDENCIES" | sed 's/:/ /g' | awk '{for(i=1;i<=NF;i++) printf "%safterok:%s", (i>1?",":""), $i}')
+fi
+
 echo "-------------------------------------------"
 echo "Submitting Global Attention-MIL final summary as dependent job..."
 
-# Validate that all folds were successfully submitted
-if [ -z "$DEPENDENCIES" ]; then
+# Validate that all folds were successfully submitted (for parallel mode)
+if [ "$BATCHED" != "1" ] && [ -z "$DEPENDENCIES" ]; then
     echo "ERROR: No fold jobs were successfully submitted!"
     echo "Cannot proceed with summary job."
     exit 1
 fi
 
 # This job will only start once all 5 folds have successfully completed
-# Convert colon-separated job IDs to SLURM dependency format (comma-separated with afterok: prefix)
-DEPENDENCY_STRING=$(echo "$DEPENDENCIES" | sed 's/:/ /g' | awk '{for(i=1;i<=NF;i++) printf "%safterok:%s", (i>1?",":""), $i}')
 
 # Final validation of dependency string
 if [ -z "$DEPENDENCY_STRING" ]; then

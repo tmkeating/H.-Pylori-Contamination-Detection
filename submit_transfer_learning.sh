@@ -49,6 +49,7 @@ set -e  # Exit on error
 MODEL_NAME=${MODEL_NAME:-"convnext_tiny"}
 PROFILE=${PROFILE:-"SEARCHER"}
 ITER=${ITER:-"31.0"}
+BATCH_SIZE=${BATCH_SIZE:-"0"}  # 0=all parallel (default), N=batch in groups of N (e.g., 3 = 3+2)
 PRETRAINED_BACKBONE="results/deephp_backbone_final_${MODEL_NAME}.pth"
 FREEZE_BACKBONE=${FREEZE_BACKBONE:-"False"}
 SKIP_PRETRAINING=${SKIP_PRETRAINING:-"False"}
@@ -742,18 +743,34 @@ fi
 echo "✓ Pre-sync dependency set: $PRE_SYNC_DEPENDENCY"
 echo ""
 
-# 2. Submit 5 fine-tuning jobs (parallel, depend on pre-sync)
+# 2. Submit 5 fine-tuning jobs (parallel or batched based on BATCH_SIZE)
 echo "Submitting transfer learning fine-tuning jobs for all 5 folds..."
+if [ "$BATCH_SIZE" != "0" ]; then
+    echo "Mode: BATCH PROCESSING (groups of $BATCH_SIZE folds)"
+else
+    echo "Mode: PARALLEL (all folds run simultaneously)"
+fi
 echo "=========================================================================="
 echo ""
 
 DEPENDENCIES=""
+declare -a FOLD_IDS  # Array to track job IDs for batch dependencies
+
 for FOLD in {0..4}
 do
+    # Determine this fold's dependency based on batch size
+    if [ "$BATCH_SIZE" != "0" ] && [ $FOLD -ge $BATCH_SIZE ]; then
+        # Not in first batch; depends on last fold of previous batch
+        BATCH_LAST_FOLD=$(((FOLD / BATCH_SIZE) * BATCH_SIZE - 1))
+        FOLD_DEPENDENCY="afterok:${FOLD_IDS[$BATCH_LAST_FOLD]}"
+    else
+        # First batch or all-parallel mode: depend on pre-sync
+        FOLD_DEPENDENCY="$PRE_SYNC_DEPENDENCY"
+    fi
     echo "Submitting fold $FOLD..."
     
     JOB_OUT=$(sbatch -p dcca40 \
-        --dependency=$PRE_SYNC_DEPENDENCY \
+        --dependency=$FOLD_DEPENDENCY \
         --job-name=transfer_f${FOLD} \
         --output=results/slurm_transfer_f${FOLD}_%j.txt \
         --error=results/slurm_transfer_error_f${FOLD}_%j.txt \
@@ -805,6 +822,7 @@ TRAIN_EOF
 )
     
     JOB_ID=$(echo $JOB_OUT | awk '{print $4}')
+    FOLD_IDS[$FOLD]="$JOB_ID"  # Store for batch dependency lookup
     
     if [ -z "$JOB_ID" ] || [ "$JOB_ID" = "" ]; then
         echo "  ✗ ERROR: Failed to submit fold $FOLD!"
@@ -812,17 +830,40 @@ TRAIN_EOF
         exit 1
     fi
     
-    echo "  ✓ Job ID: $JOB_ID (will start after pre-sync: $PRE_SYNC_ID)"
+    echo "  ✓ Job ID: $JOB_ID"
     
-    # Add to dependency list
-    if [ -z "$DEPENDENCIES" ]; then
-        DEPENDENCIES="$JOB_ID"
+    if [ "$BATCH_SIZE" != "0" ]; then
+        # Batching enabled: show which batch this fold belongs to
+        BATCH_NUM=$((FOLD / BATCH_SIZE))
+        BATCH_POS=$((FOLD % BATCH_SIZE))
+        echo "    (Batch $((BATCH_NUM + 1)), Position $((BATCH_POS + 1)))"
     else
-        DEPENDENCIES="$DEPENDENCIES:$JOB_ID"
+        # All parallel: accumulate dependencies for final summary
+        if [ -z "$DEPENDENCIES" ]; then
+            DEPENDENCIES="$JOB_ID"
+        else
+            DEPENDENCIES="$DEPENDENCIES:$JOB_ID"
+        fi
     fi
     
     sleep 1  # Prevent race conditions
 done
+
+# Set final dependency string for summary job
+if [ "$BATCH_SIZE" != "0" ]; then
+    # Batching: summary depends on ALL folds (prevent race conditions if later folds finish first)
+    DEPENDENCY_STRING=""
+    for i in {0..4}; do
+        if [ -z "$DEPENDENCY_STRING" ]; then
+            DEPENDENCY_STRING="afterok:${FOLD_IDS[$i]}"
+        else
+            DEPENDENCY_STRING="$DEPENDENCY_STRING,afterok:${FOLD_IDS[$i]}"
+        fi
+    done
+else
+    # Parallel: convert colon-separated job IDs to SLURM dependency format
+    DEPENDENCY_STRING=$(echo "$DEPENDENCIES" | sed 's/:/ /g' | awk '{for(i=1;i<=NF;i++) printf "%safterok:%s", (i>1?",":""), $i}')
+fi
 
 echo ""
 echo "=========================================================================="
@@ -832,14 +873,22 @@ echo "DEPENDENCY CHAIN SUMMARY"
 echo "=========================================================================="
 echo ""
 echo "Pre-sync Job:     $PRE_SYNC_ID"
-echo "Fine-tuning Jobs: $DEPENDENCIES"
-echo "  (All depend on pre-sync: $PRE_SYNC_ID)"
-echo ""
-echo "Execution Order:"
-echo "  1. Pre-sync ($PRE_SYNC_ID) - Syncs data to scratch"
-echo "  2. Fine-tuning folds (parallel, wait for step 1)"
-echo "  3. Summary & ensemble (waits for step 2)"
-echo "  4. Visualization generation (waits for step 3)"
+if [ "$BATCHED" = "1" ]; then
+    echo "Execution Order (SEQUENTIAL BATCHING):"
+    echo "  1. Pre-sync ($PRE_SYNC_ID) - Syncs data to scratch"
+    echo "  2. Fold 0 → Fold 1 → Fold 2 → Fold 3 → Fold 4 (sequential)"
+    echo "  3. Summary & ensemble (waits for last fold)"
+    echo "  4. Visualization generation (waits for summary)"
+else
+    echo "Fine-tuning Jobs: $DEPENDENCIES"
+    echo "  (All depend on pre-sync: $PRE_SYNC_ID)"
+    echo ""
+    echo "Execution Order (PARALLEL):"
+    echo "  1. Pre-sync ($PRE_SYNC_ID) - Syncs data to scratch"
+    echo "  2. Fine-tuning folds (parallel, wait for step 1)"
+    echo "  3. Summary & ensemble (waits for step 2)"
+    echo "  4. Visualization generation (waits for step 3)"
+fi
 echo ""
 echo "=========================================================================="
 echo ""
@@ -847,9 +896,6 @@ echo ""
 # 3 & 4. Submit summary + visualization jobs (with dependency chain)
 #    Summary job: runs summarize_results.py, ensemble_voting.py
 #    Visualization job: runs generate_visuals.py to create calibration curves and dashboards
-
-# Convert colon-separated job IDs to SLURM dependency format (comma-separated with afterok: prefix)
-DEPENDENCY_STRING=$(echo "$DEPENDENCIES" | sed 's/:/ /g' | awk '{for(i=1;i<=NF;i++) printf "%safterok:%s", (i>1?",":""), $i}')
 
 # Final validation of dependency string (prevent invalid sbatch syntax)
 if [ -z "$DEPENDENCY_STRING" ]; then
