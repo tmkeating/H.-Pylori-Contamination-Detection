@@ -126,10 +126,46 @@ if [ ! -d "$DEEPHP_ROOT/Positive" ] || [ ! -d "$DEEPHP_ROOT/Negative" ]; then
     exit 1
 fi
 
+# Clean up any previously synced blacklisted items from scratch
+echo "Cleaning blacklisted items from scratch..."
+python3 << CLEANUP_EOF
+import json
+import os
+from pathlib import Path
+
+blacklist_path = Path("./blacklistDeepHP.json")
+scratch_path = Path("$DEEPHP_SCRATCH")
+
+if blacklist_path.exists() and scratch_path.exists():
+    try:
+        with open(blacklist_path) as f:
+            data = json.load(f)
+        
+        if 'macenko_reference_patch' in data:
+            ref = data['macenko_reference_patch']
+            folder = ref.get('folder')
+            filename = ref.get('filename')
+            
+            if folder and filename:
+                file_path = scratch_path / folder / filename
+                if file_path.exists():
+                    file_path.unlink()
+                    print(f"[CLEANUP] Removed existing blacklisted file: {folder}/{filename}")
+    except Exception as e:
+        print(f"[CLEANUP] Warning: Could not clean blacklisted items: {e}")
+CLEANUP_EOF
+
+# Check cleanup exit status
+if [ $? -ne 0 ]; then
+    echo "[PRESYNC] FATAL ERROR: Blacklist cleanup failed!"
+    exit 1
+fi
+
 # Generate rsync exclude filters from blacklistDeepHP.json
 EXCLUDE_FILTER_FILE="/tmp/deephp_exclude_filters_$$.txt"
+export EXCLUDE_FILTER_FILE
 echo "Generating exclude filters from blacklistDeepHP.json..."
-python3 << 'FILTER_EOF'
+python3 << FILTER_EOF
 import json
 import os
 
