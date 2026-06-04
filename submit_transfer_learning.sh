@@ -49,7 +49,7 @@ set -e  # Exit on error
 MODEL_NAME=${MODEL_NAME:-"convnext_tiny"}
 PROFILE=${PROFILE:-"SEARCHER"}
 ITER=${ITER:-"31.0"}
-BATCH_SIZE=${BATCH_SIZE:-"0"}  # 0=all parallel (default), N=batch in groups of N (e.g., 3 = 3+2)
+FOLD_BATCH_SIZE=${FOLD_BATCH_SIZE:-"0"}  # 0=all parallel (default), N=batch in groups of N (e.g., 3 = 3+2)
 PRETRAINED_BACKBONE="results/deephp_backbone_final_${MODEL_NAME}.pth"
 FREEZE_BACKBONE=${FREEZE_BACKBONE:-"False"}
 SKIP_PRETRAINING=${SKIP_PRETRAINING:-"False"}
@@ -206,10 +206,17 @@ if [ "$DEEPHP_SUMMARY_JOB_ID" = "0" ]; then
 #SBATCH --mem=8G
 #SBATCH -J transfer_presync
 
+# Setup environment explicitly
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH
+export HOME=/home/tkeating
+
+# Activate virtual environment with dependencies
+source /home/tkeating/venv/bin/activate
+
 LOCAL_SCRATCH=$(python3 -c "from config import SCRATCH_ROOT; print(SCRATCH_ROOT)" 2>/dev/null || echo "/home/tkeating/.scratch/h_pylori_data")
 REMOTE_DATA=$(python3 -c "from config import DATASET_ROOT; print(DATASET_ROOT)" 2>/dev/null || echo "/home/tkeating/datasets/HelicoDataSet")
 
-echo "========================================================================="
+echo "=========================================================================" 
 echo "Transfer Learning Pre-Sync: Verifying Data and Syncing to Local Scratch"
 echo "========================================================================="
 echo ""
@@ -463,13 +470,17 @@ PRESYNC_EOF
 else
     echo "(Dependency on pre-training job: $DEEPHP_SUMMARY_JOB_ID)"
     PRE_SYNC_JOB=$(sbatch --dependency=afterok:$DEEPHP_SUMMARY_JOB_ID \
-        -p pg1tfg12 --job-name=transfer_presync --output=results/slurm_transfer_presync_%j.txt <<'PRESYNC_EOF'
+        -p pg1tfg12 --job-name=transfer_presync --output=results/slurm_transfer_presync_%j.txt --get-user-env <<'PRESYNC_EOF'
 #!/bin/bash
 #SBATCH -p pg1tfg12
 #SBATCH -t 0-01:00
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=8G
 #SBATCH -J transfer_presync
+#SBATCH --get-user-env
+
+# Activate virtual environment with dependencies
+source /home/tkeating/venv/bin/activate
 
 LOCAL_SCRATCH=$(python3 -c "from config import SCRATCH_ROOT; print(SCRATCH_ROOT)" 2>/dev/null || echo "/home/tkeating/.scratch/h_pylori_data")
 REMOTE_DATA=$(python3 -c "from config import DATASET_ROOT; print(DATASET_ROOT)" 2>/dev/null || echo "/home/tkeating/datasets/HelicoDataSet")
@@ -743,10 +754,10 @@ fi
 echo "✓ Pre-sync dependency set: $PRE_SYNC_DEPENDENCY"
 echo ""
 
-# 2. Submit 5 fine-tuning jobs (parallel or batched based on BATCH_SIZE)
+# 2. Submit 5 fine-tuning jobs (parallel or batched based on FOLD_BATCH_SIZE)
 echo "Submitting transfer learning fine-tuning jobs for all 5 folds..."
-if [ "$BATCH_SIZE" != "0" ]; then
-    echo "Mode: BATCH PROCESSING (groups of $BATCH_SIZE folds)"
+if [ "$FOLD_BATCH_SIZE" != "0" ]; then
+    echo "Mode: BATCH PROCESSING (groups of $FOLD_BATCH_SIZE folds)"
 else
     echo "Mode: PARALLEL (all folds run simultaneously)"
 fi
@@ -759,9 +770,9 @@ declare -a FOLD_IDS  # Array to track job IDs for batch dependencies
 for FOLD in {0..4}
 do
     # Determine this fold's dependency based on batch size
-    if [ "$BATCH_SIZE" != "0" ] && [ $FOLD -ge $BATCH_SIZE ]; then
+    if [ "$FOLD_BATCH_SIZE" != "0" ] && [ $FOLD -ge $FOLD_BATCH_SIZE ]; then
         # Not in first batch; depends on last fold of previous batch
-        BATCH_LAST_FOLD=$(((FOLD / BATCH_SIZE) * BATCH_SIZE - 1))
+        BATCH_LAST_FOLD=$(((FOLD / FOLD_BATCH_SIZE) * FOLD_BATCH_SIZE - 1))
         FOLD_DEPENDENCY="afterok:${FOLD_IDS[$BATCH_LAST_FOLD]}"
     else
         # First batch or all-parallel mode: depend on pre-sync
@@ -779,15 +790,21 @@ do
         --gres=gpu:1 \
         --mem=20G \
         --time=48:00:00 \
-        --export=ALL,FOLD=$FOLD,MODEL_NAME=$MODEL_NAME,ITER=$ITER,NUM_EPOCHS=$NUM_EPOCHS,NEG_WEIGHT=$NEG_WEIGHT,POS_WEIGHT=$POS_WEIGHT,GAMMA=$GAMMA,SAVER_METRIC=$SAVER_METRIC,FREEZE_BN=$FREEZE_BN,CLIP_GRAD=$CLIP_GRAD,PCT_START=$PCT_START,WEIGHT_DECAY=$WEIGHT_DECAY,USE_SWA=$USE_SWA,SWA_START=$SWA_START,JITTER=$JITTER,POOL_TYPE=$POOL_TYPE,FREEZE_BACKBONE=$FREEZE_BACKBONE,SKIP_PRETRAINING=$SKIP_PRETRAINING,SKIP_SYNC=1 \
         <<TRAIN_EOF
 #!/bin/bash
+# Setup environment explicitly
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH
+export HOME=/home/tkeating
+
+# Activate virtual environment with dependencies
+source /home/tkeating/venv/bin/activate
+
 # Dynamically resolve project directory
-PROJECT_DIR=\$(python3 -c "import os; print(os.path.dirname(os.path.abspath('${PWD}/train.py')))" 2>/dev/null || echo "/home/tkeating/model/H.-Pylori-Contamination-Detection")
-cd "\$PROJECT_DIR"
+PROJECT_DIR=$(python3 -c "import os; print(os.path.dirname(os.path.abspath('${PWD}/train.py')))" 2>/dev/null || echo "/home/tkeating/model/H.-Pylori-Contamination-Detection")
+cd "$PROJECT_DIR"
 
 # Build train.py command with conditional backbone path
-TRAIN_CMD="python3 train.py \
+TRAIN_CMD="python3 -u train.py \
     --fold \$FOLD \
     --num_folds 5 \
     --model_name \$MODEL_NAME \
@@ -832,10 +849,10 @@ TRAIN_EOF
     
     echo "  ✓ Job ID: $JOB_ID"
     
-    if [ "$BATCH_SIZE" != "0" ]; then
+    if [ "$FOLD_BATCH_SIZE" != "0" ]; then
         # Batching enabled: show which batch this fold belongs to
-        BATCH_NUM=$((FOLD / BATCH_SIZE))
-        BATCH_POS=$((FOLD % BATCH_SIZE))
+        BATCH_NUM=$((FOLD / FOLD_BATCH_SIZE))
+        BATCH_POS=$((FOLD % FOLD_BATCH_SIZE))
         echo "    (Batch $((BATCH_NUM + 1)), Position $((BATCH_POS + 1)))"
     else
         # All parallel: accumulate dependencies for final summary
@@ -850,7 +867,7 @@ TRAIN_EOF
 done
 
 # Set final dependency string for summary job
-if [ "$BATCH_SIZE" != "0" ]; then
+if [ "$FOLD_BATCH_SIZE" != "0" ]; then
     # Batching: summary depends on ALL folds (prevent race conditions if later folds finish first)
     DEPENDENCY_STRING=""
     for i in {0..4}; do

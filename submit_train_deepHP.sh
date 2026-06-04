@@ -19,7 +19,7 @@ set -e  # Exit on error
 MODEL_NAME=${MODEL_NAME:-"convnext_tiny"}
 PROFILE=${PROFILE:-"SEARCHER"}
 ITER=${ITER:-"31.0"}
-BATCH_SIZE=${BATCH_SIZE:-"0"}  # 0=all parallel (default), N=batch in groups of N
+FOLD_BATCH_SIZE=${FOLD_BATCH_SIZE:-"0"}  # 0=all parallel (default), N=batch in groups of N
 
 # Source the Model Profiles (for consistency with HelicoDataSet training)
 if [ -f "profiles.sh" ]; then
@@ -37,7 +37,7 @@ fi
 
 # DeepHP-specific parameters (can be overridden by profiles.sh)
 DEEPHP_EPOCHS=${DEEPHP_EPOCHS:-20}
-BATCH_SIZE=${BATCH_SIZE:-128}
+BATCH_SIZE=${BATCH_SIZE:-32}  # Training mini-batch size (reduced to fit in 11.5GB GPU memory limit)
 LEARNING_RATE=${LEARNING_RATE:-2e-5}
 WEIGHT_DECAY=${WEIGHT_DECAY:-0.01}
 POS_WEIGHT=${POS_WEIGHT:-2.5}
@@ -52,7 +52,8 @@ echo "  Profile: $PROFILE"
 echo "  Model: $MODEL_NAME"
 echo "  Iteration: $ITER"
 echo "  Pre-training Epochs: $DEEPHP_EPOCHS"
-echo "  Batch Size: $BATCH_SIZE"
+echo "  Training Batch Size: $BATCH_SIZE"
+echo "  Fold Batching Mode: $FOLD_BATCH_SIZE (0=all parallel)"
 echo "  Learning Rate: $LEARNING_RATE"
 echo "  Weight Decay: $WEIGHT_DECAY"
 echo "  Pos Weight: $POS_WEIGHT"
@@ -70,14 +71,21 @@ PRE_SYNC_JOB=$(sbatch -p pg1tfg12 --job-name=deephp_presync --output=results/slu
 #SBATCH --mem=16G
 #SBATCH -J deephp_presync
 
+# Setup environment explicitly
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH
+export HOME=/home/tkeating
+
+# Activate virtual environment with dependencies
+source /home/tkeating/venv/bin/activate
+
 echo "Pre-sync job: Setting up DeepHP dataset for training..."
 
 # Get dataset root from config
 DEEPHP_ROOT=$(python3 -c "from config import DEEPHP_DATASET_ROOT; print(DEEPHP_DATASET_ROOT)")
 echo "✓ Source dataset root: $DEEPHP_ROOT"
 
-# Setup local scratch for DeepHP
-DEEPHP_SCRATCH="/tmp/$(whoami)_deephp_data"
+# Setup scratch directory from config (use home dir since /tmp is too small)
+DEEPHP_SCRATCH=$(python3 -c "from config import DEEPHP_SCRATCH_ROOT; print(DEEPHP_SCRATCH_ROOT)")
 mkdir -p "$DEEPHP_SCRATCH"
 echo "✓ Created scratch directory: $DEEPHP_SCRATCH"
 
@@ -129,9 +137,6 @@ for FOLD in {0..4}
 do
     echo "Submitting fold $FOLD..."
     
-    # Define scratch location for this job
-    DEEPHP_SCRATCH="/tmp/$(whoami)_deephp_data"
-    
     JOB_OUT=$(sbatch -p pg1tfg12 \
         --dependency=$FOLD_DEPENDENCY \
         --job-name=deephp_f${FOLD} \
@@ -142,15 +147,35 @@ do
         --gres=gpu:1 \
         --mem=20G \
         --time=36:00:00 \
-        --export=ALL,FOLD=$FOLD,MODEL_NAME=$MODEL_NAME,DEEPHP_EPOCHS=$DEEPHP_EPOCHS,BATCH_SIZE=$BATCH_SIZE,LEARNING_RATE=$LEARNING_RATE,WEIGHT_DECAY=$WEIGHT_DECAY,POS_WEIGHT=$POS_WEIGHT,USE_FOCAL_LOSS=$USE_FOCAL_LOSS,GAMMA=$GAMMA,ITER=$ITER,DEEPHP_SCRATCH=$DEEPHP_SCRATCH \
         <<TRAIN_EOF
 #!/bin/bash
+# Setup environment explicitly
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH
+export HOME=/home/tkeating
+
+# Activate virtual environment with dependencies
+source /home/tkeating/venv/bin/activate
+
+FOLD=$FOLD
+MODEL_NAME=$MODEL_NAME
+DEEPHP_EPOCHS=$DEEPHP_EPOCHS
+BATCH_SIZE=$BATCH_SIZE
+LEARNING_RATE=$LEARNING_RATE
+WEIGHT_DECAY=$WEIGHT_DECAY
+POS_WEIGHT=$POS_WEIGHT
+USE_FOCAL_LOSS=$USE_FOCAL_LOSS
+GAMMA=$GAMMA
+ITER=$ITER
+
 cd /home/tkeating/model/H.-Pylori-Contamination-Detection
+
+# Get scratch directory at runtime from config
+DEEPHP_SCRATCH=\$(python3 -c "from config import DEEPHP_SCRATCH_ROOT; print(DEEPHP_SCRATCH_ROOT)")
 
 # Use synced DeepHP dataset from scratch
 export DEEPHP_DATASET_ROOT="\$DEEPHP_SCRATCH"
 
-python3 train_deepHP_patches.py \
+python3 -u train_deepHP_patches.py \
     --fold \$FOLD \
     --num_folds 5 \
     --model_name \$MODEL_NAME \
@@ -172,10 +197,10 @@ TRAIN_EOF
     FOLD_IDS[$FOLD]="$JOB_ID"  # Store for batch dependency lookup
     echo "  → Job ID: $JOB_ID"
     
-    if [ "$BATCH_SIZE" != "0" ]; then
+    if [ "$FOLD_BATCH_SIZE" != "0" ]; then
         # Batching enabled: show which batch this fold belongs to
-        BATCH_NUM=$((FOLD / BATCH_SIZE))
-        BATCH_POS=$((FOLD % BATCH_SIZE))
+        BATCH_NUM=$((FOLD / FOLD_BATCH_SIZE))
+        BATCH_POS=$((FOLD % FOLD_BATCH_SIZE))
         echo "    (Batch $((BATCH_NUM + 1)), Position $((BATCH_POS + 1)))"
     else
         # All parallel: accumulate dependencies for final summary
@@ -195,7 +220,7 @@ echo "All 5 fold jobs submitted. Scheduling final averaging + summary job..."
 echo "=========================================================================="
 
 # Set final dependency string for summary job
-if [ "$BATCH_SIZE" != "0" ]; then
+if [ "$FOLD_BATCH_SIZE" != "0" ]; then
     # Batching: summary depends on ALL folds (prevent race conditions if later folds finish first)
     DEPENDENCY_STRING=""
     for i in {0..4}; do

@@ -29,8 +29,11 @@ mkdir -p results
 # Activate environment
 source ../venv/bin/activate
 
+# Get dataset path from config
+DEEPHP_DATASET=$(python3 -c "from config import DEEPHP_DATASET_ROOT; print(DEEPHP_DATASET_ROOT)" 2>/dev/null || echo "/home/tkeating/datasets/8117177")
+
 echo "Starting DeepHP Global Duplicate Detection Audit..."
-echo "Dataset: /home/tkeating/datasets/8117177 (Positive + Negative folders)"
+echo "Dataset: $DEEPHP_DATASET (Positive + Negative folders)"
 echo "Expected patches: ~394,926 total (111,005 Positive + 283,921 Negative)"
 echo ""
 

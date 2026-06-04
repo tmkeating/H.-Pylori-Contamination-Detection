@@ -14,12 +14,16 @@ import os
 # Dataset Storage Paths
 DATASET_ROOT = "/home/tkeating/datasets/HelicoDataSet"
 DEEPHP_DATASET_ROOT = "/home/tkeating/datasets/8117177"  # DeepHP H&E patches (Positive & Negative folders)
-SCRATCH_ROOT = "/home/tkeating/.scratch/h_pylori_data"
+
+# Scratch/Temporary Storage Paths (for syncing datasets to local storage during training)
+SCRATCH_ROOT = "/home/tkeating/.scratch/h_pylori_data"  # HelicoDataSet scratch
+DEEPHP_SCRATCH_ROOT = "/home/tkeating/.scratch/deephp_data"  # DeepHP scratch
 
 # Allow override via environment variables
 DATASET_ROOT = os.environ.get('DATASET_ROOT', DATASET_ROOT)
 DEEPHP_DATASET_ROOT = os.environ.get('DEEPHP_DATASET_ROOT', DEEPHP_DATASET_ROOT)
 SCRATCH_ROOT = os.environ.get('SCRATCH_ROOT', SCRATCH_ROOT)
+DEEPHP_SCRATCH_ROOT = os.environ.get('DEEPHP_SCRATCH_ROOT', DEEPHP_SCRATCH_ROOT)
 
 # Metadata Files
 PATIENT_CSV = os.path.join(DATASET_ROOT, "PatientDiagnosis.csv")

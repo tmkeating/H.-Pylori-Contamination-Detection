@@ -35,6 +35,13 @@
 # Create results directory if it doesn't exist
 mkdir -p results
 
+# Setup environment explicitly for SLURM jobs
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH
+export HOME=/home/tkeating
+
+# Activate virtual environment with dependencies
+source /home/tkeating/venv/bin/activate
+
 # --- LOCAL SCRATCH SETUP ---
 # We use /tmp as it's on a local NVMe SSD (faster than network storage)
 LOCAL_SCRATCH=$(python3 -c "from config import SCRATCH_ROOT; print(SCRATCH_ROOT)" 2>/dev/null || echo "/home/tkeating/.scratch/h_pylori_data")
@@ -144,9 +151,10 @@ else
 import json
 import os
 from pathlib import Path
+from config import DATASET_ROOT
 
 exclude_filter_file = os.environ['EXCLUDE_FILTER_FILE']
-remote_data = os.environ.get('REMOTE_DATA', '/home/tkeating/datasets/HelicoDataSet')
+remote_data = os.environ.get('REMOTE_DATA', DATASET_ROOT)
 
 excludes = []
 

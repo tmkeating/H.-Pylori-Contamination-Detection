@@ -218,7 +218,7 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
         train_dataset,
         batch_size=batch_size,
         shuffle=True,
-        num_workers=8,
+        num_workers=4,
         pin_memory=True
     )
     
@@ -226,7 +226,7 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
         val_dataset,
         batch_size=batch_size,
         shuffle=False,
-        num_workers=8,
+        num_workers=4,
         pin_memory=True
     )
     

@@ -91,7 +91,7 @@ do
     # Iteration 21.3: Expanded export list to include Stability parameters
     # CHANGE: Fold jobs now depend on pre-sync job to avoid concurrent rsync operations
     # CHANGE: Added SKIP_SYNC=1 for fold jobs so they don't re-sync (pre-sync job already did it)
-    JOB_OUT=$(sbatch -p pg1tfg12 --dependency=$FOLD_DEPENDENCY --export=ALL,FOLD=$FOLD,MODEL_NAME=$MODEL_NAME,NEG_WEIGHT=$NEG_WEIGHT,POS_WEIGHT=$POS_WEIGHT,GAMMA=$GAMMA,NUM_EPOCHS=$NUM_EPOCHS,FREEZE_BN=$FREEZE_BN,CLIP_GRAD=$CLIP_GRAD,PCT_START=$PCT_START,SAVER_METRIC=$SAVER_METRIC,WEIGHT_DECAY=$WEIGHT_DECAY,USE_SWA=$USE_SWA,SWA_START=$SWA_START,JITTER=$JITTER,ITER=$ITER,SKIP_SYNC=1 run_h_pylori.sh)
+    JOB_OUT=$(sbatch -p pg1tfg12 --dependency=$FOLD_DEPENDENCY -v FOLD=$FOLD,MODEL_NAME=$MODEL_NAME,NEG_WEIGHT=$NEG_WEIGHT,POS_WEIGHT=$POS_WEIGHT,GAMMA=$GAMMA,NUM_EPOCHS=$NUM_EPOCHS,FREEZE_BN=$FREEZE_BN,CLIP_GRAD=$CLIP_GRAD,PCT_START=$PCT_START,SAVER_METRIC=$SAVER_METRIC,WEIGHT_DECAY=$WEIGHT_DECAY,USE_SWA=$USE_SWA,SWA_START=$SWA_START,JITTER=$JITTER,ITER=$ITER,SKIP_SYNC=1 run_h_pylori.sh)
     echo "$JOB_OUT"
     JOB_ID=$(echo $JOB_OUT | awk '{print $4}')
     FOLD_IDS[$FOLD]="$JOB_ID"  # Store for batch dependency lookup

@@ -776,7 +776,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
         batch_size=batch_size_mil, 
         sampler=sampler, 
         shuffle=shuffle_train,
-        num_workers=4, # Reduced for bag loading overhead
+        num_workers=4, # Balanced for SLURM: 6 CPU cores - 2 for main = 4 workers
         pin_memory=True
     )
     val_loader = DataLoader(

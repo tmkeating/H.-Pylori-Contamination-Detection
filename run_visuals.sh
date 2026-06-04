@@ -57,6 +57,13 @@ DATASET=${DATASET:-helicodataset}
 MODEL=${MODEL:-convnext_tiny}
 PIPELINE_MODE=${PIPELINE_MODE:-false}  # true = calibration curve + dashboard only
 
+# Setup environment explicitly for SLURM jobs
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH
+export HOME=/home/tkeating
+
+# Activate virtual environment with dependencies
+source /home/tkeating/venv/bin/activate
+
 # Parse command-line arguments (override environment variables)
 while [[ $# -gt 0 ]]; do
     case "$1" in
