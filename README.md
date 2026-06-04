@@ -65,11 +65,11 @@ python3 audit_png_count_deepHP.py
 After integrity checks pass, sync the vetted datasets to local node storage for performance:
 
 **HelicoDataSet Sync** (automatic in `run_h_pylori.sh`):
-- Syncs to `/tmp/tkeating_h_pylori_data/` using `suggested_blacklist.json` to exclude problematic patches
+- Syncs to `/home/tkeating/.scratch/h_pylori_data/` using `suggested_blacklist.json` to exclude problematic patches
 - 128,724 training patches (after blacklist removal) + 87,602 HoldOut patches
 
 **DeepHP Sync** (automatic in `train_deepHP_patches.py`):
-- Syncs to `/tmp/tkeating_deephp_data/` using `suggested_deephp_blacklist.json` if available
+- Syncs to `/home/tkeating/.scratch/h_pylori_data/` using `suggested_deephp_blacklist.json` if available
 - 394,926 clean patches (verified 0 duplicates)
 
 ### 2. Training (5-Fold Cross-Validation)

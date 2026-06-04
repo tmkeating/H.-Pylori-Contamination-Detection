@@ -27,7 +27,7 @@ causing fitting to fail with ill-conditioned matrices. **
 
 Configuration:
     DeepHP dataset path is set via config.py (DEEPHP_DATASET_ROOT).
-    Default: /export/hhome/tkeating/8117177
+    Default: /home/tkeating/datasets/8117177
     Override: export DEEPHP_DATASET_ROOT=/path/to/deephp
 
 Usage:

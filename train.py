@@ -477,7 +477,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
     Notes:
         - Patient-level split ensures all patches from a single patient are in train OR validation, never both
         - Grad-CAM requires torch.enable_grad() context and uses the uncompiled model (_orig_mod) for hook activation
-        - Hardware: Optimized for NVIDIA A40 (48GB VRAM) with batch_size=128 and accumulation_steps=2
+        - Hardware: Optimized for NVIDIA L40S (48GB VRAM) with batch_size=128 and accumulation_steps=2
     """
     # --- Step 0: Prepare output directories ---
     results_dir = "results"
@@ -768,7 +768,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
 
     # MIL Batch Size: Usually 1 bag per batch is safest for variable sizes, 
     # but we can try small batches if bag sizes are fixed/padded.
-    # Given A40 VRAM and 500 max patches, batch_size=1 (bag-at-a-time) is mandatory.
+    # Given L40S VRAM and 500 max patches, batch_size=1 (bag-at-a-time) is mandatory.
     batch_size_mil = 1 
     accumulation_steps = 16 # Adjust for MIL bag-level steps
     train_loader = DataLoader(

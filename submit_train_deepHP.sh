@@ -62,9 +62,9 @@ echo ""
 
 # 1. Submit pre-sync job (prepares scratch directory for data)
 echo "Submitting pre-sync job to prepare environment..."
-PRE_SYNC_JOB=$(sbatch -p dcca40 --job-name=deephp_presync --output=results/slurm_deephp_presync_%j.txt <<'PRESYNC_EOF'
+PRE_SYNC_JOB=$(sbatch -p pg1tfg12 --job-name=deephp_presync --output=results/slurm_deephp_presync_%j.txt <<'PRESYNC_EOF'
 #!/bin/bash
-#SBATCH -p dcca40
+#SBATCH -p pg1tfg12
 #SBATCH -t 0-02:00
 #SBATCH --cpus-per-task=6
 #SBATCH --mem=16G
@@ -132,7 +132,7 @@ do
     # Define scratch location for this job
     DEEPHP_SCRATCH="/tmp/$(whoami)_deephp_data"
     
-    JOB_OUT=$(sbatch -p dcca40 \
+    JOB_OUT=$(sbatch -p pg1tfg12 \
         --dependency=$FOLD_DEPENDENCY \
         --job-name=deephp_f${FOLD} \
         --output=results/slurm_deephp_f${FOLD}_%j.txt \
@@ -145,7 +145,7 @@ do
         --export=ALL,FOLD=$FOLD,MODEL_NAME=$MODEL_NAME,DEEPHP_EPOCHS=$DEEPHP_EPOCHS,BATCH_SIZE=$BATCH_SIZE,LEARNING_RATE=$LEARNING_RATE,WEIGHT_DECAY=$WEIGHT_DECAY,POS_WEIGHT=$POS_WEIGHT,USE_FOCAL_LOSS=$USE_FOCAL_LOSS,GAMMA=$GAMMA,ITER=$ITER,DEEPHP_SCRATCH=$DEEPHP_SCRATCH \
         <<TRAIN_EOF
 #!/bin/bash
-cd /hhome/tkeating/model/H.-Pylori-Contamination-Detection
+cd /home/tkeating/model/H.-Pylori-Contamination-Detection
 
 # Use synced DeepHP dataset from scratch
 export DEEPHP_DATASET_ROOT="\$DEEPHP_SCRATCH"
@@ -228,7 +228,7 @@ if [ -z "$DEPENDENCY_STRING" ]; then
 fi
 
 SUMMARY_JOB_OUT=$(sbatch --dependency=$DEPENDENCY_STRING \
-    -p dcca40 \
+    -p pg1tfg12 \
     --time=0-00:30 \
     --mem=16G \
     --cpus-per-task=4 \
@@ -237,8 +237,8 @@ SUMMARY_JOB_OUT=$(sbatch --dependency=$DEPENDENCY_STRING \
     --error=results/slurm_deephp_summary_error_%j.txt \
     <<'SUMMARY_EOF'
 #!/bin/bash
-#SBATCH -p dcca40
-cd /hhome/tkeating/model/H.-Pylori-Contamination-Detection
+#SBATCH -p pg1tfg12
+cd /home/tkeating/model/H.-Pylori-Contamination-Detection
 
 echo "=========================================================================="
 echo "All DeepHP pre-training folds complete. Averaging backbone weights..."

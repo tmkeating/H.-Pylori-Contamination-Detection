@@ -10,7 +10,7 @@
 #
 # What it does:
 #   1. Counts PNG files in the DeepHP dataset (/export/hhome/tkeating/8117177/Positive and Negative)
-#   2. Optionally counts PNG files in scratch directory (/tmp/tkeating_deephp_data)
+#   2. Optionally counts PNG files in scratch directory (/home/tkeating/.scratch/h_pylori_data)
 #   3. Generates class-level breakdowns (Positive vs Negative)
 #   4. Reports sync status if scratch exists
 #   5. Exports comprehensive CSV report with all counts

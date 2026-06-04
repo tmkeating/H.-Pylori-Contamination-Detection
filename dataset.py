@@ -57,7 +57,7 @@ class HPyloriDataset(Dataset):
         ----------------------------------
         Total patches available for training: 129,043 patches
           - Counted by: audit_png_count.py + dataset.py verification
-          - Location: /tmp/tkeating_h_pylori_data (CrossValidation folder)
+          - Location: /home/tkeating/.scratch/h_pylori_data (CrossValidation folder)
           - Coverage: All 154 unique clinical patient base IDs
           - Breakdown: Annotated (2,953) + Cropped (126,090 unique)
           - Both Annotated and Cropped versions loaded for data diversity

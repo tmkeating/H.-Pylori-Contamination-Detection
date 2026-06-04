@@ -56,7 +56,7 @@ echo "-------------------------------------------"
 echo "Submitting pre-sync job to populate scratch directory before training..."
 # Submit a pre-sync job that syncs data once, blocking until complete
 # All fold jobs will depend on this pre-sync job to avoid concurrent sync/training operations
-PRE_SYNC_JOB=$(sbatch -p dcca40 --export=ALL,PRE_SYNC_ONLY=1 run_h_pylori.sh)
+PRE_SYNC_JOB=$(sbatch -p pg1tfg12 --export=ALL,PRE_SYNC_ONLY=1 run_h_pylori.sh)
 PRE_SYNC_JOB_ID=$(echo $PRE_SYNC_JOB | awk '{print $4}')
 echo "Pre-sync job ID: $PRE_SYNC_JOB_ID"
 PRE_SYNC_DEPENDENCY="afterok:$PRE_SYNC_JOB_ID"
@@ -91,7 +91,7 @@ do
     # Iteration 21.3: Expanded export list to include Stability parameters
     # CHANGE: Fold jobs now depend on pre-sync job to avoid concurrent rsync operations
     # CHANGE: Added SKIP_SYNC=1 for fold jobs so they don't re-sync (pre-sync job already did it)
-    JOB_OUT=$(sbatch -p dcca40 --dependency=$FOLD_DEPENDENCY --export=ALL,FOLD=$FOLD,MODEL_NAME=$MODEL_NAME,NEG_WEIGHT=$NEG_WEIGHT,POS_WEIGHT=$POS_WEIGHT,GAMMA=$GAMMA,NUM_EPOCHS=$NUM_EPOCHS,FREEZE_BN=$FREEZE_BN,CLIP_GRAD=$CLIP_GRAD,PCT_START=$PCT_START,SAVER_METRIC=$SAVER_METRIC,WEIGHT_DECAY=$WEIGHT_DECAY,USE_SWA=$USE_SWA,SWA_START=$SWA_START,JITTER=$JITTER,ITER=$ITER,SKIP_SYNC=1 run_h_pylori.sh)
+    JOB_OUT=$(sbatch -p pg1tfg12 --dependency=$FOLD_DEPENDENCY --export=ALL,FOLD=$FOLD,MODEL_NAME=$MODEL_NAME,NEG_WEIGHT=$NEG_WEIGHT,POS_WEIGHT=$POS_WEIGHT,GAMMA=$GAMMA,NUM_EPOCHS=$NUM_EPOCHS,FREEZE_BN=$FREEZE_BN,CLIP_GRAD=$CLIP_GRAD,PCT_START=$PCT_START,SAVER_METRIC=$SAVER_METRIC,WEIGHT_DECAY=$WEIGHT_DECAY,USE_SWA=$USE_SWA,SWA_START=$SWA_START,JITTER=$JITTER,ITER=$ITER,SKIP_SYNC=1 run_h_pylori.sh)
     echo "$JOB_OUT"
     JOB_ID=$(echo $JOB_OUT | awk '{print $4}')
     FOLD_IDS[$FOLD]="$JOB_ID"  # Store for batch dependency lookup
@@ -151,7 +151,7 @@ if [ -z "$DEPENDENCY_STRING" ]; then
 fi
 
 sbatch --dependency=$DEPENDENCY_STRING \
-    -p dcca40 \
+    -p pg1tfg12 \
     --time=0-12:00 \
     --mem=20G \
     --cpus-per-task=6 \
@@ -162,7 +162,7 @@ sbatch --dependency=$DEPENDENCY_STRING \
 #!/bin/bash
 #SBATCH -p dcca40
 
-cd /hhome/tkeating/model/H.-Pylori-Contamination-Detection
+cd /home/tkeating/model/H.-Pylori-Contamination-Detection
 
 # Get job ID for output filename
 JOB_ID=$SLURM_JOB_ID

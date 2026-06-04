@@ -120,19 +120,19 @@ Each method generates comprehensive outputs:
 ## � Dataset Architecture
 
 ### HelicoDataSet (IHC H. Pylori Stain)
-- **Location**: `/export/hhome/tkeating/8117180/`
+- **Location**: `/home/tkeating/datasets/HelicoDataSet`
 - **Structure**: Patient-hierarchical with stratified 5-fold CV
-- **Total Patches**: ~400K+ across patient cohort
+- **Total Patches**: 219,619 patches across patient cohort
 - **Classes**: Positive (H. pylori) / Negative (no bacteria)
 - **Training**: `train.py` with patient-level cross-validation
 - **Integrity**: Global MD5 deduplication via `global_duplicates_check.py`
 
 ### DeepHP Dataset (H&E Histology)
-- **Location**: `/export/hhome/tkeating/8117177/`
+- **Location**: `/home/tkeating/datasets/8117177/`
 - **Structure**: Flat class directories (Positive/, Negative/) - NOT patient-hierarchical
 - **Total Patches**: 394,926 patches (111,005 Positive + 283,921 Negative)
 - **Class Imbalance**: 2.56:1 (Negative:Positive ratio)
-- **Sync**: Pre-synced to `/tmp/tkeating_deephp_data/` for training
+- **Sync**: Pre-synced to `/home/tkeating/.scratch/h_pylori_data/` for training
 - **Purpose**: ConvNeXt-Tiny backbone pre-training on diverse histology patterns
 - **Training**: `train_deepHP_patches.py` with 5-fold stratified CV on patches
 - **Integrity**: Global MD5 deduplication via `check_global_duplicates_deepHP.py` (verified: 0 duplicates, 394,926/394,926 patches present)
@@ -157,7 +157,7 @@ Each method generates comprehensive outputs:
   - Generates model weights, evaluation reports, confusion matrices, learning curves, ROC/PR curves
 - **[audit_png_count_deepHP.py](audit_png_count_deepHP.py)**: PNG patch counting and sync verification for DeepHP dataset
   - Outputs `deephp_audit_report.csv` with class distribution
-  - Verifies all 394,926 patches synced to scratch (`/tmp/tkeating_deephp_data/`)
+  - Verifies all 394,926 patches synced to scratch (`/home/tkeating/.scratch/h_pylori_data/`)
 - **[check_global_duplicates_deepHP.py](check_global_duplicates_deepHP.py)**: Full-file MD5 byte-level duplicate detection across DeepHP dataset
   - Outputs: `deephp_image_inventory.csv`, `deephp_image_duplicates.csv`, `deephp_class_distribution.csv`, `deephp_patch_duplicate_audit.csv`, `suggested_deephp_blacklist.json`
   - Verified: 0 duplicates across 394,926 patches (tested Job 113406)

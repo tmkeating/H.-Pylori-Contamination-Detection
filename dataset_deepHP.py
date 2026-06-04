@@ -15,7 +15,7 @@ Usage:
     
     # Load dataset with H&E normalization
     dataset = DeepHPDataset(
-        root_dir="/export/hhome/tkeating/8117177",
+        root_dir="/home/tkeating/datasets/8117177",
         transform=transforms.Compose([...]),
         fold=0,  # for cross-validation stratification
         num_folds=5

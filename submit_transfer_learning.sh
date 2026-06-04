@@ -198,16 +198,16 @@ echo "Submitting pre-sync job..."
 if [ "$DEEPHP_SUMMARY_JOB_ID" = "0" ]; then
     echo "(No dependency - starting immediately)"
     PRE_SYNC_JOB=$(sbatch \
-        -p dcca40 --job-name=transfer_presync --output=results/slurm_transfer_presync_%j.txt <<'PRESYNC_EOF'
+        -p pg1tfg12 --job-name=transfer_presync --output=results/slurm_transfer_presync_%j.txt <<'PRESYNC_EOF'
 #!/bin/bash
-#SBATCH -p dcca40
+#SBATCH -p pg1tfg12
 #SBATCH -t 0-01:00
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=8G
 #SBATCH -J transfer_presync
 
-LOCAL_SCRATCH=$(python3 -c "from config import SCRATCH_ROOT; print(SCRATCH_ROOT)" 2>/dev/null || echo "/tmp/tkeating_h_pylori_data")
-REMOTE_DATA=$(python3 -c "from config import DATASET_ROOT; print(DATASET_ROOT)" 2>/dev/null || echo "/export/hhome/tkeating/datasets/HelicoDataSet")
+LOCAL_SCRATCH=$(python3 -c "from config import SCRATCH_ROOT; print(SCRATCH_ROOT)" 2>/dev/null || echo "/home/tkeating/.scratch/h_pylori_data")
+REMOTE_DATA=$(python3 -c "from config import DATASET_ROOT; print(DATASET_ROOT)" 2>/dev/null || echo "/home/tkeating/datasets/HelicoDataSet")
 
 echo "========================================================================="
 echo "Transfer Learning Pre-Sync: Verifying Data and Syncing to Local Scratch"
@@ -463,16 +463,16 @@ PRESYNC_EOF
 else
     echo "(Dependency on pre-training job: $DEEPHP_SUMMARY_JOB_ID)"
     PRE_SYNC_JOB=$(sbatch --dependency=afterok:$DEEPHP_SUMMARY_JOB_ID \
-        -p dcca40 --job-name=transfer_presync --output=results/slurm_transfer_presync_%j.txt <<'PRESYNC_EOF'
+        -p pg1tfg12 --job-name=transfer_presync --output=results/slurm_transfer_presync_%j.txt <<'PRESYNC_EOF'
 #!/bin/bash
-#SBATCH -p dcca40
+#SBATCH -p pg1tfg12
 #SBATCH -t 0-01:00
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=8G
 #SBATCH -J transfer_presync
 
-LOCAL_SCRATCH=$(python3 -c "from config import SCRATCH_ROOT; print(SCRATCH_ROOT)" 2>/dev/null || echo "/tmp/tkeating_h_pylori_data")
-REMOTE_DATA=$(python3 -c "from config import DATASET_ROOT; print(DATASET_ROOT)" 2>/dev/null || echo "/export/hhome/tkeating/datasets/HelicoDataSet")
+LOCAL_SCRATCH=$(python3 -c "from config import SCRATCH_ROOT; print(SCRATCH_ROOT)" 2>/dev/null || echo "/home/tkeating/.scratch/h_pylori_data")
+REMOTE_DATA=$(python3 -c "from config import DATASET_ROOT; print(DATASET_ROOT)" 2>/dev/null || echo "/home/tkeating/datasets/HelicoDataSet")
 
 echo "========================================================================="
 echo "Transfer Learning Pre-Sync: Verifying Data and Syncing to Local Scratch"
@@ -769,7 +769,7 @@ do
     fi
     echo "Submitting fold $FOLD..."
     
-    JOB_OUT=$(sbatch -p dcca40 \
+    JOB_OUT=$(sbatch -p pg1tfg12 \
         --dependency=$FOLD_DEPENDENCY \
         --job-name=transfer_f${FOLD} \
         --output=results/slurm_transfer_f${FOLD}_%j.txt \
@@ -783,7 +783,7 @@ do
         <<TRAIN_EOF
 #!/bin/bash
 # Dynamically resolve project directory
-PROJECT_DIR=\$(python3 -c "import os; print(os.path.dirname(os.path.abspath('${PWD}/train.py')))" 2>/dev/null || echo "/hhome/tkeating/model/H.-Pylori-Contamination-Detection")
+PROJECT_DIR=\$(python3 -c "import os; print(os.path.dirname(os.path.abspath('${PWD}/train.py')))" 2>/dev/null || echo "/home/tkeating/model/H.-Pylori-Contamination-Detection")
 cd "\$PROJECT_DIR"
 
 # Build train.py command with conditional backbone path
@@ -905,7 +905,7 @@ if [ -z "$DEPENDENCY_STRING" ]; then
 fi
 
 SUMMARY_JOB_ID=$(sbatch --dependency=$DEPENDENCY_STRING \
-    -p dcca40 \
+    -p pg1tfg12 \
     --time=0-02:00 \
     --mem=8G \
     --cpus-per-task=6 \
@@ -914,8 +914,8 @@ SUMMARY_JOB_ID=$(sbatch --dependency=$DEPENDENCY_STRING \
     --error=results/slurm_transfer_summary_error_%j.txt \
     <<'SUMMARY_EOF'
 #!/bin/bash
-#SBATCH -p dcca40
-cd /hhome/tkeating/model/H.-Pylori-Contamination-Detection
+#SBATCH -p pg1tfg12
+cd /home/tkeating/model/H.-Pylori-Contamination-Detection
 
 # Get job ID for output filename
 JOB_ID=$SLURM_JOB_ID
@@ -984,7 +984,7 @@ echo "Submitting automatic visualization generation job..."
 echo ""
 
 VISUAL_JOB_ID=$(sbatch --dependency=afterok:$SUMMARY_JOB_ID \
-    -p dcca40 \
+    -p pg1tfg12 \
     --time=0-02:00 \
     --mem=16G \
     --cpus-per-task=4 \
@@ -993,8 +993,8 @@ VISUAL_JOB_ID=$(sbatch --dependency=afterok:$SUMMARY_JOB_ID \
     --error=results/slurm_transfer_visuals_error_%j.txt \
     <<'VISUAL_EOF'
 #!/bin/bash
-#SBATCH -p dcca40
-cd /hhome/tkeating/model/H.-Pylori-Contamination-Detection
+#SBATCH -p pg1tfg12
+cd /home/tkeating/model/H.-Pylori-Contamination-Detection
 
 JOB_ID=$SLURM_JOB_ID
 

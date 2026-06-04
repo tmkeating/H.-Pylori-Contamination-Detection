@@ -23,7 +23,7 @@
 #SBATCH -c 8
 #SBATCH -N 1
 #SBATCH -t 0-02:00
-#SBATCH -p dcca40
+#SBATCH -p pg1tfg12
 #SBATCH --mem=32G
 #SBATCH --gres=gpu:1
 #SBATCH -o results/rescue_ensemble/slurm_rescue_%j.txt
@@ -34,7 +34,7 @@ mkdir -p results/rescue_ensemble
 
 # --- LOCAL SCRATCH SETUP (Skip image sync if already present or just use remote) ---
 # We'll rely on the existing dataset paths in rescue_inference.py which already 
-# check for /tmp/tkeating_h_pylori_data first.
+# check for /home/tkeating/.scratch/h_pylori_data first.
 
 # Activate virtual environment
 source ../venv/bin/activate

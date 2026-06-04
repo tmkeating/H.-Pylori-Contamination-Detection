@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=deephp_duplicates_check
-#SBATCH -p dcca40
+#SBATCH -p pg1tfg12
 #SBATCH -n 1
 #SBATCH -c 4
 #SBATCH -t 0-02:00
@@ -30,12 +30,12 @@ mkdir -p results
 source ../venv/bin/activate
 
 echo "Starting DeepHP Global Duplicate Detection Audit..."
-echo "Dataset: /export/hhome/tkeating/8117177 (Positive + Negative folders)"
+echo "Dataset: /home/tkeating/datasets/8117177 (Positive + Negative folders)"
 echo "Expected patches: ~394,926 total (111,005 Positive + 283,921 Negative)"
 echo ""
 
 # Using absolute path for accuracy
-python3 /hhome/tkeating/model/H.-Pylori-Contamination-Detection/check_global_duplicates_deepHP.py
+python3 /home/tkeating/model/H.-Pylori-Contamination-Detection/check_global_duplicates_deepHP.py
 
 echo ""
 echo "✓ DeepHP duplicate detection audit complete!"

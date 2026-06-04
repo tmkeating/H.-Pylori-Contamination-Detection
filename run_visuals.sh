@@ -43,7 +43,7 @@
 #SBATCH -n 4
 #SBATCH -N 1
 #SBATCH -t 0-02:00
-#SBATCH -p dcca40
+#SBATCH -p pg1tfg12
 #SBATCH --mem=32G
 #SBATCH --gres=gpu:1
 #SBATCH -o results/visuals_output_%j.txt

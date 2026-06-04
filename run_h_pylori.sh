@@ -26,9 +26,9 @@
 #SBATCH -c 8                          # Request 8 CPU cores per task for fast data loading
 #SBATCH -N 1
 #SBATCH -t 0-06:00                     # It will likely finish in < 6 hours now
-#SBATCH -p dcca40
+#SBATCH -p pg1tfg12
 #SBATCH --mem=20G                      # Reduced from 48GB to prevent cluster starvation (5×20G=100GB acceptable)
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:l40s:1
 #SBATCH -o results/output_%j.txt
 #SBATCH -e results/error_%j.txt
 
@@ -37,8 +37,8 @@ mkdir -p results
 
 # --- LOCAL SCRATCH SETUP ---
 # We use /tmp as it's on a local NVMe SSD (faster than network storage)
-LOCAL_SCRATCH=$(python3 -c "from config import SCRATCH_ROOT; print(SCRATCH_ROOT)" 2>/dev/null || echo "/tmp/tkeating_h_pylori_data")
-REMOTE_DATA=$(python3 -c "from config import DATASET_ROOT; print(DATASET_ROOT)" 2>/dev/null || echo "/export/hhome/tkeating/datasets/HelicoDataSet")
+LOCAL_SCRATCH=$(python3 -c "from config import SCRATCH_ROOT; print(SCRATCH_ROOT)" 2>/dev/null || echo "/home/tkeating/.scratch/h_pylori_data")
+REMOTE_DATA=$(python3 -c "from config import DATASET_ROOT; print(DATASET_ROOT)" 2>/dev/null || echo "/home/tkeating/datasets/HelicoDataSet"
 
 echo "Synchronizing dataset to local scratch: $LOCAL_SCRATCH"
 mkdir -p "$LOCAL_SCRATCH"
@@ -146,7 +146,7 @@ import os
 from pathlib import Path
 
 exclude_filter_file = os.environ['EXCLUDE_FILTER_FILE']
-remote_data = os.environ.get('REMOTE_DATA', '/export/hhome/tkeating/HelicoDataSet')
+remote_data = os.environ.get('REMOTE_DATA', '/home/tkeating/datasets/HelicoDataSet')
 
 excludes = []
 
