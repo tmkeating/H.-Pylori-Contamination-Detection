@@ -95,29 +95,41 @@ class DeepHPDataset(Dataset):
             try:
                 with open(blacklist_path, 'r') as f:
                     bl_data = json.load(f)
+                
+                # DEBUG: Print what we loaded
+                print(f"[DEBUG] Loaded blacklistDeepHP.json successfully")
+                print(f"[DEBUG] Blacklist data keys: {bl_data.keys() if isinstance(bl_data, dict) else 'not a dict'}")
                     
                 # Extract all paths to exclude
                 if isinstance(bl_data, dict):
                     for key, entry in bl_data.items():
+                        print(f"[DEBUG] Processing blacklist entry: {key}")
                         if isinstance(entry, dict):
                             if "full_path" in entry:
                                 blacklist_paths.add(entry["full_path"])
+                                print(f"[DEBUG]   Added via full_path: {entry['full_path']}")
                             elif "filename" in entry and "folder" in entry:
                                 # Construct path from folder and filename
                                 folder_name = entry["folder"]
                                 filename = entry["filename"]
                                 potential_path = os.path.join(root_dir, folder_name, filename)
                                 blacklist_paths.add(potential_path)
+                                print(f"[DEBUG]   Added via folder/filename: {potential_path}")
                 
                 # Filter out blacklisted samples
                 if blacklist_paths:
                     original_count = len(self.samples)
+                    print(f"[DEBUG] Original samples count: {original_count}")
+                    print(f"[DEBUG] Blacklist paths to exclude: {blacklist_paths}")
                     self.samples = [(path, label) for path, label in self.samples if path not in blacklist_paths]
                     excluded_count = original_count - len(self.samples)
+                    print(f"[DEBUG] After exclusion count: {len(self.samples)}, excluded: {excluded_count}")
                     # Only print once during training dataset initialization
                     if self.train and excluded_count > 0:
                         print(f"DeepHP Blacklist: Excluded {excluded_count} patches")
                         print(f"  Reason: Macenko reference and problematic patches")
+                else:
+                    print(f"[DEBUG] No blacklist paths found to exclude")
                         
             except Exception as e:
                 print(f"Warning: Could not load blacklist {blacklist_path}: {e}")
@@ -161,6 +173,15 @@ class DeepHPDataset(Dataset):
         val_indices = pos_indices[pos_val_start:pos_val_end] + neg_indices[neg_val_start:neg_val_end]
         train_indices = (pos_indices[:pos_val_start] + pos_indices[pos_val_end:] + 
                         neg_indices[:neg_val_start] + neg_indices[neg_val_end:])
+        
+        # DEBUG: Verify indices are disjoint
+        train_set = set(train_indices)
+        val_set = set(val_indices)
+        overlap = train_set & val_set
+        if overlap:
+            print(f"[ERROR] CRITICAL: Train and validation indices overlap! {len(overlap)} samples in both!")
+        else:
+            print(f"[DEBUG] ✓ Train/Val indices are disjoint ({len(train_indices)} train, {len(val_indices)} val)")
         
         return {'train': train_indices, 'val': val_indices}
     

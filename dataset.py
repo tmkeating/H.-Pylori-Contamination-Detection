@@ -342,6 +342,11 @@ class HPyloriDataset(Dataset):
                             image_blacklist_set.add((item["folder"], item["filename"]))
                         elif isinstance(item, (list, tuple)):
                             image_blacklist_set.add(tuple(item))
+                
+                # DEBUG: Print blacklist status
+                print(f"[DEBUG] Loaded blacklist.json successfully")
+                print(f"[DEBUG] Conflict bags to exclude: {len(conflict_blacklist)}")
+                print(f"[DEBUG] Individual images to exclude: {len(image_blacklist_set)}")
             else:
                 print(f"Warning: Blacklist file {blacklist_path} not found. Proceeding without filtering.")
             

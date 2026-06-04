@@ -647,10 +647,27 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
     # Create a merged dataset object by passing both training directories as a list
     # The HPyloriDataset (Iter 22+) supports list of paths for root_dir
     train_dirs = [train_dir, cropped_dir]
+    
+    # DEBUG: Print dataset directories being used
+    print(f"\n{'='*60}")
+    print(f"Loading HelicoDataSet from:")
+    print(f"  - Train dir: {train_dir}")
+    print(f"  - Cropped dir: {cropped_dir}")
+    print(f"  Using scratch: {'/scratch' in train_dir or '.scratch' in train_dir}")
+    print(f"{'='*60}\n")
+    
     full_dataset = HPyloriDataset(train_dirs, patient_csv, patch_csv, transform=None, bag_mode=True, max_bag_size=500, train=True)
     
     # Iteration 25.1: Pass the run prefix to the dataset for automated audit logging
     full_dataset.audit_prefix = os.path.join(results_dir, prefix)
+    
+    # DEBUG: Print dataset statistics
+    all_bag_ids_temp = [bag[2] for bag in full_dataset.bags]
+    print(f"[DEBUG] HelicoDataSet loaded successfully")
+    print(f"[DEBUG] Total bags: {len(full_dataset.bags)}")
+    print(f"[DEBUG] Total patients: {len(set([bid.split('_')[0] for bid in all_bag_ids_temp]))}")
+    print(f"[DEBUG] Positive bags: {sum(1 for bag in full_dataset.bags if bag[3] == 1)}")
+    print(f"[DEBUG] Negative bags: {sum(1 for bag in full_dataset.bags if bag[3] == 0)}")
     
     # --- RIGOROUS PATIENT-LEVEL SPLIT (Leakage-Proof Iteration) ---
     # 1. Identify all clinical patient IDs (base IDs) present across all folders
@@ -716,6 +733,15 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
     # Map all bags (from both folders) to their assigned folds using the clinical IDs
     train_indices = [i for i, bag in enumerate(full_dataset.bags) if bag[2].split('_')[0] in train_base_ids]
     val_indices = [i for i, bag in enumerate(full_dataset.bags) if bag[2].split('_')[0] in val_base_ids]
+    
+    # DEBUG: Verify train/val indices are disjoint (no patient leakage)
+    train_set = set(train_indices)
+    val_set = set(val_indices)
+    overlap = train_set & val_set
+    if overlap:
+        print(f"[ERROR] CRITICAL: Train and validation indices overlap! {len(overlap)} bags in both!")
+    else:
+        print(f"[DEBUG] ✓ Train/Val indices are disjoint ({len(train_indices)} train bags, {len(val_indices)} val bags)")
     
     print(f"Independent Patient-level split:")
     print(f" - Train: {len(train_indices)} biopsy bags")
