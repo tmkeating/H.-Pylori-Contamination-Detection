@@ -35,12 +35,19 @@
 # Create results directory if it doesn't exist
 mkdir -p results
 
+set -e  # Exit on error
+
+# Verify virtual environment before proceeding
+if [ -f "./verify_venv.sh" ]; then
+    source ./verify_venv.sh
+else
+    echo "ERROR: verify_venv.sh not found in current directory"
+    exit 1
+fi
+
 # Setup environment explicitly for SLURM jobs
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH
 export HOME=/home/tkeating
-
-# Get virtual environment path from config
-VENV_ROOT=$(python3 -c "from config import VENV_ROOT; print(VENV_ROOT)")
 
 # Activate virtual environment with dependencies
 source $VENV_ROOT/bin/activate

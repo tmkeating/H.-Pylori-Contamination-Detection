@@ -49,6 +49,16 @@
 #SBATCH -o results/visuals_output_%j.txt
 #SBATCH -e results/visuals_error_%j.txt
 
+set -e  # Exit on error
+
+# Verify virtual environment before proceeding
+if [ -f "./verify_venv.sh" ]; then
+    source ./verify_venv.sh
+else
+    echo "ERROR: verify_venv.sh not found in current directory"
+    exit 1
+fi
+
 # Set defaults for optional parameters (from environment variables)
 RUN_ID=${RUN_ID:-}           # Empty = use latest run
 FOLD=${FOLD:-0}
@@ -60,9 +70,6 @@ PIPELINE_MODE=${PIPELINE_MODE:-false}  # true = calibration curve + dashboard on
 # Setup environment explicitly for SLURM jobs
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH
 export HOME=/home/tkeating
-
-# Get virtual environment path from config
-VENV_ROOT=$(python3 -c "from config import VENV_ROOT; print(VENV_ROOT)")
 
 # Activate virtual environment with dependencies
 source $VENV_ROOT/bin/activate

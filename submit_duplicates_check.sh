@@ -27,8 +27,15 @@
 # Create results folder if it doesn't already exist
 mkdir -p results
 
-# Get virtual environment path from config
-VENV_ROOT=$(python3 -c "from config import VENV_ROOT; print(VENV_ROOT)")
+set -e  # Exit on error
+
+# Verify virtual environment before proceeding
+if [ -f "./verify_venv.sh" ]; then
+    source ./verify_venv.sh
+else
+    echo "ERROR: verify_venv.sh not found in current directory"
+    exit 1
+fi
 
 # Activate environment
 source $VENV_ROOT/bin/activate

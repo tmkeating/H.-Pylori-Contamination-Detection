@@ -46,6 +46,17 @@
 
 set -e  # Exit on error
 
+# Create results folder if it doesn't already exist
+mkdir -p results
+
+# Verify virtual environment before proceeding
+if [ -f "./verify_venv.sh" ]; then
+    source ./verify_venv.sh
+else
+    echo "ERROR: verify_venv.sh not found in current directory"
+    exit 1
+fi
+
 MODEL_NAME=${MODEL_NAME:-"convnext_tiny"}
 PROFILE=${PROFILE:-"SEARCHER"}
 ITER=${ITER:-"31.0"}
