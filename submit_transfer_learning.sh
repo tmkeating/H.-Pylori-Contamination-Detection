@@ -291,7 +291,7 @@ print(f"[CLEANUP] Blacklist file: {blacklist_path}")
 print(f"[CLEANUP] Scratch path: {scratch_path}")
 
 if not blacklist_path.exists():
-    print(f"[CLEANUP] WARNING: Blacklist file not found at {blacklist_path}")
+    print(f"[CLEANUP] ERROR: Blacklist file not found at {blacklist_path}")
 else:
     if scratch_path.exists():
         with open(blacklist_path, 'r') as f:
@@ -327,6 +327,13 @@ else:
                                     image_removed += 1
                 print(f"[CLEANUP] Removed {image_removed} image-level files")
 CLEANUP_EOF
+
+# Check cleanup exit status - CRITICAL: abort if blacklist fails
+if [ $? -ne 0 ]; then
+    echo "[PRESYNC] FATAL ERROR: Blacklist cleanup failed!"
+    echo "[PRESYNC] Pipeline aborting to prevent data corruption"
+    exit 1
+fi
 
 # Generate rsync exclude filters from blacklist.json AND identify orphaned patches
 EXCLUDE_FILTER_FILE="/tmp/h_pylori_exclude_filters_$$.txt"
@@ -475,6 +482,25 @@ try:
     print(f"  Total exclusions: {conflict + image}")
 except Exception as e:
     print(f"  (Unable to read blacklist: {e})")
+
+# Check for DeepHP Macenko reference exclusion (for accountability)
+print(f"\nDeepHP Dataset Exclusions:")
+try:
+    with open('./blacklistDeepHP.json') as f:
+        deephp_data = json.load(f)
+    if 'macenko_reference_patch' in deephp_data:
+        ref_patch = deephp_data['macenko_reference_patch']
+        full_path = ref_patch.get('full_path', 'unknown')
+        reason = ref_patch.get('reason', 'unknown')
+        print(f"  ✓ Macenko Reference Excluded:")
+        print(f"    File: {full_path}")
+        print(f"    Reason: {reason}")
+    else:
+        print(f"  (No Macenko reference exclusion)")
+except FileNotFoundError:
+    print(f"  (No DeepHP blacklist - Macenko reference not created yet)")
+except Exception as e:
+    print(f"  (Unable to read DeepHP blacklist: {e})")
 STATS_EOF
 
 echo ""
@@ -553,7 +579,7 @@ print(f"[CLEANUP] Blacklist file: {blacklist_path}")
 print(f"[CLEANUP] Scratch path: {scratch_path}")
 
 if not blacklist_path.exists():
-    print(f"[CLEANUP] WARNING: Blacklist file not found at {blacklist_path}")
+    print(f"[CLEANUP] ERROR: Blacklist file not found at {blacklist_path}")
 else:
     if scratch_path.exists():
         with open(blacklist_path, 'r') as f:
@@ -589,6 +615,13 @@ else:
                                     image_removed += 1
                 print(f"[CLEANUP] Removed {image_removed} image-level files")
 CLEANUP_EOF
+
+# Check cleanup exit status - CRITICAL: abort if blacklist fails
+if [ $? -ne 0 ]; then
+    echo "[PRESYNC] FATAL ERROR: Blacklist cleanup failed!"
+    echo "[PRESYNC] Pipeline aborting to prevent data corruption"
+    exit 1
+fi
 
 # Generate rsync exclude filters from blacklist.json AND identify orphaned patches
 EXCLUDE_FILTER_FILE="/tmp/h_pylori_exclude_filters_$$.txt"
@@ -739,6 +772,25 @@ try:
     print(f"  Total exclusions: {conflict + image}")
 except Exception as e:
     print(f"  (Unable to read blacklist: {e})")
+
+# Check for DeepHP Macenko reference exclusion (for accountability)
+print(f"\nDeepHP Dataset Exclusions:")
+try:
+    with open('./blacklistDeepHP.json') as f:
+        deephp_data = json.load(f)
+    if 'macenko_reference_patch' in deephp_data:
+        ref_patch = deephp_data['macenko_reference_patch']
+        full_path = ref_patch.get('full_path', 'unknown')
+        reason = ref_patch.get('reason', 'unknown')
+        print(f"  ✓ Macenko Reference Excluded:")
+        print(f"    File: {full_path}")
+        print(f"    Reason: {reason}")
+    else:
+        print(f"  (No Macenko reference exclusion)")
+except FileNotFoundError:
+    print(f"  (No DeepHP blacklist - Macenko reference not created yet)")
+except Exception as e:
+    print(f"  (Unable to read DeepHP blacklist: {e})")
 STATS_EOF
 
 echo ""
