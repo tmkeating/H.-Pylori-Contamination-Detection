@@ -214,6 +214,25 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
     train_dataset.print_statistics()
     val_dataset.print_statistics()
     
+    # Print blacklist status for transparency
+    try:
+        import json
+        with open('./blacklistDeepHP.json') as f:
+            blacklist_data = json.load(f)
+        
+        if 'macenko_reference_patch' in blacklist_data:
+            ref = blacklist_data['macenko_reference_patch']
+            print("\n" + "="*60)
+            print("Blacklist Status (Applied Before Fold Split):")
+            print("="*60)
+            print(f"  ✓ Macenko Reference Excluded:")
+            print(f"    File: {ref.get('folder')}/{ref.get('filename')}")
+            print(f"    Quality Score: {ref.get('score')}")
+            print(f"    Reason: {ref.get('reason')}")
+            print("="*60 + "\n")
+    except Exception as e:
+        print(f"Note: Could not read blacklist status: {e}\n")
+    
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
