@@ -20,7 +20,7 @@ SCRATCH_ROOT = "/home/tkeating/.scratch/h_pylori_data"  # HelicoDataSet scratch
 DEEPHP_SCRATCH_ROOT = "/home/tkeating/.scratch/deephp_data"  # DeepHP scratch
 
 # Virtual Environment Path
-VENV_ROOT = "/home/tkeating/venv"  # Python virtual environment for all dependencies
+VENV_ROOT = os.path.join(os.path.dirname(__file__), "venv")  # Project venv folder
 
 # Allow override via environment variables
 DATASET_ROOT = os.environ.get('DATASET_ROOT', DATASET_ROOT)
