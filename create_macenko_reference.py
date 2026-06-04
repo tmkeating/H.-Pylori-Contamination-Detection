@@ -189,11 +189,6 @@ def create_reference():
                 score = assess_patch_quality(img)
                 quality_scores.append(score)
                 
-                # Bonus for positive class patches (better H&E staining)
-                if label == 1:
-                    positive_count += 1
-                    score = score * 1.2  # 20% bonus for positive patches
-                
                 if score > best_score:
                     best_score = score
                     best_patch = img.clone()  # Clone to avoid reference issues
