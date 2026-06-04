@@ -195,6 +195,14 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
     train_transform = create_deephp_transforms_train()
     val_transform = create_deephp_transforms_val()
     
+    # Verify which dataset directory is being used
+    print(f"\n{'='*60}")
+    print(f"Loading dataset from: {deephp_root}")
+    print(f"Scratch directory: /home/tkeating/.scratch/deephp_data")
+    print(f"Original directory: /home/tkeating/datasets/8117177")
+    print(f"Using scratch: {deephp_root == '/home/tkeating/.scratch/deephp_data'}")
+    print(f"{'='*60}\n")
+    
     train_dataset = DeepHPDataset(
         root_dir=deephp_root,
         transform=train_transform,

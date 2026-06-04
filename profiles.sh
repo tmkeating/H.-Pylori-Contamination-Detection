@@ -87,7 +87,7 @@ function set_profile_TEST() {
     export POS_WEIGHT=1.0 
     export GAMMA=3.0
     export NUM_EPOCHS=1
-    export DEEPHP_EPOCHS=1
+    export DEEPHP_EPOCHS=2
     export SAVER_METRIC="f1"
     export POOL_TYPE="attention"
 }
