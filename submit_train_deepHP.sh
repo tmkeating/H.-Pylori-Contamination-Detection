@@ -145,6 +145,36 @@ echo "✓ Total patches: $TOTAL_PATCHES"
 export DEEPHP_DATASET_ROOT="$DEEPHP_SCRATCH"
 echo "✓ DeepHP dataset ready at: $DEEPHP_SCRATCH"
 
+# Print blacklist information (which patches are excluded from training)
+echo ""
+echo "Blacklist Status:"
+python3 << 'BLACKLIST_CHECK'
+import json
+import os
+
+try:
+    with open('./blacklistDeepHP.json') as f:
+        blacklist_data = json.load(f)
+    
+    if 'macenko_reference_patch' in blacklist_data:
+        ref = blacklist_data['macenko_reference_patch']
+        filename = ref.get('filename', 'unknown')
+        folder = ref.get('folder', 'unknown')
+        reason = ref.get('reason', 'unknown')
+        score = ref.get('score', 'unknown')
+        
+        print(f"  ✓ Macenko Reference Excluded:")
+        print(f"    File: {folder}/{filename}")
+        print(f"    Quality Score: {score}")
+        print(f"    Reason: {reason}")
+    else:
+        print(f"  (No Macenko reference in blacklist)")
+except FileNotFoundError:
+    print(f"  ⚠ blacklistDeepHP.json not found (Macenko reference will be created during training)")
+except Exception as e:
+    print(f"  ERROR: Failed to read blacklist: {e}")
+BLACKLIST_CHECK
+
 PRESYNC_EOF
 )
 PRE_SYNC_JOB_ID=$(echo $PRE_SYNC_JOB | awk '{print $4}')
