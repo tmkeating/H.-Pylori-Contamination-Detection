@@ -86,6 +86,41 @@ class DeepHPDataset(Dataset):
         if len(self.samples) == 0:
             raise FileNotFoundError(f"No images found in {root_dir}. Check folder structure.")
         
+        # Load blacklist (exclude Macenko reference and any problematic patches)
+        import json
+        blacklist_path = os.path.join(os.path.dirname(__file__), "blacklistDeepHP.json")
+        blacklist_paths = set()
+        
+        if os.path.exists(blacklist_path):
+            try:
+                with open(blacklist_path, 'r') as f:
+                    bl_data = json.load(f)
+                    
+                # Extract all paths to exclude
+                if isinstance(bl_data, dict):
+                    for key, entry in bl_data.items():
+                        if isinstance(entry, dict):
+                            if "full_path" in entry:
+                                blacklist_paths.add(entry["full_path"])
+                            elif "filename" in entry and "folder" in entry:
+                                # Construct path from folder and filename
+                                folder_name = entry["folder"]
+                                filename = entry["filename"]
+                                potential_path = os.path.join(root_dir, folder_name, filename)
+                                blacklist_paths.add(potential_path)
+                
+                # Filter out blacklisted samples
+                if blacklist_paths:
+                    original_count = len(self.samples)
+                    self.samples = [(path, label) for path, label in self.samples if path not in blacklist_paths]
+                    excluded_count = original_count - len(self.samples)
+                    print(f"DeepHP Blacklist: Excluded {excluded_count} patches")
+                    if excluded_count > 0:
+                        print(f"  Reason: Macenko reference and problematic patches")
+                        
+            except Exception as e:
+                print(f"Warning: Could not load blacklist {blacklist_path}: {e}")
+        
         # Stratified k-fold split (ensure class distribution across folds)
         self.fold_indices = self._stratified_fold_split()
         

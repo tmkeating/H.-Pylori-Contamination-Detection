@@ -17,13 +17,42 @@ The pipeline now supports backbone pre-training on the **DeepHP dataset** (394,9
 - **New**: `dataset_deepHP.py` - DeepHP dataset loader with stratified k-fold CV  
 - **New**: `load_pretrained_backbone.py` - Utilities for loading and averaging backbone weights
 - **Modified**: `train.py` - Added `--pretrained_backbone_path` argument for loading backbone
-- **DeepHP Data**: `/export/hhome/tkeating/8117177/` (Positive/ and Negative/ folders)
+- **DeepHP Data**: `/home/tkeating/datasets/8117177/` (Positive/ and Negative/ folders)
+
+---
+
+## Pre-Pipeline Setup
+
+### Virtual Environment Verification
+All training scripts automatically verify the virtual environment before execution:
+
+```bash
+./verify_venv.sh
+```
+
+This script:
+- ✅ Verifies the project virtual environment (`venv/`) exists and is activated
+- ✅ Dynamically reads `requirements.txt` to check all dependencies are installed
+- ✅ Auto-installs missing packages if needed (with error handling)
+- ✅ Exports `VENV_ROOT` for all SLURM scripts to use
+
+**Note:** All 8 SLURM scripts automatically call this verification before submitting jobs, so manual execution is usually not required.
+
+### Configuration Management
+All paths and environment variables are centralized in `config.py`:
+- `VENV_ROOT`: Dynamically computed relative path to project virtual environment
+- `DATASET_ROOT`: HelicoDataSet permanent storage location
+- `DEEPHP_DATASET_ROOT`: DeepHP dataset location  
+- `SCRATCH_ROOT`: Local node scratch for temporary training data
+- All variables support environment variable overrides for flexibility
 
 ---
 
 ## Execution Workflow (Step-by-Step)
 
-To reproduce the results, follow this specific execution order (with optional transfer learning from DeepHP):
+**RECOMMENDED: Full Transfer Learning Pipeline** (DeepHP Pre-training → Backbone Averaging → HelicoDataSet Fine-tuning)
+
+To reproduce the best results, follow this specific execution order:
 
 ### 0. HelicoDataSet Data Integrity & Deduplication Audit (BEFORE SYNCING)
 Run a comprehensive data integrity audit on the permanent HelicoDataSet before syncing to scratch:
@@ -46,8 +75,8 @@ python3 audit_png_count.py
 ```
 *Outputs:* `audit_png_count_report.csv` - Confirms 216,326 total patches available (128,724 training after blacklist, 87,602 HoldOut).
 
-### 0a. DeepHP Data Integrity Checks (⭐ If Using Transfer Learning - BEFORE SYNCING)
-If performing transfer learning with pre-trained backbone, audit the DeepHP H&E dataset for duplicates before syncing:
+### 0a. DeepHP Data Integrity Checks (⭐ RECOMMENDED - BEFORE SYNCING)
+As part of the recommended full pipeline, audit the DeepHP H&E dataset for duplicates before syncing:
 
 ```bash
 # Check for byte-level duplicates across all 394,926 patches
@@ -72,35 +101,41 @@ After integrity checks pass, sync the vetted datasets to local node storage for 
 - Syncs to `/home/tkeating/.scratch/h_pylori_data/` using `suggested_deephp_blacklist.json` if available
 - 394,926 clean patches (verified 0 duplicates)
 
-### 2. Training (5-Fold Cross-Validation)
-Launch the automated training workflow with transfer learning pre-training and fine-tuning:
+### 2. Training (5-Fold Cross-Validation) - RECOMMENDED METHOD
+
+**Launch the full transfer learning pipeline** (preferred for best accuracy):
 
 ```bash
-sbatch submit_transfer_learning.sh
+PROFILE=SEARCHER MODEL_NAME=convnext_tiny ITER=30.0 ./submit_transfer_learning.sh
 ```
 
 This script automatically orchestrates:
 1. **DeepHP Backbone Pre-training** (5-fold stratified CV on 394,926 H&E patches)
+   - Includes automatic Macenko reference image check (creates if missing)
+   - Applies Macenko stain normalization during DeepHP pre-training
+   - Runs on login node before SLURM job submission (fast, non-intensive)
 2. **Backbone Averaging** (creates unified pre-trained backbone)
 3. **HelicoDataSet Fine-tuning** (5-fold stratified CV on 114 patients with pre-trained backbone)
+   - No stain normalization (IHC stains don't use Macenko)
+   - Automatic venv verification before each phase
 
 *Outputs: `results/*_model_brain.pth` (trained models), `results/*_patient_consensus.csv` (per-fold predictions), `results/*_evaluation_report.csv` (fold metrics)*
 
-**Alternative: Training Without Transfer Learning**
-If skipping transfer learning, run:
+**Alternative: Training Without Transfer Learning** (faster but lower accuracy)
+If you want to skip backbone pre-training, run:
 ```bash
 PROFILE=SEARCHER MODEL_NAME=convnext_tiny ITER=30.0 ./submit_all_folds.sh
 ```
 
 This script automatically orchestrates:
 1. **Pre-sync** (syncs HelicoDataSet to scratch)
-2. **5-Fold Training** (trains models on all folds in parallel)
+2. **5-Fold Training** (trains models on all folds in parallel, initialized randomly)
 3. **Summary & Ensemble Fusion** (automatically runs after all folds complete)
 
-*Outputs: Same as transfer learning workflow - trained models, fold predictions, and ensemble results*
+*Note: This approach trains faster but typically achieves ~3-5% lower accuracy than the transfer learning pipeline.*
 
 ### 3. Ensemble Results (Automatic)
-Both training workflows (`submit_transfer_learning.sh` and `submit_all_folds.sh`) automatically generate ensemble voting, meta-classifier, and hybrid ensemble results after all training folds complete. **No manual step required.**
+Both training pipelines (`submit_transfer_learning.sh` - RECOMMENDED and `submit_all_folds.sh` - ALTERNATIVE) automatically generate ensemble voting, meta-classifier, and hybrid ensemble results after all training folds complete. **No manual step required.**
 
 The automated summary job runs:
 - `summarize_results.py` — Aggregates cross-fold metrics with bootstrap confidence intervals
@@ -136,6 +171,7 @@ sbatch run_visuals.sh
 
 ## Core Project Structure
 
+- `config.py`: Centralized configuration with dynamic path resolution and environment variable overrides. Defines VENV_ROOT, dataset paths, and scratch directories for portability across systems.
 - `dataset.py`: Multi-Pass coverage loader with **16-way Contrast-Boosted TTA**. Handles live data integrity checks.
 - `model.py`: **Gated Attention MIL** with **Top-3 Chunk Aggregation** for signal resilience.
 - `train.py`: Unified engine featuring **SWA BN Recalibration** and **Grad-CAM Ghost Audits**.
@@ -189,10 +225,13 @@ ConvNeXt-Small's additional parameters did not translate to improved performance
 
 
 ## 🛠️ Key Pipeline Features
-- **Macenko Stain Normalization**: Applied during DeepHP H&E pre-training to normalize color variations across different staining protocols and tissue scanners, improving generalization to clinical IHC stains.
+- **Macenko Stain Normalization**: Applied exclusively during DeepHP H&E pre-training to normalize color variations across different staining protocols and tissue scanners, improving backbone generalization. Reference image is automatically created/verified on login node before training starts.
+- **Proactive Environment Verification**: All scripts verify virtual environment dependencies before SLURM job submission, preventing runtime failures with early, actionable error messages.
+- **Centralized Configuration**: All paths and environment variables in `config.py` support dynamic resolution and environment variable overrides for portability across different systems.
 - **Stride-128 Rescue Pass**: Dense-window overlap to "catch" sparse bacteria that fall in gaps at default strides.
 - **Top-3 Mixed MIL**: Balances sensitivity with noise resilience by averaging the top 3 most confident tissue chunks.
 - **Contrast-Boosted TTA**: 16-way transforms (8 spatial + 1.1x contrast jitter) to "pop" faint IHC signals.
+- **Modern PyTorch API**: Uses current `torch.amp.GradScaler` with automatic device detection instead of deprecated `torch.cuda.amp.GradScaler`, ensuring forward compatibility with future PyTorch versions.
 - **Hybrid Ensemble Strategy**: Intelligently combines three fusion methods:
   - **High Confidence Zone (>0.95)**: Uses ensemble voting
   - **Uncertainty Zone (0.35-0.55)**: Uses meta-classifier

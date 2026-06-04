@@ -12,13 +12,15 @@ consistency across all pre-training experiments.
 """
 
 import os
+import json
 import torch
 import numpy as np
 from PIL import Image
 from torch.utils.data import DataLoader
 from dataset_deepHP import DeepHPDataset
 import torchvision.transforms as T
-from config import DEEPHP_SCRATCH_ROOT
+from tqdm import tqdm
+from config import DEEPHP_SCRATCH_ROOT, DEEPHP_DATASET_ROOT
 
 
 def assess_patch_quality(image_tensor):
@@ -123,58 +125,110 @@ def create_reference():
         train=True  # Use training fold
     )
     
-    # Create loader to sample patches
+    # Create loader to sample patches (reproducible shuffle for consistency)
     loader = DataLoader(
         dataset,
         batch_size=64,
         shuffle=True,
         num_workers=4,
-        pin_memory=False
+        pin_memory=False,
+        generator=torch.Generator().manual_seed(42)  # Reproducible scanning
     )
     
-    print(f"Dataset loaded: {len(dataset)} patches (POSITIVE class only)")
+    print(f"Dataset loaded: {len(dataset)} patches")
     print("Scanning patches for optimal H&E staining quality...")
-    print("(High color variation is KEY for eigenvalue stability)\n")
+    print("(High color variation is KEY for eigenvalue stability)")
+    print(f"Target: Sample ~10,000 patches for robust reference selection\n")
     
     best_patch = None
     best_score = -1.0
     best_idx = -1
+    best_path = None  # Track file path of best patch for blacklist
     patch_count = 0
     positive_count = 0
     top_candidates = []  # Track top 5 candidates
+    quality_scores = []  # Track all scores for statistics
     
-    # Scan up to 100 batches for much better sample coverage
-    # At batch_size=64, this is 6,400 patches from ~315K total (2% sample)
-    for batch_idx, (images, labels) in enumerate(loader):
-        if batch_idx >= 100:  # Increased from 5 to 100 batches
+    # Create batch_to_sample_idx mapping for DataLoader
+    batch_sample_idx = 0
+    
+    # Scan up to 156 batches (~10,000 patches) for robust coverage
+    # At batch_size=64, this is ~10,000 patches from ~315K total (~3% sample)
+    max_batches = 156  # Target ~10,000 patches
+    excellent_threshold = 0.95  # Early termination if we find excellent patch
+    
+    for batch_idx, (images, labels) in enumerate(tqdm(loader, total=max_batches, desc="Scanning patches")):
+        if batch_idx >= max_batches:
+            break
+        
+        # Early termination: if we found an excellent patch, we can stop
+        if best_score > excellent_threshold:
+            print(f"\n✓ Found excellent patch (score={best_score:.3f}), stopping early scan")
             break
         
         for idx in range(len(images)):
             patch_count += 1
-            img = images[idx]  # [C, H, W], values in [0, 1]
-            label = labels[idx].item() if hasattr(labels[idx], 'item') else labels[idx]
             
-            score = assess_patch_quality(img)
-            
-            # Bonus for positive class patches (better H&E staining)
-            if label == 1:
-                positive_count += 1
-                score = score * 1.2  # 20% bonus for positive patches
-            
-            if score > best_score:
-                best_score = score
-                best_patch = img
-                best_idx = patch_count
-                top_candidates.append((score, patch_count, label))
-                if len(top_candidates) > 5:
-                    top_candidates.pop(0)
-                if len(top_candidates) <= 3:  # Print first few
-                    print(f"  Batch {batch_idx+1}, Patch {idx+1}: Score={score:.3f} ← NEW BEST")
-            elif batch_idx % 10 == 0 and idx == 0:
-                print(f"  Batch {batch_idx+1}: Scanning... (best so far: {best_score:.3f})")
+            try:
+                img = images[idx]  # [C, H, W], values in [0, 1]
+                label = labels[idx].item() if hasattr(labels[idx], 'item') else labels[idx]
+                
+                # Get the actual file path from the dataset
+                # dataset.indices maps to sample indices, which map to (path, label) tuples
+                sample_idx = dataset.indices[batch_sample_idx] if batch_sample_idx < len(dataset.indices) else -1
+                if sample_idx >= 0:
+                    img_path, _ = dataset.samples[sample_idx]
+                else:
+                    img_path = None
+                batch_sample_idx += 1
+                
+                # Skip NaN or invalid images
+                if torch.isnan(img).any():
+                    continue
+                
+                score = assess_patch_quality(img)
+                quality_scores.append(score)
+                
+                # Bonus for positive class patches (better H&E staining)
+                if label == 1:
+                    positive_count += 1
+                    score = score * 1.2  # 20% bonus for positive patches
+                
+                if score > best_score:
+                    best_score = score
+                    best_patch = img.clone()  # Clone to avoid reference issues
+                    best_idx = patch_count
+                    best_path = img_path  # Save the file path for blacklist exclusion
+                    top_candidates.append((score, patch_count, label))
+                    if len(top_candidates) > 5:
+                        top_candidates.pop(0)
+                    if len(top_candidates) <= 3:  # Print first few
+                        tqdm.write(f"  Batch {batch_idx+1}, Patch {idx+1}: Score={score:.3f} ← NEW BEST")
+            except Exception as e:
+                # Skip corrupted images
+                tqdm.write(f"  Warning: Skipped patch at batch {batch_idx+1}, idx {idx+1}: {e}")
+                continue
     
     print(f"\n✓ Scanned {patch_count} total patches ({positive_count} positive class)")
     print(f"✓ Best patch score: {best_score:.3f} (patch #{best_idx})")
+    
+    # Quality statistics
+    if quality_scores:
+        quality_array = np.array(quality_scores)
+        print(f"\n📊 Quality Score Statistics:")
+        print(f"  Mean: {quality_array.mean():.3f}")
+        print(f"  Std:  {quality_array.std():.3f}")
+        print(f"  Min:  {quality_array.min():.3f}")
+        print(f"  Max:  {quality_array.max():.3f}")
+        print(f"  P50:  {np.percentile(quality_array, 50):.3f}")
+        print(f"  P95:  {np.percentile(quality_array, 95):.3f}")
+    
+    # Validate reference quality
+    if best_score < 0.3:
+        print(f"\n⚠️  WARNING: Selected patch has low quality score ({best_score:.3f})")
+        print(f"    This may indicate poor H&E staining in the dataset.")
+        print(f"    The Macenko normalization may not work well.")
+    
     if top_candidates:
         labels_str = ['P' if l==1 else 'N' for _,_,l in sorted(top_candidates, reverse=True)]
         scores_str = ', '.join([f'{s:.3f}({l})' for s,_,l in sorted(top_candidates, reverse=True)])
@@ -193,6 +247,26 @@ def create_reference():
     print(f"\n✓ Reference saved: {output_path}")
     print(f"  Size: {ref_pil.size}")
     print(f"  Format: RGB JPEG")
+    
+    # Save blacklist entry for the Macenko reference patch
+    # This ensures it's excluded from all training/validation folds
+    blacklist_path = "blacklistDeepHP.json"
+    blacklist_data = {
+        "macenko_reference_patch": {
+            "folder": os.path.dirname(best_path).split("/")[-1] if best_path else "Unknown",
+            "filename": os.path.basename(best_path) if best_path else "unknown.jpg",
+            "full_path": best_path,
+            "reason": "Macenko H&E normalization reference - excluded from training/validation to prevent data leakage",
+            "score": float(best_score)
+        }
+    }
+    
+    with open(blacklist_path, 'w') as f:
+        json.dump(blacklist_data, f, indent=2)
+    
+    print(f"✓ Blacklist entry created: {blacklist_path}")
+    print(f"  Excluded patch: {best_path}")
+    print(f"  Reason: Macenko reference - prevents data leakage through normalization")
     
     # Verify we can load it back
     test_load = Image.open(output_path)
