@@ -425,12 +425,12 @@ PYTHON_EOF
 
 # Sync folders with filter file (no lock - SLURM handles job isolation)
 echo "[PRESYNC] Syncing HelicoDataSet to local scratch..."
-mkdir -p "$LOCAL_SCRATCH/CrossValidation"
+mkdir -p "$LOCAL_SCRATCH/CrossValidation" "$LOCAL_SCRATCH/HoldOut"
 if [ -f "$EXCLUDE_FILTER_FILE" ]; then
     echo "[RSYNC] Syncing with exclusion filters..."
-    rsync -aq --filter="merge $EXCLUDE_FILTER_FILE" "$REMOTE_DATA/CrossValidation/Annotated" "$LOCAL_SCRATCH/CrossValidation/" || { echo "[ERROR] Sync failed for Annotated"; exit 1; }
-    rsync -aq --filter="merge $EXCLUDE_FILTER_FILE" "$REMOTE_DATA/CrossValidation/Cropped" "$LOCAL_SCRATCH/CrossValidation/" || { echo "[ERROR] Sync failed for Cropped"; exit 1; }
-    rsync -aq --filter="merge $EXCLUDE_FILTER_FILE" "$REMOTE_DATA/HoldOut" "$LOCAL_SCRATCH/" || { echo "[ERROR] Sync failed for HoldOut"; exit 1; }
+    rsync -aq --filter="merge $EXCLUDE_FILTER_FILE" "$REMOTE_DATA/CrossValidation/Annotated/" "$LOCAL_SCRATCH/CrossValidation/Annotated/" || { echo "[ERROR] Sync failed for Annotated"; exit 1; }
+    rsync -aq --filter="merge $EXCLUDE_FILTER_FILE" "$REMOTE_DATA/CrossValidation/Cropped/" "$LOCAL_SCRATCH/CrossValidation/Cropped/" || { echo "[ERROR] Sync failed for Cropped"; exit 1; }
+    rsync -aq --filter="merge $EXCLUDE_FILTER_FILE" "$REMOTE_DATA/HoldOut/" "$LOCAL_SCRATCH/HoldOut/" || { echo "[ERROR] Sync failed for HoldOut"; exit 1; }
     rm -f "$EXCLUDE_FILTER_FILE"
 else
     echo "[RSYNC] Filter file not found - syncing all files without filtering"

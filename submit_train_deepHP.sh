@@ -237,6 +237,8 @@ echo ""
 echo "Blacklist Status:"
 python3 << 'BLACKLIST_CHECK'
 import json
+import os
+from pathlib import Path
 
 try:
     with open('./blacklistDeepHP.json') as f:
@@ -253,6 +255,19 @@ try:
         print(f"    File: {folder}/{filename}")
         print(f"    Quality Score: {score}")
         print(f"    Reason: {reason}")
+        
+        # Verification: Search for the blacklisted file in scratch to prove it was excluded
+        print(f"\n  Verification - Searching for blacklisted file in scratch:")
+        scratch_root = os.path.expandvars("$DEEPHP_SCRATCH")
+        search_path = Path(scratch_root) / folder / filename
+        found = search_path.exists()
+        
+        if found:
+            print(f"    ❌ ERROR: Blacklisted file FOUND in scratch: {search_path}")
+            print(f"       This indicates the exclusion filter did not work!")
+        else:
+            print(f"    ✓ Blacklisted file NOT found in scratch (as expected)")
+            print(f"    ✓ Exclusion filter working correctly")
     else:
         print(f"  (No Macenko reference in blacklist)")
 except FileNotFoundError:
