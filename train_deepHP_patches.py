@@ -283,7 +283,9 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
     history = {'train_loss': [], 'train_acc': [], 'val_loss': [], 'val_acc': []}
     best_loss = float('inf')
     
-    scaler = torch.cuda.amp.GradScaler() if torch.cuda.is_available() else None
+    # Use the non-deprecated torch.amp.GradScaler API
+    device_type = 'cuda' if torch.cuda.is_available() else 'cpu'
+    scaler = torch.amp.GradScaler(device_type)
     
     for epoch in range(num_epochs):
         print(f"\nEpoch {epoch + 1}/{num_epochs}")
