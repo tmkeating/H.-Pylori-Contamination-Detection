@@ -181,9 +181,11 @@ try:
         folder = ref.get('folder')
         filename = ref.get('filename')
         if folder and filename:
-            # Add rsync exclude filter for the blacklisted file
-            excludes.append(f"- {folder}/{filename}")
-            print(f"[FILTER] Excluding: {folder}/{filename}")
+            # For rsync filters: when syncing Positive/, use just the filename (no folder prefix)
+            # since paths are relative to the source directory being synced
+            if folder == 'Positive':
+                excludes.append(f"- {filename}")
+                print(f"[FILTER] Excluding from Positive: {filename}")
 except FileNotFoundError:
     print(f"[FILTER] blacklistDeepHP.json not found - no exclusions needed")
 except Exception as e:
