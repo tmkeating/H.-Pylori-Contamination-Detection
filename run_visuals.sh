@@ -61,8 +61,11 @@ PIPELINE_MODE=${PIPELINE_MODE:-false}  # true = calibration curve + dashboard on
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH
 export HOME=/home/tkeating
 
+# Get virtual environment path from config
+VENV_ROOT=$(python3 -c "from config import VENV_ROOT; print(VENV_ROOT)")
+
 # Activate virtual environment with dependencies
-source /home/tkeating/venv/bin/activate
+source $VENV_ROOT/bin/activate
 
 # Parse command-line arguments (override environment variables)
 while [[ $# -gt 0 ]]; do
@@ -114,9 +117,9 @@ echo "========================================================================="
 echo ""
 
 # Activate environment if available
-if [ -f ../venv/bin/activate ]; then
-    source ../venv/bin/activate
-    echo "✓ Virtual environment activated"
+if [[ ! -z "$VENV_ROOT" ]]; then
+    source $VENV_ROOT/bin/activate
+    echo "✓ Virtual environment activated from $VENV_ROOT"
 fi
 
 # Build python command

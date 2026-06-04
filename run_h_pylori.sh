@@ -39,8 +39,11 @@ mkdir -p results
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH
 export HOME=/home/tkeating
 
+# Get virtual environment path from config
+VENV_ROOT=$(python3 -c "from config import VENV_ROOT; print(VENV_ROOT)")
+
 # Activate virtual environment with dependencies
-source /home/tkeating/venv/bin/activate
+source $VENV_ROOT/bin/activate
 
 # --- LOCAL SCRATCH SETUP ---
 # We use /tmp as it's on a local NVMe SSD (faster than network storage)
@@ -269,7 +272,7 @@ fi
 
 # 2. Activate your virtual environment
 # The venv is located in the parent directory
-source ../venv/bin/activate
+source $VENV_ROOT/bin/activate
 
 # 3. Ensure you have the GPU version of PyTorch
 # pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118

@@ -19,11 +19,15 @@ DEEPHP_DATASET_ROOT = "/home/tkeating/datasets/8117177"  # DeepHP H&E patches (P
 SCRATCH_ROOT = "/home/tkeating/.scratch/h_pylori_data"  # HelicoDataSet scratch
 DEEPHP_SCRATCH_ROOT = "/home/tkeating/.scratch/deephp_data"  # DeepHP scratch
 
+# Virtual Environment Path
+VENV_ROOT = "/home/tkeating/venv"  # Python virtual environment for all dependencies
+
 # Allow override via environment variables
 DATASET_ROOT = os.environ.get('DATASET_ROOT', DATASET_ROOT)
 DEEPHP_DATASET_ROOT = os.environ.get('DEEPHP_DATASET_ROOT', DEEPHP_DATASET_ROOT)
 SCRATCH_ROOT = os.environ.get('SCRATCH_ROOT', SCRATCH_ROOT)
 DEEPHP_SCRATCH_ROOT = os.environ.get('DEEPHP_SCRATCH_ROOT', DEEPHP_SCRATCH_ROOT)
+VENV_ROOT = os.environ.get('VENV_ROOT', VENV_ROOT)
 
 # Metadata Files
 PATIENT_CSV = os.path.join(DATASET_ROOT, "PatientDiagnosis.csv")

@@ -167,8 +167,11 @@ cd /home/tkeating/model/H.-Pylori-Contamination-Detection
 # Get job ID for output filename
 JOB_ID=$SLURM_JOB_ID
 
+# Get virtual environment path from config
+VENV_ROOT=$(python3 -c "from config import VENV_ROOT; print(VENV_ROOT)")
+
 # Activate virtual environment
-source ../venv/bin/activate
+source $VENV_ROOT/bin/activate
 
 echo "=========================================================================="
 echo "All training folds complete. Generating comprehensive ensemble analysis..."

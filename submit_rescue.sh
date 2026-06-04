@@ -32,12 +32,11 @@
 # Create output directory
 mkdir -p results/rescue_ensemble
 
-# --- LOCAL SCRATCH SETUP (Skip image sync if already present or just use remote) ---
-# We'll rely on the existing dataset paths in rescue_inference.py which already 
-# check for /home/tkeating/.scratch/h_pylori_data first.
+# Get virtual environment path from config
+VENV_ROOT=$(python3 -c "from config import VENV_ROOT; print(VENV_ROOT)")
 
 # Activate virtual environment
-source ../venv/bin/activate
+source $VENV_ROOT/bin/activate
 
 # Parameters
 STRIDE=${STRIDE:-128}

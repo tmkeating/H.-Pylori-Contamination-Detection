@@ -35,6 +35,9 @@ else
     echo "⚠ profiles.sh not found, using defaults"
 fi
 
+# Get virtual environment path from config
+VENV_ROOT=$(python3 -c "from config import VENV_ROOT; print(VENV_ROOT)")
+
 # DeepHP-specific parameters (can be overridden by profiles.sh)
 DEEPHP_EPOCHS=${DEEPHP_EPOCHS:-20}
 BATCH_SIZE=${BATCH_SIZE:-32}  # Training mini-batch size (reduced to fit in 11.5GB GPU memory limit)
@@ -76,7 +79,7 @@ export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH
 export HOME=/home/tkeating
 
 # Activate virtual environment with dependencies
-source /home/tkeating/venv/bin/activate
+source $VENV_ROOT/bin/activate
 
 echo "Pre-sync job: Setting up DeepHP dataset for training..."
 
@@ -154,7 +157,7 @@ export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH
 export HOME=/home/tkeating
 
 # Activate virtual environment with dependencies
-source /home/tkeating/venv/bin/activate
+source $VENV_ROOT/bin/activate
 
 FOLD=$FOLD
 MODEL_NAME=$MODEL_NAME

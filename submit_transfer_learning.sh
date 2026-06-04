@@ -144,6 +144,9 @@ else
     echo "⚠ profiles.sh not found, using defaults"
 fi
 
+# Get virtual environment path from config
+VENV_ROOT=$(python3 -c "from config import VENV_ROOT; print(VENV_ROOT)")
+
 # Pre-training parameters (from profiles.sh, for reference and documentation)
 DEEPHP_EPOCHS=${DEEPHP_EPOCHS:-20}
 
@@ -211,12 +214,12 @@ export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH
 export HOME=/home/tkeating
 
 # Activate virtual environment with dependencies
-source /home/tkeating/venv/bin/activate
+source $VENV_ROOT/bin/activate
 
 LOCAL_SCRATCH=$(python3 -c "from config import SCRATCH_ROOT; print(SCRATCH_ROOT)" 2>/dev/null || echo "/home/tkeating/.scratch/h_pylori_data")
 REMOTE_DATA=$(python3 -c "from config import DATASET_ROOT; print(DATASET_ROOT)" 2>/dev/null || echo "/home/tkeating/datasets/HelicoDataSet")
 
-echo "=========================================================================" 
+echo "==========================================================================" 
 echo "Transfer Learning Pre-Sync: Verifying Data and Syncing to Local Scratch"
 echo "========================================================================="
 echo ""
@@ -479,7 +482,7 @@ else
 #SBATCH -J transfer_presync
 
 # Activate virtual environment with dependencies
-source /home/tkeating/venv/bin/activate
+source $VENV_ROOT/bin/activate
 
 LOCAL_SCRATCH=$(python3 -c "from config import SCRATCH_ROOT; print(SCRATCH_ROOT)" 2>/dev/null || echo "/home/tkeating/.scratch/h_pylori_data")
 REMOTE_DATA=$(python3 -c "from config import DATASET_ROOT; print(DATASET_ROOT)" 2>/dev/null || echo "/home/tkeating/datasets/HelicoDataSet")
@@ -796,7 +799,7 @@ export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH
 export HOME=/home/tkeating
 
 # Activate virtual environment with dependencies
-source /home/tkeating/venv/bin/activate
+source $VENV_ROOT/bin/activate
 
 # Dynamically resolve project directory
 PROJECT_DIR=$(python3 -c "import os; print(os.path.dirname(os.path.abspath('${PWD}/train.py')))" 2>/dev/null || echo "/home/tkeating/model/H.-Pylori-Contamination-Detection")

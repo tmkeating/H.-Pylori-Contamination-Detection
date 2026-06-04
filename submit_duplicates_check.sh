@@ -27,8 +27,11 @@
 # Create results folder if it doesn't already exist
 mkdir -p results
 
+# Get virtual environment path from config
+VENV_ROOT=$(python3 -c "from config import VENV_ROOT; print(VENV_ROOT)")
+
 # Activate environment
-source ../venv/bin/activate
+source $VENV_ROOT/bin/activate
 
 echo "Starting Global Deduplication Audit (All images, All folders)..."
 # Using absolute path for accuracy
