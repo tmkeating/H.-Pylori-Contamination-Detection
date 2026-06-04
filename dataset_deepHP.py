@@ -114,8 +114,9 @@ class DeepHPDataset(Dataset):
                     original_count = len(self.samples)
                     self.samples = [(path, label) for path, label in self.samples if path not in blacklist_paths]
                     excluded_count = original_count - len(self.samples)
-                    print(f"DeepHP Blacklist: Excluded {excluded_count} patches")
-                    if excluded_count > 0:
+                    # Only print once during training dataset initialization
+                    if self.train and excluded_count > 0:
+                        print(f"DeepHP Blacklist: Excluded {excluded_count} patches")
                         print(f"  Reason: Macenko reference and problematic patches")
                         
             except Exception as e:
