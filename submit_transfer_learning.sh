@@ -470,14 +470,13 @@ PRESYNC_EOF
 else
     echo "(Dependency on pre-training job: $DEEPHP_SUMMARY_JOB_ID)"
     PRE_SYNC_JOB=$(sbatch --dependency=afterok:$DEEPHP_SUMMARY_JOB_ID \
-        -p pg1tfg12 --job-name=transfer_presync --output=results/slurm_transfer_presync_%j.txt --get-user-env <<'PRESYNC_EOF'
+        -p pg1tfg12 --job-name=transfer_presync --output=results/slurm_transfer_presync_%j.txt <<'PRESYNC_EOF'
 #!/bin/bash
 #SBATCH -p pg1tfg12
 #SBATCH -t 0-01:00
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=8G
 #SBATCH -J transfer_presync
-#SBATCH --get-user-env
 
 # Activate virtual environment with dependencies
 source /home/tkeating/venv/bin/activate
