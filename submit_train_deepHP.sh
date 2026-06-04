@@ -126,10 +126,59 @@ if [ ! -d "$DEEPHP_ROOT/Positive" ] || [ ! -d "$DEEPHP_ROOT/Negative" ]; then
     exit 1
 fi
 
-# Sync dataset to scratch (with progress)
-echo "Syncing DeepHP dataset to scratch..."
-rsync -av --progress "$DEEPHP_ROOT/Positive/" "$DEEPHP_SCRATCH/Positive/" 2>&1 | tail -5
-rsync -av --progress "$DEEPHP_ROOT/Negative/" "$DEEPHP_SCRATCH/Negative/" 2>&1 | tail -5
+# Generate rsync exclude filters from blacklistDeepHP.json
+EXCLUDE_FILTER_FILE="/tmp/deephp_exclude_filters_$$.txt"
+echo "Generating exclude filters from blacklistDeepHP.json..."
+python3 << 'FILTER_EOF'
+import json
+import os
+
+exclude_filter_file = os.environ.get('EXCLUDE_FILTER_FILE', '/tmp/deephp_exclude_filters.txt')
+excludes = []
+
+try:
+    with open('./blacklistDeepHP.json') as f:
+        data = json.load(f)
+    
+    if 'macenko_reference_patch' in data:
+        ref = data['macenko_reference_patch']
+        folder = ref.get('folder')
+        filename = ref.get('filename')
+        if folder and filename:
+            # Add rsync exclude filter for the blacklisted file
+            excludes.append(f"- {folder}/{filename}")
+            print(f"[FILTER] Excluding: {folder}/{filename}")
+except FileNotFoundError:
+    print(f"[FILTER] blacklistDeepHP.json not found - no exclusions needed")
+except Exception as e:
+    print(f"[FILTER] Error reading blacklist: {e}")
+
+# Write filter file with proper rsync syntax
+with open(exclude_filter_file, 'w') as f:
+    for exclude in excludes:
+        f.write(exclude + '\n')
+    # Critical: include directories and all other files
+    f.write('+ */\n')
+    f.write('+ **\n')
+    f.write('- *\n')
+
+print(f"[FILTER] Wrote exclude filter file: {exclude_filter_file}")
+FILTER_EOF
+
+# Sync dataset to scratch with exclusion filters
+echo "Syncing DeepHP dataset to scratch (with blacklist exclusions)..."
+mkdir -p "$DEEPHP_SCRATCH/Positive" "$DEEPHP_SCRATCH/Negative"
+
+if [ -f "$EXCLUDE_FILTER_FILE" ]; then
+    echo "[RSYNC] Syncing Positive patches with exclusion filters..."
+    rsync -aq --filter="merge $EXCLUDE_FILTER_FILE" "$DEEPHP_ROOT/Positive/" "$DEEPHP_SCRATCH/Positive/" || { echo "ERROR: Sync failed for Positive"; exit 1; }
+    echo "[RSYNC] Syncing Negative patches..."
+    rsync -aq "$DEEPHP_ROOT/Negative/" "$DEEPHP_SCRATCH/Negative/" || { echo "ERROR: Sync failed for Negative"; exit 1; }
+    rm -f "$EXCLUDE_FILTER_FILE"
+else
+    echo "ERROR: Exclude filter file not generated"
+    exit 1
+fi
 
 # Verify sync
 echo "Verifying sync..."
@@ -145,12 +194,11 @@ echo "✓ Total patches: $TOTAL_PATCHES"
 export DEEPHP_DATASET_ROOT="$DEEPHP_SCRATCH"
 echo "✓ DeepHP dataset ready at: $DEEPHP_SCRATCH"
 
-# Print blacklist information (which patches are excluded from training)
+# Print blacklist information
 echo ""
 echo "Blacklist Status:"
 python3 << 'BLACKLIST_CHECK'
 import json
-import os
 
 try:
     with open('./blacklistDeepHP.json') as f:
@@ -163,7 +211,7 @@ try:
         reason = ref.get('reason', 'unknown')
         score = ref.get('score', 'unknown')
         
-        print(f"  ✓ Macenko Reference Excluded:")
+        print(f"  ✓ Macenko Reference Excluded from Sync:")
         print(f"    File: {folder}/{filename}")
         print(f"    Quality Score: {score}")
         print(f"    Reason: {reason}")
