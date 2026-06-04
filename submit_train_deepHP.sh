@@ -75,6 +75,23 @@ echo "  Focal Loss: $USE_FOCAL_LOSS (gamma=$GAMMA)"
 echo "=========================================================================="
 echo ""
 
+# Check for Macenko reference image (used for stain normalization)
+echo "Checking for Macenko reference image..."
+if [ ! -f "macenko_reference.png" ]; then
+    echo "⚠️  macenko_reference.png not found. Creating it now..."
+    source $VENV_ROOT/bin/activate
+    python3 create_macenko_reference.py
+    if [ $? -eq 0 ]; then
+        echo "✓ Macenko reference created successfully"
+    else
+        echo "ERROR: Failed to create Macenko reference image"
+        exit 1
+    fi
+else
+    echo "✓ Macenko reference found"
+fi
+echo ""
+
 # 1. Submit pre-sync job (prepares scratch directory for data)
 echo "Submitting pre-sync job to prepare environment..."
 PRE_SYNC_JOB=$(sbatch -p pg1tfg12 --job-name=deephp_presync --output=results/slurm_deephp_presync_%j.txt <<'PRESYNC_EOF'
