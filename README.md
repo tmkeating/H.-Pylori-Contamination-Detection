@@ -100,6 +100,7 @@ After integrity checks pass, sync the vetted datasets to local node storage for 
 **DeepHP Sync** (automatic in `train_deepHP_patches.py`):
 - Syncs to `/home/tkeating/.scratch/h_pylori_data/` using `suggested_deephp_blacklist.json` if available
 - 394,926 clean patches (verified 0 duplicates)
+- **Critical Data Integrity**: The Macenko normalization reference patch is automatically excluded from all 5 folds **before** k-fold assignment (not after), mathematically guaranteeing zero leakage between training and validation sets
 
 ### 2. Training (5-Fold Cross-Validation) - RECOMMENDED METHOD
 
@@ -225,6 +226,7 @@ ConvNeXt-Small's additional parameters did not translate to improved performance
 
 
 ## 🛠️ Key Pipeline Features
+- **Deterministic Validation Sets (Reproducible Cross-Validation)**: All folds use stratified k-fold splitting with fixed random seeds (`seed = 42 + fold_index`), ensuring validation sets are identical across training runs. This enables reliable model comparison and debugging without randomness in fold assignment. For example, Fold 0 always contains the same 20% of data as validation, while Folds 1-4 use their own consistent partitions. Training and validation indices are strictly disjoint with no overlap.
 - **Macenko Stain Normalization**: Applied exclusively during DeepHP H&E pre-training to normalize color variations across different staining protocols and tissue scanners, improving backbone generalization. Reference image is automatically created/verified on login node before training starts.
 - **Proactive Environment Verification**: All scripts verify virtual environment dependencies before SLURM job submission, preventing runtime failures with early, actionable error messages.
 - **Centralized Configuration**: All paths and environment variables in `config.py` support dynamic resolution and environment variable overrides for portability across different systems.
