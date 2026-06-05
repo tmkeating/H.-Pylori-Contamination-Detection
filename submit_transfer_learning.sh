@@ -213,11 +213,17 @@ echo "Submitting pre-sync job..."
 # Build sbatch command with conditional dependency
 SBATCH_CMD="sbatch -p pg1tfg12 --job-name=transfer_presync --output=results/slurm_transfer_presync_%j.txt"
 
-if [ "$DEEPHP_SUMMARY_JOB_ID" != "0" ]; then
-    echo "(With dependency on DeepHP summary job: $DEEPHP_SUMMARY_JOB_ID)"
-    SBATCH_CMD="sbatch --dependency=afterok:$DEEPHP_SUMMARY_JOB_ID -p pg1tfg12 --job-name=transfer_presync --output=results/slurm_transfer_presync_%j.txt"
+# Only set dependency if we RAN pre-training in this session
+# If SKIP_PRETRAINING is true, the backbone already exists and pre-sync can start immediately
+if [ "$SKIP_PRETRAINING" = "False" ] || [ "$SKIP_PRETRAINING" = "false" ]; then
+    if [ "$DEEPHP_SUMMARY_JOB_ID" != "0" ]; then
+        echo "(With dependency on DeepHP summary job: $DEEPHP_SUMMARY_JOB_ID)"
+        SBATCH_CMD="sbatch --dependency=afterok:$DEEPHP_SUMMARY_JOB_ID -p pg1tfg12 --job-name=transfer_presync --output=results/slurm_transfer_presync_%j.txt"
+    else
+        echo "(No dependency - starting immediately)"
+    fi
 else
-    echo "(No dependency - starting immediately)"
+    echo "(No dependency - pre-training skipped, backbone already exists)"
 fi
 
 PRE_SYNC_JOB=$($SBATCH_CMD <<'PRESYNC_EOF'
@@ -490,25 +496,6 @@ try:
     print(f"  Total exclusions: {conflict + image}")
 except Exception as e:
     print(f"  (Unable to read blacklist: {e})")
-
-# Check for DeepHP Macenko reference exclusion (for accountability)
-print(f"\nDeepHP Dataset Exclusions:")
-try:
-    with open('./blacklistDeepHP.json') as f:
-        deephp_data = json.load(f)
-    if 'macenko_reference_patch' in deephp_data:
-        ref_patch = deephp_data['macenko_reference_patch']
-        full_path = ref_patch.get('full_path', 'unknown')
-        reason = ref_patch.get('reason', 'unknown')
-        print(f"  ✓ Macenko Reference Excluded:")
-        print(f"    File: {full_path}")
-        print(f"    Reason: {reason}")
-    else:
-        print(f"  (No Macenko reference exclusion)")
-except FileNotFoundError:
-    print(f"  (No DeepHP blacklist - Macenko reference not created yet)")
-except Exception as e:
-    print(f"  (Unable to read DeepHP blacklist: {e})")
 STATS_EOF
 
 echo ""
@@ -566,12 +553,29 @@ do
         --gres=gpu:1 \
         --mem=20G \
         --time=48:00:00 \
-        --export=ALL,FOLD=$FOLD,MODEL_NAME=$MODEL_NAME,NEG_WEIGHT=$NEG_WEIGHT,POS_WEIGHT=$POS_WEIGHT,GAMMA=$GAMMA,NUM_EPOCHS=$NUM_EPOCHS,SAVER_METRIC=$SAVER_METRIC,FREEZE_BN=$FREEZE_BN,CLIP_GRAD=$CLIP_GRAD,PCT_START=$PCT_START,WEIGHT_DECAY=$WEIGHT_DECAY,USE_SWA=$USE_SWA,SWA_START=$SWA_START,JITTER=$JITTER,POOL_TYPE=$POOL_TYPE,ITER=$ITER,SKIP_PRETRAINING=$SKIP_PRETRAINING,FREEZE_BACKBONE=$FREEZE_BACKBONE \
         <<TRAIN_EOF
 #!/bin/bash
 # Setup environment explicitly
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH
 export HOME=/home/tkeating
+export FOLD=$FOLD
+export MODEL_NAME=$MODEL_NAME
+export NEG_WEIGHT=$NEG_WEIGHT
+export POS_WEIGHT=$POS_WEIGHT
+export GAMMA=$GAMMA
+export NUM_EPOCHS=$NUM_EPOCHS
+export SAVER_METRIC=$SAVER_METRIC
+export FREEZE_BN=$FREEZE_BN
+export CLIP_GRAD=$CLIP_GRAD
+export PCT_START=$PCT_START
+export WEIGHT_DECAY=$WEIGHT_DECAY
+export USE_SWA=$USE_SWA
+export SWA_START=$SWA_START
+export JITTER=$JITTER
+export POOL_TYPE=$POOL_TYPE
+export ITER=$ITER
+export SKIP_PRETRAINING=$SKIP_PRETRAINING
+export FREEZE_BACKBONE=$FREEZE_BACKBONE
 
 # Activate virtual environment with dependencies
 source $VENV_ROOT/bin/activate
