@@ -427,6 +427,9 @@ SUMMARY_JOB_OUT=$(sbatch --dependency=$DEPENDENCY_STRING \
 #SBATCH -p pg1tfg12
 cd /home/tkeating/model/H.-Pylori-Contamination-Detection
 
+# Activate virtual environment for Python dependencies
+source /home/tkeating/venv/bin/activate
+
 echo "=========================================================================="
 echo "All DeepHP pre-training folds complete. Averaging backbone weights..."
 echo "=========================================================================="

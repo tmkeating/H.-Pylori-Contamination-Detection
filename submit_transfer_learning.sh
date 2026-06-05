@@ -709,7 +709,9 @@ SUMMARY_JOB_ID=$(sbatch --dependency=$DEPENDENCY_STRING \
 #!/bin/bash
 #SBATCH -p pg1tfg12
 cd /home/tkeating/model/H.-Pylori-Contamination-Detection
-
+# Activate virtual environment for Python dependencies
+VENV_ROOT=$(python3 -c "from config import VENV_ROOT; print(VENV_ROOT)")
+source $VENV_ROOT/bin/activate
 # Get job ID for output filename
 JOB_ID=$SLURM_JOB_ID
 
@@ -788,7 +790,9 @@ VISUAL_JOB_ID=$(sbatch --dependency=afterok:$SUMMARY_JOB_ID \
 #!/bin/bash
 #SBATCH -p pg1tfg12
 cd /home/tkeating/model/H.-Pylori-Contamination-Detection
-
+# Activate virtual environment for Python dependencies
+VENV_ROOT=$(python3 -c "from config import VENV_ROOT; print(VENV_ROOT)")
+source $VENV_ROOT/bin/activate
 JOB_ID=$SLURM_JOB_ID
 
 echo "=========================================================================="
