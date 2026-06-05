@@ -427,8 +427,11 @@ SUMMARY_JOB_OUT=$(sbatch --dependency=$DEPENDENCY_STRING \
 #SBATCH -p pg1tfg12
 cd /home/tkeating/model/H.-Pylori-Contamination-Detection
 
+# Get virtual environment path from config
+VENV_ROOT=$(python3 -c "from config import VENV_ROOT; print(VENV_ROOT)")
+
 # Activate virtual environment for Python dependencies
-source /home/tkeating/venv/bin/activate
+source $VENV_ROOT/bin/activate
 
 echo "=========================================================================="
 echo "All DeepHP pre-training folds complete. Averaging backbone weights..."
