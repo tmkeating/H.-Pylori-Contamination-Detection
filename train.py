@@ -1414,12 +1414,12 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
     all_patch_counts = np.zeros(num_holdout, dtype=np.int32) # Transparency: total tissue analyzed
     
     patient_ids_list = []
-    # Use a chunk size of 400 for ConvNeXt evaluate loop with 16GB system RAM
-    # Increased from 256 now that we have proper memory allocation
-    # Each chunk: 400 patches × 3×256×256 × 4 bytes = ~3.1 GB per augmentation
-    vram_bag_limit = 400
+    # Use a chunk size of 256 for ConvNeXt evaluate loop with 24GB memory allocation
+    # Reduced from 400 to fit within memory constraints while maintaining evaluation quality
+    # Each chunk: 256 patches × 3×256×256 × 4 bytes = ~1.95 GB per augmentation
+    vram_bag_limit = 256
     # Iteration 24.9: Sliding Window Overlap (50%) to prevent signal split
-    eval_stride = 200 
+    eval_stride = 128 
 
     with torch.no_grad():
         for i, (bags, labels, patient_ids) in enumerate(tqdm(holdout_loader, desc=f"Patient-Independent TTA Test (Fold {fold_idx + 1}/{num_folds})")):
