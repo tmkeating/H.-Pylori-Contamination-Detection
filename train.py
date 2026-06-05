@@ -1466,9 +1466,14 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
                             logits, _ = model.forward_bag(aug_bags)
                     
                     if chunk_logits_sum is None:
-                        chunk_logits_sum = logits
+                        chunk_logits_sum = logits.detach()
                     else:
-                        chunk_logits_sum += logits
+                        chunk_logits_sum += logits.detach()
+                    
+                    # Explicit memory cleanup to prevent OOM on large bags
+                    # Processing TTA sequentially with cleanup reduces peak memory usage
+                    del aug_bags, logits
+                    torch.cuda.empty_cache()
                 
                 # --- Step 8.3: Stochastic Smoothing ---
                 # We average the summed logits to finalize the view for this chunk.

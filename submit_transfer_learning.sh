@@ -551,7 +551,7 @@ do
         --ntasks=1 \
         --cpus-per-task=6 \
         --gres=gpu:1 \
-        --mem=20G \
+        --mem=24G \
         --time=48:00:00 \
         <<TRAIN_EOF
 #!/bin/bash
