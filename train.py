@@ -1540,14 +1540,17 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
             
             # AGGRESSIVE memory cleanup after each patient to prevent OOM on large bags
             # Critical: Prevents memory fragmentation during 114-patient holdout evaluation
-            del bag_probs_list
-            del all_chunks_probs
-            torch.cuda.empty_cache()
-            gc.collect()
+            # Delete all references to prevent residual GPU memory fragmentation
+            del bag_probs_list, all_chunks_probs, labels, preds
             
-            # Periodic deeper VRAM flush every 5 patients for extra safety
-            if i % 5 == 0:
+            # Synchronize GPU before clearing cache to ensure all operations complete
+            torch.cuda.synchronize()
+            # Force immediate cache clearing
+            torch.cuda.empty_cache()
+            # Aggressive garbage collection every 2 batches to fight fragmentation
+            if i % 2 == 0:
                 gc.collect()
+                torch.cuda.reset_peak_memory_stats()  # Reset to allow better defragmentation
 
     # --- Step 9: Detailed Reporting (Patient Level Focused) ---
     print("\nPatient-Level Classification Report (MIL):")
