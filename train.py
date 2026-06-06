@@ -1363,13 +1363,16 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
     )
     
     # Evaluation Loader: Single batch (1 patient) at a time.
-    # num_workers=0 is used inside the loop to avoid multi-process overhead for sequential TTA.
+    # num_workers=1 with prefetch_factor=1 allows asynchronous loading of next batch
+    # while processing current patient, improving throughput without memory overhead
+    # pin_memory=False: Disables pinned memory to prevent accumulation over 114 sequential batches
     holdout_loader = DataLoader(
         holdout_dataset, 
         batch_size=1, 
         shuffle=False, 
-        num_workers=0, 
-        pin_memory=True
+        num_workers=1, 
+        prefetch_factor=1,
+        pin_memory=False
     )
     
     # --- 16-way Deterministic TTA (Iteration 25.1: Clinical Grade) ---
@@ -1541,7 +1544,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
             # AGGRESSIVE memory cleanup after each patient to prevent OOM on large bags
             # Critical: Prevents memory fragmentation during 114-patient holdout evaluation
             # Delete all references to prevent residual GPU memory fragmentation
-            del bag_probs_list, all_chunks_probs, labels, preds
+            del bag_probs_list, all_chunks_probs, labels, preds, bags
             
             # Synchronize GPU before clearing cache to ensure all operations complete
             torch.cuda.synchronize()
