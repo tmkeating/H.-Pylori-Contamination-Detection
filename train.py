@@ -1732,6 +1732,12 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
             # Cleanup per patch
             del patch_img, patch_input, heatmap
             torch.cuda.empty_cache()
+        
+        # CRITICAL: Delete entire bag after processing to prevent memory accumulation
+        # Large bags (>7000 patches) consume 2GB+ and can accumulate across 5 patients
+        del bag_imgs, all_indicators, indicators
+        gc.collect()
+        torch.cuda.empty_cache()
 
     # Repeat for False Negatives (Ghost Patients)
     fn_indices = [i for i, (prob, label) in enumerate(zip(all_probs_pat, all_labels_pat)) if label == 1 and prob < 0.5]
@@ -1805,7 +1811,13 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
                 # Full memory sweep between patches to avoid VRAM fragmentation
                 del patch_img, patch_input, heatmap
                 torch.cuda.empty_cache()
-                
+            
+            # CRITICAL: Delete entire bag after processing to prevent memory accumulation
+            # Large FN bags can also consume 2GB+ and accumulate across 5 patients
+            del bag_imgs, all_indicators, indicators
+            gc.collect()
+            torch.cuda.empty_cache()
+    
     print(f"Iteration reporting and metrics complete.")
     sys.stdout.flush()
 
