@@ -1363,15 +1363,14 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
     )
     
     # Evaluation Loader: Single batch (1 patient) at a time.
-    # num_workers=1 with prefetch_factor=1 allows asynchronous loading of next batch
-    # while processing current patient, improving throughput without memory overhead
+    # num_workers=0: No prefetching - memory constraint prevents holding 2 bags simultaneously
+    # With large patient bags (up to 10,000 patches), we can only fit ONE bag in 24GB memory
     # pin_memory=False: Disables pinned memory to prevent accumulation over 114 sequential batches
     holdout_loader = DataLoader(
         holdout_dataset, 
         batch_size=1, 
         shuffle=False, 
-        num_workers=1, 
-        prefetch_factor=1,
+        num_workers=0, 
         pin_memory=False
     )
     
