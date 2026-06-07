@@ -1489,13 +1489,16 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
                 bag_probs_list.append(chunk_probs.cpu()) 
                 
                 # Proactive Memory Management (Clinical Pipe)
-                del chunk_bags
-                del avg_chunk_logits
-                del chunk_logits_sum
+                # Delete ALL references to prevent GPU memory fragmentation
+                del chunk_bags, avg_chunk_logits, chunk_logits_sum, chunk_probs
+                torch.cuda.empty_cache()
             
             # Move probabilities to DEVICE for final aggregation math
+            # Stack on CPU first to avoid GPU memory spike on large bags
             # Shape (Num_Chunks, 1, 2) -> (Num_Chunks, 2)
-            all_chunks_probs = torch.stack(bag_probs_list).squeeze(1).to(device)
+            all_chunks_probs_cpu = torch.stack(bag_probs_list, dim=0).squeeze(1)  # Stack on CPU
+            all_chunks_probs = all_chunks_probs_cpu.to(device)  # Then move to GPU
+            del all_chunks_probs_cpu  # Free CPU memory too
             
             # --- Step 8.4: AGGREGATION: Iteration 24.9 Top-3 Mixed MIL Strategy ---
             # Instead of a global mean or a single max (which are prone to noise or outliers),
