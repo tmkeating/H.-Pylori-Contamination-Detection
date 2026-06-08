@@ -27,7 +27,7 @@
 #SBATCH -N 1
 #SBATCH -t 0-06:00                     # It will likely finish in < 6 hours now
 #SBATCH -p pg1tfg12
-#SBATCH --mem=20G                      # Reduced from 48GB to prevent cluster starvation (5×20G=100GB acceptable)
+#SBATCH --mem=32G                      # Increased from 20G to handle TTA evaluation with 114 patients
 #SBATCH --gres=gpu:l40s:1
 #SBATCH -o results/output_%j.txt
 #SBATCH -e results/error_%j.txt

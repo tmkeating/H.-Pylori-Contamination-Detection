@@ -1,0 +1,11 @@
+{
+  "use_swa": true,
+  "best_recall": 0.0,
+  "last_val_recall": 0.75,
+  "training_time_hours": 1.98,
+  "training_time_seconds": 7139.4,
+  "peak_gpu_memory_gb": 1.67,
+  "throughput_patches_per_sec": 0.5,
+  "num_epochs": 20,
+  "fold": 4
+}
