@@ -1,0 +1,56 @@
+==========================================================================
+All DeepHP pre-training folds complete. Averaging backbone weights...
+==========================================================================
+
+Found backbone checkpoints:
+  Fold 0: results/01_31.0_6785_f0_convnext_tiny_model_brain.pth
+  Fold 1: results/01_31.0_6786_f1_convnext_tiny_model_brain.pth
+  Fold 2: results/01_31.0_6787_f2_convnext_tiny_model_brain.pth
+  Fold 3: results/01_31.0_6788_f3_convnext_tiny_model_brain.pth
+  Fold 4: results/01_31.0_6789_f4_convnext_tiny_model_brain.pth
+
+Averaging 5-fold backbone weights...
+
+================================================================================
+Averaging Backbone Weights Across 5 Folds
+================================================================================
+
+Loading fold 1/5: results/01_31.0_6785_f0_convnext_tiny_model_brain.pth
+Loading fold 2/5: results/01_31.0_6786_f1_convnext_tiny_model_brain.pth
+Loading fold 3/5: results/01_31.0_6787_f2_convnext_tiny_model_brain.pth
+Loading fold 4/5: results/01_31.0_6788_f3_convnext_tiny_model_brain.pth
+Loading fold 5/5: results/01_31.0_6789_f4_convnext_tiny_model_brain.pth
+
+✓ Saved averaged backbone weights to: results/deephp_backbone_final_convnext_tiny.pth
+================================================================================
+
+
+================================================================================
+✓ Backbone averaging complete!
+================================================================================
+
+Next steps:
+1. Fine-tune on HelicoDataSet using pre-trained backbone:
+   PRETRAINED_BACKBONE=results/deephp_backbone_final_convnext_tiny.pth
+   for i in {0..4}; do
+     sbatch -J heli_ft_f\$i run_h_pylori.sh \$i
+   done
+
+2. Or use automated fine-tuning:
+   ./submit_transfer_learning.sh
+
+3. Generate ensemble and analysis:
+   python3 ensemble_voting.py --runs 31_0,31_1,31_2,31_3,31_4
+================================================================================
+
+✓ Summary job complete
+
+==========================================================================
+DeepHP pre-training pipeline finished!
+==========================================================================
+
+Backbone checkpoints:
+
+Averaged backbone:
+-rw-rw-r-- 1 tkeating tkeating 110M jun  8 03:47 results/deephp_backbone_final_convnext_tiny.pth
+

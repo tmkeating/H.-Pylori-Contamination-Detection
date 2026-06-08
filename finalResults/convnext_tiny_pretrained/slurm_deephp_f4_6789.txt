@@ -1,0 +1,181 @@
+Using device: cuda
+
+================================================================================
+DeepHP Backbone Pre-training: Fold 5/5
+Run ID: 01 (Iter: 31.0, SLURM Job: 6789)
+================================================================================
+Model: convnext_tiny | Epochs: 20 | Batch Size: 32
+Learning Rate: 2e-05 | Weight Decay: 0.05
+Focal Loss: True | Pos Weight: 1.5
+================================================================================
+
+
+============================================================
+Loading dataset from: /home/tkeating/.scratch/deephp_data
+Scratch directory: /home/tkeating/.scratch/deephp_data
+Original directory: /home/tkeating/datasets/8117177
+Using scratch: True
+============================================================
+
+[DEBUG] Loaded blacklistDeepHP.json successfully
+[DEBUG] Blacklist data keys: dict_keys(['macenko_reference_patch'])
+[DEBUG] Processing blacklist entry: macenko_reference_patch
+[DEBUG]   Added via full_path: /home/tkeating/.scratch/deephp_data/Positive/Experiment-6712_b0s11c0x7495-2776y16848-2080m49_17922048x256512.jpeg
+[DEBUG] Original samples count: 394925
+[DEBUG] Blacklist paths to exclude: {'/home/tkeating/.scratch/deephp_data/Positive/Experiment-6712_b0s11c0x7495-2776y16848-2080m49_17922048x256512.jpeg'}
+[DEBUG] After exclusion count: 394925, excluded: 0
+[DEBUG] ✓ Train/Val indices are disjoint (315936 train, 78989 val)
+[DEBUG] Loaded blacklistDeepHP.json successfully
+[DEBUG] Blacklist data keys: dict_keys(['macenko_reference_patch'])
+[DEBUG] Processing blacklist entry: macenko_reference_patch
+[DEBUG]   Added via full_path: /home/tkeating/.scratch/deephp_data/Positive/Experiment-6712_b0s11c0x7495-2776y16848-2080m49_17922048x256512.jpeg
+[DEBUG] Original samples count: 394925
+[DEBUG] Blacklist paths to exclude: {'/home/tkeating/.scratch/deephp_data/Positive/Experiment-6712_b0s11c0x7495-2776y16848-2080m49_17922048x256512.jpeg'}
+[DEBUG] After exclusion count: 394925, excluded: 0
+[DEBUG] ✓ Train/Val indices are disjoint (315936 train, 78989 val)
+
+============================================================
+DeepHP Dataset Statistics (Fold 4, TRAIN)
+============================================================
+Total patches:        315,936
+  Positive (H. pylori):  88,800
+  Negative (Normal):     227,136
+Imbalance ratio (Neg:Pos): 2.56:1
+============================================================
+
+
+============================================================
+DeepHP Dataset Statistics (Fold 4, VAL)
+============================================================
+Total patches:        78,989
+  Positive (H. pylori):  22,204
+  Negative (Normal):     56,785
+Imbalance ratio (Neg:Pos): 2.56:1
+============================================================
+
+
+============================================================
+Blacklist Status (Applied Before Fold Split):
+============================================================
+  ✓ Macenko Reference Excluded:
+    File: Positive/Experiment-6712_b0s11c0x7495-2776y16848-2080m49_17922048x256512.jpeg
+    Quality Score: 0.9551966921899046
+    Reason: Macenko H&E normalization reference - excluded from training/validation to prevent data leakage
+============================================================
+
+Loading convnext_tiny backbone...
+Using Focal Loss (gamma=3.0, pos_weight=1.5)
+Initializing Macenko normalizer for H&E stain normalization...
+  Loading pre-computed reference: ./macenko_reference.png
+✓ Macenko normalizer fitted to pre-computed reference
+
+Epoch 1/20
+Train Loss: 0.0108 | Train Acc: 98.50%
+Val Loss: 0.0012 | Val Acc: 99.89% | F1: 0.9981
+✓ Saved best (lowest val loss) model to results/01_31.0_6789_f4_convnext_tiny_model_brain.pth
+
+Epoch 2/20
+Train Loss: 0.0025 | Train Acc: 99.78%
+Val Loss: 0.0005 | Val Acc: 99.96% | F1: 0.9993
+✓ Saved best (lowest val loss) model to results/01_31.0_6789_f4_convnext_tiny_model_brain.pth
+
+Epoch 3/20
+Train Loss: 0.0018 | Train Acc: 99.86%
+Val Loss: 0.0014 | Val Acc: 99.93% | F1: 0.9988
+
+Epoch 4/20
+Train Loss: 0.0013 | Train Acc: 99.89%
+Val Loss: 0.0011 | Val Acc: 99.92% | F1: 0.9985
+
+Epoch 5/20
+Train Loss: 0.0012 | Train Acc: 99.91%
+Val Loss: 0.0006 | Val Acc: 99.97% | F1: 0.9995
+
+Epoch 6/20
+Train Loss: 0.0010 | Train Acc: 99.93%
+Val Loss: 0.0006 | Val Acc: 99.97% | F1: 0.9995
+
+Epoch 7/20
+Train Loss: 0.0009 | Train Acc: 99.93%
+Val Loss: 0.0007 | Val Acc: 99.96% | F1: 0.9993
+
+Epoch 8/20
+Train Loss: 0.0007 | Train Acc: 99.95%
+Val Loss: 0.0005 | Val Acc: 99.98% | F1: 0.9997
+✓ Saved best (lowest val loss) model to results/01_31.0_6789_f4_convnext_tiny_model_brain.pth
+
+Epoch 9/20
+Train Loss: 0.0006 | Train Acc: 99.96%
+Val Loss: 0.0007 | Val Acc: 99.97% | F1: 0.9994
+
+Epoch 10/20
+Train Loss: 0.0005 | Train Acc: 99.97%
+Val Loss: 0.0005 | Val Acc: 99.98% | F1: 0.9997
+
+Epoch 11/20
+Train Loss: 0.0005 | Train Acc: 99.97%
+Val Loss: 0.0004 | Val Acc: 99.98% | F1: 0.9996
+✓ Saved best (lowest val loss) model to results/01_31.0_6789_f4_convnext_tiny_model_brain.pth
+
+Epoch 12/20
+Train Loss: 0.0003 | Train Acc: 99.98%
+Val Loss: 0.0004 | Val Acc: 99.98% | F1: 0.9996
+
+Epoch 13/20
+Train Loss: 0.0003 | Train Acc: 99.98%
+Val Loss: 0.0005 | Val Acc: 99.98% | F1: 0.9996
+
+Epoch 14/20
+Train Loss: 0.0002 | Train Acc: 99.98%
+Val Loss: 0.0004 | Val Acc: 99.98% | F1: 0.9996
+
+Epoch 15/20
+Train Loss: 0.0001 | Train Acc: 99.99%
+Val Loss: 0.0004 | Val Acc: 99.96% | F1: 0.9993
+✓ Saved best (lowest val loss) model to results/01_31.0_6789_f4_convnext_tiny_model_brain.pth
+
+Epoch 16/20
+Train Loss: 0.0001 | Train Acc: 99.99%
+Val Loss: 0.0007 | Val Acc: 99.96% | F1: 0.9994
+
+Epoch 17/20
+Train Loss: 0.0001 | Train Acc: 99.99%
+Val Loss: 0.0005 | Val Acc: 99.98% | F1: 0.9997
+
+Epoch 18/20
+Train Loss: 0.0001 | Train Acc: 100.00%
+Val Loss: 0.0004 | Val Acc: 99.97% | F1: 0.9995
+✓ Saved best (lowest val loss) model to results/01_31.0_6789_f4_convnext_tiny_model_brain.pth
+
+Epoch 19/20
+Train Loss: 0.0000 | Train Acc: 100.00%
+Val Loss: 0.0003 | Val Acc: 99.97% | F1: 0.9995
+✓ Saved best (lowest val loss) model to results/01_31.0_6789_f4_convnext_tiny_model_brain.pth
+
+Epoch 20/20
+Train Loss: 0.0000 | Train Acc: 100.00%
+Val Loss: 0.0003 | Val Acc: 99.97% | F1: 0.9995
+✓ Saved final epoch (fallback) model to results/01_31.0_6789_f4_convnext_tiny_model_brain.pth
+
+✓ Saved learning curves to results/01_31.0_6789_f4_convnext_tiny_learning_curves.png
+
+================================================================================
+Final Evaluation (Fold 5/5)
+================================================================================
+Accuracy:  99.99%
+Precision: 99.99%
+Recall:    99.99%
+Specificity: 100.00%
+F1 Score:  0.9999
+MCC:       0.9998
+Confusion Matrix: TP=22201, FP=2, FN=3, TN=56783
+================================================================================
+
+✓ Saved evaluation report to results/01_31.0_6789_f4_convnext_tiny_evaluation_report.csv
+✓ Saved ROC curve to results/01_31.0_6789_f4_convnext_tiny_roc_curve.png
+✓ Saved confusion matrix to results/01_31.0_6789_f4_convnext_tiny_confusion_matrix.png
+✓ Saved PR curve to results/01_31.0_6789_f4_convnext_tiny_pr_curve.png
+✓ Fold 5/5 Complete!
+
+
+✓ Fold 4 complete: results/deephp_backbone_pretrained_convnext_tiny_f4.pth

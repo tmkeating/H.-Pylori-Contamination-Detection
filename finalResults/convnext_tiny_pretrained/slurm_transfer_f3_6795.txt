@@ -1,0 +1,262 @@
+--- Starting Run ID: 01 (Fold: 4/5, Model: convnext_tiny, SLURM Job: 6795, Iter: 31.0) ---
+Using device: cuda
+Set float32 matmul precision to 'high' for A40 hardware optimization.
+Using Data Path: /home/tkeating/.scratch/h_pylori_data
+Pre-processing: Using Standard ImageNet Normalization (IHC-mode).
+Validating data at: /home/tkeating/.scratch/h_pylori_data
+✓ Data validation passed (153 bags found in training directory)
+
+============================================================
+Loading HelicoDataSet from:
+  - Train dir: /home/tkeating/.scratch/h_pylori_data/CrossValidation/Annotated
+  - Cropped dir: /home/tkeating/.scratch/h_pylori_data/CrossValidation/Cropped
+  Using scratch: True
+============================================================
+
+
+📊 DEBUG: File Enumeration & Deduplication Statistics
+   Total files enumerated: 128,724
+   Unique patients with files: 154
+   Total samples added: 128,724
+
+   Gap analysis:
+     Enumerated: 128,724
+     Added to samples: 128,724
+     Silent skips (Priority match but already in added_keys): 0
+     Explicit skips (Priority 4 - no match): 0
+     Unaccounted: 0
+
+✓ DEBUG: No patches skipped by Priority 4 filter (all have density info)
+
+   Total samples loaded: 128,724
+[DEBUG] Loaded blacklist.json successfully
+[DEBUG] Conflict bags to exclude: 5
+[DEBUG] Individual images to exclude: 2788
+--- LIVE DATA INTEGRITY AUDIT ---
+  Scanned Patches: 128724
+  Conflict Blacklist: Removed 0 patient bags []
+    (Note: Conflict bags were excluded at rsync level - not in scratch)
+  Image-Level Blacklist: Removed 0 cross-folder duplicate images
+    (Note: These images appear in multiple bags; removing from non-primary locations)
+  Total Patches Removed: 0
+  Total Patches Remaining: 128724
+  Final Valid Bags: 223
+---------------------------------
+[DEBUG] HelicoDataSet loaded successfully
+[DEBUG] Total bags: 223
+[DEBUG] Total patients: 154
+[DEBUG] Positive bags: 0
+[DEBUG] Negative bags: 0
+--- Fold 4/5 Split (Leakage-Proof MIL) ---
+Total Clinical Patients: 154
+Training Clinical IDs: 124
+Validation Clinical IDs: 30
+[DEBUG] ✓ Train/Val indices are disjoint (178 train bags, 45 val bags)
+Independent Patient-level split:
+ - Train: 178 biopsy bags
+ - Val:   45 biopsy bags
+Training distribution (Bags): Negative=89, Contaminated=89
+Pos Weight 1.5 > 1.0: Disabling Sampler, using Shuffle=True.
+
+================================================================================
+TRANSFER LEARNING: Loading Pre-trained Backbone from DeepHP
+Backbone Path: results/deephp_backbone_final_convnext_tiny.pth
+================================================================================
+
+================================================================================
+Loading Pre-trained Backbone from: results/deephp_backbone_final_convnext_tiny.pth
+================================================================================
+
+Loaded backbone weights successfully!
+Missing keys (expected - these are MIL head): 11
+Unexpected keys: 11
+
+Backbone is trainable (will fine-tune during HelicoDataSet training)
+Total trainable parameters: 191
+================================================================================
+
+Backbone is TRAINABLE (will fine-tune on HelicoDataSet)
+Using AdamW Optimizer for convnext_tiny (LR=2e-5, WD=0.05)...
+Skipping torch.compile for convnext_tiny to conserve VRAM...
+Running on standard PyTorch (IPEX disabled).
+Epoch 1/20 (Fold 4/5)
+Train Loss: 0.1139 Acc: 0.5337
+Val Loss: 0.1217 Acc: 0.6000 Recall: 1.0000 F1: 0.7500
+New Best F1! 0.7500
+Saving model to results/01_31.0_6795_f3_convnext_tiny_model_brain.pth
+Epoch 2/20 (Fold 4/5)
+Train Loss: 0.0880 Acc: 0.5899
+Val Loss: 0.0984 Acc: 0.8000 Recall: 0.9630 F1: 0.8525
+New Best F1! 0.8525
+Saving model to results/01_31.0_6795_f3_convnext_tiny_model_brain.pth
+Epoch 3/20 (Fold 4/5)
+Train Loss: 0.0570 Acc: 0.6461
+Val Loss: 0.0750 Acc: 0.8889 Recall: 0.9259 F1: 0.9091
+New Best F1! 0.9091
+Saving model to results/01_31.0_6795_f3_convnext_tiny_model_brain.pth
+Epoch 4/20 (Fold 4/5)
+Train Loss: 0.0593 Acc: 0.8315
+Val Loss: 0.0622 Acc: 0.8667 Recall: 0.9259 F1: 0.8929
+Epoch 5/20 (Fold 4/5)
+Train Loss: 0.0345 Acc: 0.7809
+Val Loss: 0.0613 Acc: 0.9333 Recall: 0.8889 F1: 0.9412
+New Best F1! 0.9412
+Saving model to results/01_31.0_6795_f3_convnext_tiny_model_brain.pth
+Epoch 6/20 (Fold 4/5)
+Train Loss: 0.0343 Acc: 0.8989
+Val Loss: 0.0559 Acc: 0.8889 Recall: 0.8889 F1: 0.9057
+Epoch 7/20 (Fold 4/5)
+Train Loss: 0.0230 Acc: 0.8427
+Val Loss: 0.0523 Acc: 0.9333 Recall: 0.9259 F1: 0.9434
+New Best F1! 0.9434
+Saving model to results/01_31.0_6795_f3_convnext_tiny_model_brain.pth
+Epoch 8/20 (Fold 4/5)
+Train Loss: 0.0105 Acc: 0.9157
+Val Loss: 0.0499 Acc: 0.8889 Recall: 0.9259 F1: 0.9091
+Epoch 9/20 (Fold 4/5)
+Train Loss: 0.0117 Acc: 0.8652
+Val Loss: 0.0537 Acc: 0.9333 Recall: 0.8889 F1: 0.9412
+Epoch 10/20 (Fold 4/5)
+Train Loss: -0.0005 Acc: 0.9326
+Val Loss: 0.0520 Acc: 0.9111 Recall: 0.9259 F1: 0.9259
+Epoch 11/20 (Fold 4/5)
+Train Loss: -0.0034 Acc: 0.9270
+Val Loss: 0.0483 Acc: 0.9111 Recall: 0.9259 F1: 0.9259
+Epoch 12/20 (Fold 4/5)
+Train Loss: -0.0035 Acc: 0.9326
+Val Loss: 0.0503 Acc: 0.9556 Recall: 0.9259 F1: 0.9615
+New Best F1! 0.9615
+Saving model to results/01_31.0_6795_f3_convnext_tiny_model_brain.pth
+Epoch 13/20 (Fold 4/5)
+Train Loss: -0.0102 Acc: 0.9494
+Val Loss: 0.0408 Acc: 0.9111 Recall: 0.9259 F1: 0.9259
+Epoch 14/20 (Fold 4/5)
+Train Loss: -0.0112 Acc: 0.9551
+Val Loss: 0.0503 Acc: 0.9333 Recall: 0.8889 F1: 0.9412
+Epoch 15/20 (Fold 4/5)
+Train Loss: -0.0104 Acc: 0.9438
+Val Loss: 0.0582 Acc: 0.9333 Recall: 0.8889 F1: 0.9412
+Epoch 16/20 (Fold 4/5)
+Train Loss: -0.0172 Acc: 0.9438
+Val Loss: 0.0658 Acc: 0.9333 Recall: 0.8889 F1: 0.9412
+Epoch 17/20 (Fold 4/5)
+Train Loss: -0.0204 Acc: 0.9607
+Val Loss: 0.0431 Acc: 0.8667 Recall: 0.9259 F1: 0.8929
+Epoch 18/20 (Fold 4/5)
+Train Loss: -0.0106 Acc: 0.9551
+Val Loss: 0.0616 Acc: 0.9333 Recall: 0.8889 F1: 0.9412
+Epoch 19/20 (Fold 4/5)
+Train Loss: -0.0246 Acc: 0.9607
+Val Loss: 0.0821 Acc: 0.9333 Recall: 0.8889 F1: 0.9412
+Epoch 20/20 (Fold 4/5)
+Train Loss: -0.0290 Acc: 0.9831
+Val Loss: 0.0565 Acc: 0.9333 Recall: 0.8889 F1: 0.9412
+Training complete. Best Val F1: 0.9615
+
+[ENSEMBLE] Generating fold-level validation consensus for ensemble voting...
+[ENSEMBLE] ✓ Saved fold validation consensus (45 patients, 93.3% acc)
+[ENSEMBLE]   File: 01_31.0_6795_f3_convnext_tiny_patient_consensus.csv (4254 bytes)
+Final SWA Clinical Model saved to results/01_31.0_6795_f3_convnext_tiny_swa_model_brain.pth
+Saved clinical learning curves to results/01_31.0_6795_f3_convnext_tiny_learning_curves.png
+Saved learning curves data to results/01_31.0_6795_f3_convnext_tiny_learning_curves.json
+
+Evaluating on Independent Hold-Out set from: /home/tkeating/.scratch/h_pylori_data/HoldOut with 16-way TTA
+
+📊 DEBUG: File Enumeration & Deduplication Statistics
+   Total files enumerated: 87,602
+   Unique patients with files: 114
+   Total samples added: 87,602
+
+   Gap analysis:
+     Enumerated: 87,602
+     Added to samples: 87,602
+     Silent skips (Priority match but already in added_keys): 0
+     Explicit skips (Priority 4 - no match): 0
+     Unaccounted: 0
+
+✓ DEBUG: No patches skipped by Priority 4 filter (all have density info)
+
+   Total samples loaded: 87,602
+[DEBUG] Loaded blacklist.json successfully
+[DEBUG] Conflict bags to exclude: 5
+[DEBUG] Individual images to exclude: 2788
+--- LIVE DATA INTEGRITY AUDIT ---
+  Scanned Patches: 87602
+  Conflict Blacklist: Removed 0 patient bags []
+    (Note: Conflict bags were excluded at rsync level - not in scratch)
+  Image-Level Blacklist: Removed 0 cross-folder duplicate images
+    (Note: These images appear in multiple bags; removing from non-primary locations)
+  Total Patches Removed: 0
+  Total Patches Remaining: 87602
+  Final Valid Bags: 114
+---------------------------------
+
+[DIAGNOSTIC] Batch 10: Large bag detected (1820 patches, patient B22-10_0)
+
+[DIAGNOSTIC] Batch 11: Large bag detected (1217 patches, patient B22-11_0)
+
+[DIAGNOSTIC] Batch 19: Large bag detected (1250 patches, patient B22-136_0)
+
+[DIAGNOSTIC] Batch 21: Large bag detected (1100 patches, patient B22-13_0)
+
+[DIAGNOSTIC] Batch 24: Large bag detected (1207 patches, patient B22-159_1)
+
+[DIAGNOSTIC] Batch 25: Large bag detected (1206 patches, patient B22-15_1)
+
+[DIAGNOSTIC] Batch 26: Large bag detected (1791 patches, patient B22-161_0)
+
+[DIAGNOSTIC] Batch 41: Large bag detected (1417 patches, patient B22-208_0)
+
+[DIAGNOSTIC] Batch 47: Large bag detected (1605 patches, patient B22-215_0)
+
+[DIAGNOSTIC] Batch 48: Large bag detected (1206 patches, patient B22-220_0)
+
+[DIAGNOSTIC] Batch 54: Large bag detected (2340 patches, patient B22-229_0)
+
+[DIAGNOSTIC] Batch 55: Large bag detected (1834 patches, patient B22-231_0)
+
+[DIAGNOSTIC] Batch 57: Large bag detected (1469 patches, patient B22-236_0)
+
+[DIAGNOSTIC] Batch 64: Large bag detected (1180 patches, patient B22-247_1)
+
+[DIAGNOSTIC] Batch 66: Large bag detected (1239 patches, patient B22-255_1)
+
+[DIAGNOSTIC] Batch 68: Large bag detected (1217 patches, patient B22-259_0)
+
+[DIAGNOSTIC] Batch 74: Large bag detected (1089 patches, patient B22-268_0)
+
+[DIAGNOSTIC] Batch 76: Large bag detected (1132 patches, patient B22-271_0)
+
+[DIAGNOSTIC] Batch 83: Large bag detected (1162 patches, patient B22-286_1)
+
+[DIAGNOSTIC] Batch 88: Large bag detected (1031 patches, patient B22-310_0)
+
+[DIAGNOSTIC] Batch 104: Large bag detected (2017 patches, patient B22-72_0)
+
+[DIAGNOSTIC] Batch 106: Large bag detected (1189 patches, patient B22-75_0)
+
+[DIAGNOSTIC] Batch 113: Large bag detected (7338 patches, patient B22-89_0)
+
+[DIAGNOSTIC] Batch 114: Large bag detected (2026 patches, patient B22-96_0)
+
+Patient-Level Classification Report (MIL):
+              precision    recall  f1-score   support
+
+    Negative       0.97      0.61      0.75        57
+    Positive       0.72      0.98      0.83        57
+
+    accuracy                           0.80       114
+   macro avg       0.85      0.80      0.79       114
+weighted avg       0.85      0.80      0.79       114
+
+Holdout consensus report saved to 01_31.0_6795_f3_convnext_tiny_holdout_consensus.csv
+Evaluation report saved to results/01_31.0_6795_f3_convnext_tiny_evaluation_report.csv
+
+Final Patient-Level Accuracy (MIL): 79.82%
+
+Generating final metrics and interpretability maps...
+Generating Grad-CAM for most suspicious patient bags in results/01_31.0_6795_f3_convnext_tiny_gradcam_samples...
+Generating Grad-CAM for 4 False Negative (Ghost) bags...
+Iteration reporting and metrics complete.
+
+✓ Fold 3 fine-tuning complete
