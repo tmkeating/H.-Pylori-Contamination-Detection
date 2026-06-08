@@ -550,7 +550,7 @@ do
         --error=results/slurm_transfer_error_f${FOLD}_%j.txt \
         --ntasks=1 \
         --cpus-per-task=6 \
-        --gres=gpu:1 \
+        --gres=gpu:l40s:1 \
         --mem=32G \
         --time=48:00:00 \
         <<TRAIN_EOF
