@@ -16,7 +16,7 @@ function set_profile_SEARCHER() {
     export NEG_WEIGHT=1.0
     export POS_WEIGHT=1.5 
     # Maintained 3.0 to focus gradients on 'Hard' sparse bacterial targets
-    export GAMMA=3.0
+    export GAMMA=5.0
     # Higher WD to prevent 100% Training Accuracy (Overfitting)
     export WEIGHT_DECAY=0.05
     # Reduced epochs with early stopping potential
@@ -37,7 +37,7 @@ function set_profile_SEARCHERTRANSFER() {
     export NEG_WEIGHT=1.0
     export POS_WEIGHT=1.5 
     # Maintained 3.0 to focus gradients on 'Hard' sparse bacterial targets
-    export GAMMA=3.0
+    export GAMMA=5.0
     # Higher WD to prevent 100% Training Accuracy (Overfitting)
     export WEIGHT_DECAY=0.05
     # Reduced epochs with early stopping potential

@@ -98,7 +98,7 @@ PRE_SYNC_JOB=$(sbatch -p pg1tfg12 --job-name=deephp_presync --output=results/slu
 #!/bin/bash
 #SBATCH -p pg1tfg12
 #SBATCH -t 0-02:00
-#SBATCH --cpus-per-task=6
+#SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
 #SBATCH -J deephp_presync
 
@@ -282,21 +282,31 @@ PRE_SYNC_JOB_ID=$(echo $PRE_SYNC_JOB | awk '{print $4}')
 echo "Pre-sync job ID: $PRE_SYNC_JOB_ID"
 PRE_SYNC_DEPENDENCY="afterok:$PRE_SYNC_JOB_ID"
 
-# 2. Submit 5 fold training jobs (parallel or batched based on BATCHED flag)
+# 2. Submit 5 fold training jobs (parallel or batched based on FOLD_BATCH_SIZE)
 echo ""
 echo "Submitting DeepHP pre-training jobs for all 5 folds..."
-if [ "$BATCHED" = "1" ]; then
-    echo "Mode: SEQUENTIAL BATCHING (each fold waits for previous)"
+if [ "$FOLD_BATCH_SIZE" != "0" ]; then
+    echo "Mode: BATCH PROCESSING (groups of $FOLD_BATCH_SIZE folds)"
 else
     echo "Mode: PARALLEL (all folds run simultaneously)"
 fi
 echo "=========================================================================="
 
 DEPENDENCIES=""
-FOLD_DEPENDENCY="$PRE_SYNC_DEPENDENCY"  # Start all folds depending on pre-sync
+declare -a FOLD_IDS  # Array to track job IDs for batch dependencies
 
 for FOLD in {0..4}
 do
+    # Determine this fold's dependency based on batch size
+    if [ "$FOLD_BATCH_SIZE" != "0" ] && [ $FOLD -ge $FOLD_BATCH_SIZE ]; then
+        # Not in first batch; depends on last fold of previous batch
+        BATCH_LAST_FOLD=$(((FOLD / FOLD_BATCH_SIZE) * FOLD_BATCH_SIZE - 1))
+        FOLD_DEPENDENCY="afterok:${FOLD_IDS[$BATCH_LAST_FOLD]}"
+    else
+        # First batch or all-parallel mode: depend on pre-sync
+        FOLD_DEPENDENCY="$PRE_SYNC_DEPENDENCY"
+    fi
+    
     echo "Submitting fold $FOLD..."
     
     JOB_OUT=$(sbatch -p pg1tfg12 \
@@ -305,8 +315,8 @@ do
         --output=results/slurm_deephp_f${FOLD}_%j.txt \
         --error=results/slurm_deephp_error_f${FOLD}_%j.txt \
         --ntasks=1 \
-        --cpus-per-task=6 \
-        --gres=gpu:1 \
+        --cpus-per-task=4 \
+        --gres=shard:l40s:12000 \
         --mem=20G \
         --time=36:00:00 \
         <<TRAIN_EOF
@@ -372,8 +382,6 @@ TRAIN_EOF
             DEPENDENCIES="$DEPENDENCIES:$JOB_ID"
         fi
     fi
-    
-    sleep 1  # Prevent race conditions
 done
 
 echo ""
@@ -399,7 +407,7 @@ fi
 echo ""
 
 # Validate that all folds were successfully submitted
-if [ -z "$DEPENDENCIES" ]; then
+if [ ${#FOLD_IDS[@]} -eq 0 ]; then
     echo "ERROR: No fold jobs were successfully submitted!"
     echo "Cannot proceed with summary job."
     exit 1
