@@ -64,6 +64,7 @@ FOLD_BATCH_SIZE=${FOLD_BATCH_SIZE:-"0"}  # 0=all parallel (default), N=batch in 
 PRETRAINED_BACKBONE="results/deephp_backbone_final_${MODEL_NAME}.pth"
 FREEZE_BACKBONE=${FREEZE_BACKBONE:-"False"}
 SKIP_PRETRAINING=${SKIP_PRETRAINING:-"False"}
+GRADCAM_ONLY=${GRADCAM_ONLY:-"False"}  # True to generate only Grad-CAM visualizations (skip other plots)
 DEEPHP_SUMMARY_JOB_ID=${DEEPHP_SUMMARY_JOB_ID:-""}
 
 echo "=========================================================================="
@@ -264,7 +265,7 @@ else
     # Pre-training enabled: submit transfer presync with dependency on DeepHP summary
     echo "Pre-training enabled: submitting transfer learning presync after pre-training..."
     
-    PRE_SYNC_JOB=$(sbatch --dependency=afterok:$DEEPHP_SUMMARY_JOB_ID -p pg1tfg12 --job-name=transfer_presync --output=results/slurm_transfer_presync_%j.txt <<'PRESYNC_EOF'
+    PRE_SYNC_JOB=$(sbatch --dependency=afterok:$DEEPHP_SUMMARY_JOB_ID -p pg1tfg12 --nodelist=dcc-gr1 --job-name=transfer_presync --output=results/slurm_transfer_presync_%j.txt <<'PRESYNC_EOF'
 #!/bin/bash
 #SBATCH -p pg1tfg12
 #SBATCH -t 0-01:00
@@ -347,7 +348,7 @@ do
         --error=results/slurm_transfer_error_f${FOLD}_%j.txt \
         --ntasks=1 \
         --cpus-per-task=4 \
-        --gres=shard:l40s:12000 \
+        --gres=gpu:l40s:1 --gres=shard:l40s:12000 \
         --mem=30G \
         --time=48:00:00 \
         <<TRAIN_EOF
@@ -380,6 +381,9 @@ source $VENV_ROOT/bin/activate
 # Dynamically resolve project directory
 PROJECT_DIR=$(python3 -c "import os; print(os.path.dirname(os.path.abspath('${PWD}/train.py')))" 2>/dev/null || echo "/home/tkeating/model/H.-Pylori-Contamination-Detection")
 cd "$PROJECT_DIR"
+
+# Force all folds to use GPU 0 for memory consolidation
+export CUDA_VISIBLE_DEVICES=0
 
 # Build train.py command with conditional backbone path
 TRAIN_CMD="python3 -u train.py \
@@ -501,7 +505,8 @@ SUMMARY_JOB_ID=$(sbatch --dependency=$DEPENDENCY_STRING \
     -p pg1tfg12 \
     --time=0-02:00 \
     --mem=8G \
-    --cpus-per-task=4 \
+    --cpus-per-task=1 \
+    --gres=gpu:l40s:1 --gres=shard:l40s:12000 \
     --job-name=transfer_summary \
     --output=results/slurm_transfer_summary_%j.txt \
     --error=results/slurm_transfer_summary_error_%j.txt \
@@ -582,7 +587,8 @@ VISUAL_JOB_ID=$(sbatch --dependency=afterok:$SUMMARY_JOB_ID \
     -p pg1tfg12 \
     --time=0-02:00 \
     --mem=16G \
-    --cpus-per-task=4 \
+    --cpus-per-task=1 \
+    --gres=gpu:l40s:1 --gres=shard:l40s:12000 \
     --job-name=transfer_visuals \
     --output=results/slurm_transfer_visuals_%j.txt \
     --error=results/slurm_transfer_visuals_error_%j.txt \
@@ -625,7 +631,17 @@ echo ""
 # Generate calibration curve + performance dashboard automatically (skip redundant visualizations)
 echo "Step 1: Generating novel visualizations (calibration curve + performance dashboard)..."
 echo "  (Skipping ROC/PR/confusion matrix - already generated during training)"
-python3 generate_visuals.py --run_id $RUN_ID --dataset helicodataset --pipeline_mode 2>&1
+
+# Build visualization command with conditional Grad-CAM flag
+VISUAL_CMD="python3 generate_visuals.py --run_id $RUN_ID --model_name $MODEL_NAME --dataset helicodataset"
+if [ "$GRADCAM_ONLY" = "True" ] || [ "$GRADCAM_ONLY" = "true" ]; then
+    echo "  [Grad-CAM Only Mode: Skipping other visualizations]"
+    VISUAL_CMD="$VISUAL_CMD --gradcam_only"
+else
+    VISUAL_CMD="$VISUAL_CMD --pipeline_mode"
+fi
+
+eval "$VISUAL_CMD" 2>&1
 
 echo ""
 echo "=========================================================================="

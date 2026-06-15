@@ -336,7 +336,9 @@ from visualization_utils import (
     plot_ensemble_voting_agreement, plot_cross_validation_stability,
     plot_data_integrity_audit, plot_hard_examples_analysis, plot_edge_cases_analysis,
     plot_training_trajectory, plot_training_efficiency, plot_model_complexity_analysis,
-    plot_class_distribution_analysis, combine_learning_curves, plot_bootstrap_confidence_intervals
+    plot_class_distribution_analysis, combine_learning_curves, plot_bootstrap_confidence_intervals,
+    plot_cross_fold_confusion_matrices_dashboard, plot_cross_fold_pr_curves_dashboard,
+    plot_combined_fold_roc_curves
 )
 
 # --- Config ---
@@ -373,30 +375,19 @@ def full_visual_report(RUN_ID, MODEL_PATH, MODEL_NAME="convnext_tiny", fold_idx=
     print(f"{'='*80}\n")
     OUTPUT_DIR = os.path.join("results", f"{full_prefix}_gradcam_samples")
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-    # Initialize Dataset (Hold-out / Unseen Test Set) with manageable bag size
-    if dataset_type.lower() == "helicodataset":
-        print(f"Loading HelicoDataSet (HoldOut set from {HOLDOUT})...")
-        full_dataset = HPyloriDataset(
-            HOLDOUT, PATIENT_CSV, PATCH_XLSX, 
-            transform=VAL_TRANSFORM, bag_mode=True, 
-            max_bag_size=1000, train=False  # Reduced from 10000 to save memory
-        )
-    elif dataset_type.lower() == "deephp":
-        if DeepHPDataset is None:
-            print("ERROR: DeepHP dataset module not available. Install dataset_deepHP.py")
-            sys.exit(1)
-        print(f"Loading DeepHP Dataset (fold {fold_idx}/{num_folds} from {DEEPHP_DATASET_ROOT})...")
-        full_dataset = DeepHPDataset(
-            DEEPHP_DATASET_ROOT, fold_idx=fold_idx, num_folds=num_folds,
-            train=False, transform=VAL_TRANSFORM, bag_mode=True,
-            max_bag_size=1000
-        )
-    else:
-        print(f"ERROR: Unknown dataset_type '{dataset_type}'. Use 'helicodataset' or 'deephp'")
-        sys.exit(1)
     
-    print(f"✓ Dataset loaded: {len(full_dataset)} patients/samples")
+    # Validate model checkpoint exists
+    if not os.path.exists(MODEL_PATH):
+        print(f"ERROR: Model checkpoint not found: {MODEL_PATH}")
+        print(f"Available checkpoint files:")
+        import glob
+        for f in sorted(glob.glob("results/*_model_brain.pth"))[:5]:
+            print(f"  - {f}")
+        sys.exit(1)
+
+    # Defer dataset loading until Grad-CAM generation to save memory
+    # (Most visualizations don't need the full dataset in memory)
+    full_dataset = None
     
     # Create DataLoader: one patient (bag) per batch
     val_loader = DataLoader(
@@ -441,11 +432,12 @@ def full_visual_report(RUN_ID, MODEL_PATH, MODEL_NAME="convnext_tiny", fold_idx=
     
     patient_performance = []
     
-    # OPTIMIZATION: In pipeline mode, load precomputed predictions from holdout_consensus.csv
+    # OPTIMIZATION: Load precomputed predictions from holdout_consensus.csv if available
     # This avoids re-running inference on 87K+ patches which takes hours
+    # Default behavior: use cached predictions to save time and memory
     predictions_path = os.path.join("results", f"{full_prefix}_holdout_consensus.csv")
-    if args.pipeline_mode and os.path.exists(predictions_path):
-        print(f"\n[Pipeline Mode] Loading precomputed predictions from [{predictions_path}]...")
+    if os.path.exists(predictions_path):
+        print(f"\n✓ Using cached predictions from [{predictions_path}]...")
         print(f"  (Skipping time-consuming inference on 87K+ patches)")
         
         preds_df = pd.read_csv(predictions_path)
@@ -462,18 +454,73 @@ def full_visual_report(RUN_ID, MODEL_PATH, MODEL_NAME="convnext_tiny", fold_idx=
         
         print(f"✓ Loaded predictions for {len(patient_ids)} patients")
         
-        # Skip model loading and inference entirely
+        # Skip building dataset index mapping - we'll do on-demand lookup in Grad-CAM loop
+        # This avoids expensive iteration through all dataset entries
+        
+        # Don't load model here - defer to Grad-CAM section where it's actually needed
+        # This keeps memory usage low when Grad-CAM isn't being generated
         model = None
         val_loader = None
     else:
-        # Full inference mode (non-pipeline or no precomputed predictions found)
-        print(f"Running full inference on {len(full_dataset)} validation patients...")
+        # Predictions not found - need checkpoint to run inference
+        if not os.path.exists(MODEL_PATH):
+            print(f"\n{'='*80}")
+            print(f"ERROR: Cannot regenerate visualizations")
+            print(f"{'='*80}")
+            print(f"Missing required file: {MODEL_PATH}")
+            print(f"\nTo regenerate visualizations, you need ONE of:")
+            print(f"  1. Cached predictions: {predictions_path}")
+            print(f"  2. Model checkpoint: {MODEL_PATH}")
+            print(f"\nIf you have ONLY the model checkpoint (no predictions):")
+            print(f"  → Run with --gradcam_only to skip inference and only generate Grad-CAM")
+            print(f"\nIf you have predictions but no checkpoint:")
+            print(f"  → Visualizations (ROC, PR, confusion matrix) will still work")
+            print(f"  → Grad-CAM generation will be skipped\n")
+            sys.exit(1)
+        
+        # Full inference mode (need checkpoint to run)
+        print(f"Cached predictions not found. Running full inference on validation set...")
+        print(f"(This requires the model checkpoint and will use ~30GB memory)")
+        print(f"Tip: Keep {predictions_path} from training to avoid re-inference\n")
+        sys.stdout.flush()
+        
+        # Load dataset now (only if we're actually going to run inference)
+        if full_dataset is None:
+            print(f"Loading dataset...")
+            if dataset_type.lower() == "helicodataset":
+                full_dataset = HPyloriDataset(
+                    HOLDOUT, PATIENT_CSV, PATCH_XLSX, 
+                    transform=VAL_TRANSFORM, bag_mode=True, 
+                    max_bag_size=1000, train=False
+                )
+            elif dataset_type.lower() == "deephp":
+                if DeepHPDataset is None:
+                    print("ERROR: DeepHP dataset module not available")
+                    sys.exit(1)
+                full_dataset = DeepHPDataset(
+                    DEEPHP_DATASET_ROOT, fold_idx=fold_idx, num_folds=num_folds,
+                    train=False, transform=VAL_TRANSFORM, bag_mode=True,
+                    max_bag_size=1000
+                )
+            print(f"✓ Dataset loaded: {len(full_dataset)} patients\n")
+            sys.stdout.flush()
         
         # Create DataLoader: one patient (bag) per batch
+        # Memory-optimized settings to prevent OOM during inference
         val_loader = DataLoader(
             full_dataset, batch_size=1, shuffle=False, 
-            num_workers=0, pin_memory=False  # Reduced VRAM usage
+            num_workers=0,           # No multiprocessing (saves memory)
+            pin_memory=False,        # Don't pin to GPU memory
+            prefetch_factor=None     # Don't prefetch (saves memory)
         )
+        
+        print(f"DataLoader configured for memory efficiency:")
+        print(f"  • batch_size=1 (one patient per batch)")
+        print(f"  • num_workers=0 (no parallel loading)")
+        print(f"  • pin_memory=False (reduced GPU memory)")
+        print(f"  • Adaptive chunk_size per patient based on bag size")
+        print(f"  • GPU cache cleared after each patient\n")
+        sys.stdout.flush()
         
         # Load Model (Attention-MIL Architecture)
         model = get_model(model_name=MODEL_NAME, num_classes=2).to(DEVICE)
@@ -506,38 +553,79 @@ def full_visual_report(RUN_ID, MODEL_PATH, MODEL_NAME="convnext_tiny", fold_idx=
         print(f"Running Inference on {len(full_dataset)} Validation Patients...")
         print(f"(Using efficient MIL aggregation on full bags)")
     
-    # Run inference only if we didn't load precomputed predictions
-    if model is not None:
+    # Run inference only if we have a dataloader (i.e., not using precomputed predictions)
+    if val_loader is not None:
         with torch.no_grad():
             # Also need to track the index in the dataset
-            for dataset_idx, (bags, labels, p_ids) in enumerate(tqdm(val_loader, desc="Patient Inference", file=sys.stderr)):
+            for batch_idx, (bags, labels, p_ids) in enumerate(tqdm(val_loader, desc="Patient Inference", file=sys.stderr)):
                 # bags: (1, bag_size, C, H, W), labels: (1,), p_ids: (1,)
                 bags = bags.squeeze(0).to(DEVICE)  # (bag_size, C, H, W)
                 label = labels.item()
                 p_id = p_ids[0]
+                dataset_idx = batch_idx
                 
                 # Store dataset index for later reloading (not the bags themselves)
                 pat_to_dataset_idx[p_id] = dataset_idx
                 
-                # Process entire bag via forward_bag (which handles internal chunking with chunk_size=64)
-                # This preserves proper MIL aggregation across the entire bag
-                logits, _ = model.forward_bag(bags, chunk_size=64)
-                prob = torch.softmax(logits, dim=1)[0, 1].item()
+                # Adaptive chunk sizing based on bag size (balanced for GPU)
+                if bags.size(0) > 500:
+                    chunk_size = 128  # Large bags: use bigger chunks for speed
+                elif bags.size(0) > 200:
+                    chunk_size = 128  # Medium bags: standard chunks
+                else:
+                    chunk_size = 256  # Normal bags: maximum chunk size
                 
-                all_probs.append(prob)
-                all_labels.append(label)
-                patient_ids.append(p_id)
-                
-                patient_performance.append({
-                    "Patient": p_id,
-                    "Label": label,
-                    "Prob": prob,
-                    "Pred": 1 if prob >= 0.5 else 0
-                })
-                
-                # Free bag memory after processing
-                del bags
-                torch.cuda.empty_cache()
+                # Process entire bag via forward_bag with memory-optimized chunk size
+                try:
+                    logits, _ = model.forward_bag(bags, chunk_size=chunk_size)
+                    prob = torch.softmax(logits, dim=1)[0, 1].item()
+                    
+                    all_probs.append(prob)
+                    all_labels.append(label)
+                    patient_ids.append(p_id)
+                    
+                    patient_performance.append({
+                        "Patient": p_id,
+                        "Label": label,
+                        "Prob": prob,
+                        "Pred": 1 if prob >= 0.5 else 0
+                    })
+                except RuntimeError as e:
+                    if 'out of memory' in str(e).lower():
+                        # OOM recovery: clear GPU and retry with smaller chunks
+                        print(f"\n    ⚠ GPU memory full for patient {p_id} ({bags.size(0)} patches), clearing cache and retrying...")
+                        torch.cuda.empty_cache()
+                        torch.cuda.synchronize()
+                        
+                        # Retry with smaller chunks
+                        try:
+                            logits, _ = model.forward_bag(bags, chunk_size=64)
+                            prob = torch.softmax(logits, dim=1)[0, 1].item()
+                            
+                            all_probs.append(prob)
+                            all_labels.append(label)
+                            patient_ids.append(p_id)
+                            
+                            patient_performance.append({
+                                "Patient": p_id,
+                                "Label": label,
+                                "Prob": prob,
+                                "Pred": 1 if prob >= 0.5 else 0
+                            })
+                            print(f"    ✓ Recovered with chunk_size=64")
+                        except RuntimeError as e2:
+                            print(f"    ✗ Failed to process patient {p_id} even with smaller chunks: {e2}")
+                            print(f"    Skipping patient {p_id} to prevent crash")
+                    else:
+                        raise
+                finally:
+                    # Cleanup after each patient
+                    del bags
+                    torch.cuda.empty_cache()
+                    
+                    # Every 20 patients: run garbage collection
+                    if (batch_idx + 1) % 20 == 0:
+                        gc.collect()
     
     all_labels_bin = [1 if l != 0 else 0 for l in all_labels]
     
@@ -755,90 +843,267 @@ def full_visual_report(RUN_ID, MODEL_PATH, MODEL_NAME="convnext_tiny", fold_idx=
         # 5. Threshold Analysis (Performance across decision boundaries)
         plot_threshold_analysis(all_labels_bin, all_probs, os.path.join("results", f"{full_prefix}_threshold_analysis.png"))
     
-    # 6. Calibration Curve (ALWAYS generate - this is new and clinically important)
-    print(f"\n[New Visualization] Generating calibration curve (clinical calibration validation)...")
-    plot_calibration_curve(all_labels_bin, all_probs, os.path.join("results", f"{full_prefix}_calibration_curve.png"))
-    
-    # 7. Patient-Level Performance Dashboard (SKIP per-fold - ensemble dashboards generated separately)
-    # Per-fold dashboards not needed since ensemble/meta/hybrid dashboards provide better aggregated view
-    print(f"[Skipped] Per-fold performance dashboard (generated separately for ensembles)")
-    
-    # 8. Grad-CAM visualizations (ALWAYS generate - model explainability)
-    if not args.pipeline_mode:
-        print(f"\nGenerating Grad-CAM visualizations for top predictions...")
-    else:
-        print(f"\n[Skipped] Grad-CAM visualizations (generate separately if needed for detailed analysis)")
-    
-    # Print per-fold metrics summary
-    print(f"\n{'='*50}")
-    print(f"PER-FOLD METRICS SUMMARY: {full_prefix}")
-    print(f"{'='*50}")
-    print(f"Recall:       {fold_metrics['recall']:.4f} [CI: {bootstrap_ci['recall']['ci_lower']:.4f} - {bootstrap_ci['recall']['ci_upper']:.4f}]")
-    print(f"Precision:    {fold_metrics['precision']:.4f} [CI: {bootstrap_ci['precision']['ci_lower']:.4f} - {bootstrap_ci['precision']['ci_upper']:.4f}]")
-    print(f"Accuracy:     {fold_metrics['accuracy']:.4f} [CI: {bootstrap_ci['accuracy']['ci_lower']:.4f} - {bootstrap_ci['accuracy']['ci_upper']:.4f}]")
-    print(f"F1 Score:     {fold_metrics['f1']:.4f} [CI: {bootstrap_ci['f1']['ci_lower']:.4f} - {bootstrap_ci['f1']['ci_upper']:.4f}]")
-    print(f"Specificity:  {fold_metrics['specificity']:.4f} [CI: {bootstrap_ci['specificity']['ci_lower']:.4f} - {bootstrap_ci['specificity']['ci_upper']:.4f}]")
-    print(f"ROC-AUC:      {roc_auc:.4f}")
-    print(f"PR-AUC:       {pr_auc:.4f}")
-    print(f"TP: {fold_metrics['tp']} | FP: {fold_metrics['fp']} | FN: {fold_metrics['fn']} | TN: {fold_metrics['tn']}")
-    print(f"{'='*50}\n")
-
-    # --- Step 3: Grad-CAM for Top Suspicious Patients ---
-    if args.pipeline_mode:
-        print(f"[Pipeline Mode] Skipping Grad-CAM (can be regenerated separately for detailed analysis)")
-    else:
-        print(f"Generating Grad-CAM for top predictions and false negatives...")
-        # Pick Top 3 Positives and Top 3 False Negatives (if any)
-        top_positives = perf_df[perf_df['Label'] == 1].sort_values('Prob', ascending=False).head(3)
-        ghosts = perf_df[(perf_df['Label'] == 1) & (perf_df['Prob'] < 0.5)].sort_values('Prob', ascending=False).head(3)
+    # ========================================================================
+    # MAIN VISUALIZATIONS (Skip in --gradcam_only mode)
+    # ========================================================================
+    if not args.gradcam_only:
+        # 6. Calibration Curve (ALWAYS generate - this is new and clinically important)
+        print(f"\n[New Visualization] Generating calibration curve (clinical calibration validation)...")
+        plot_calibration_curve(all_labels_bin, all_probs, os.path.join("results", f"{full_prefix}_calibration_curve.png"))
         
-        targets = pd.concat([top_positives, ghosts])
+        # 7. Patient-Level Performance Dashboard (SKIP per-fold - ensemble dashboards generated separately)
+        # Per-fold dashboards not needed since ensemble/meta/hybrid dashboards provide better aggregated view
+        print(f"[Skipped] Per-fold performance dashboard (generated separately for ensembles)")
+        
+        # 8. Grad-CAM visualizations (ALWAYS generate - model explainability)
+        if not args.pipeline_mode:
+            print(f"\nGenerating Grad-CAM visualizations for top predictions...")
+        else:
+            print(f"\n[Skipped] Grad-CAM visualizations (generate separately if needed for detailed analysis)")
+        
+        # Print per-fold metrics summary
+        print(f"\n{'='*50}")
+        print(f"PER-FOLD METRICS SUMMARY: {full_prefix}")
+        print(f"{'='*50}")
+        print(f"Recall:       {fold_metrics['recall']:.4f} [CI: {bootstrap_ci['recall']['ci_lower']:.4f} - {bootstrap_ci['recall']['ci_upper']:.4f}]")
+        print(f"Precision:    {fold_metrics['precision']:.4f} [CI: {bootstrap_ci['precision']['ci_lower']:.4f} - {bootstrap_ci['precision']['ci_upper']:.4f}]")
+        print(f"Accuracy:     {fold_metrics['accuracy']:.4f} [CI: {bootstrap_ci['accuracy']['ci_lower']:.4f} - {bootstrap_ci['accuracy']['ci_upper']:.4f}]")
+        print(f"F1 Score:     {fold_metrics['f1']:.4f} [CI: {bootstrap_ci['f1']['ci_lower']:.4f} - {bootstrap_ci['f1']['ci_upper']:.4f}]")
+        print(f"Specificity:  {fold_metrics['specificity']:.4f} [CI: {bootstrap_ci['specificity']['ci_lower']:.4f} - {bootstrap_ci['specificity']['ci_upper']:.4f}]")
+        print(f"ROC-AUC:      {roc_auc:.4f}")
+        print(f"PR-AUC:       {pr_auc:.4f}")
+        print(f"TP: {fold_metrics['tp']} | FP: {fold_metrics['fp']} | FN: {fold_metrics['fn']} | TN: {fold_metrics['tn']}")
+        print(f"{'='*50}\n")
 
-        print(f"Generating Grad-CAM for {len(targets)} patients...")
-        for _, row in targets.iterrows():
-            p_id = row['Patient']
-            is_fn = row['Prob'] < 0.5
-            
-            # Reload bags from dataset instead of keeping in memory
-            if p_id not in pat_to_dataset_idx:
-                continue
-            
-            dataset_idx = pat_to_dataset_idx[p_id]
-            bags_tensor, _, _ = full_dataset[dataset_idx]
-            bags_tensor = bags_tensor.squeeze(0)  # (bag_size, C, H, W)
-            
-            # Get attention weights to pick the most important patches
-            all_attns = []
-            max_patches_to_check = min(bags_tensor.size(0), 100)  # Reduced from 500 for speed
-            
-            with torch.no_grad():
-                for i in range(max_patches_to_check):
-                    img = bags_tensor[i]
-                    img_t = img.unsqueeze(0).to(DEVICE)
-                    _, attn = model.forward_bag(img_t)
-                    all_attns.append((i, attn.item()))
-            
-            # Pick top 2 patches by attention
-            all_attns.sort(key=lambda x: x[1], reverse=True)
-            top_indices = [idx for idx, _ in all_attns[:2]]
-            
-            for rank, idx in enumerate(top_indices):
-                patch_img = bags_tensor[idx]
-                patch_t = patch_img.unsqueeze(0).to(DEVICE)
+    # --- Step 3: Grad-CAM for Top Suspicious Patients (ALWAYS in gradcam_only mode) ---
+    if args.pipeline_mode and not args.gradcam_only:
+        print(f"[Pipeline Mode] Skipping Grad-CAM (can be regenerated separately for detailed analysis)")
+        sys.stdout.flush()
+    else:
+        # Load model for Grad-CAM if not already loaded
+        if model is None:
+            if not os.path.exists(MODEL_PATH):
+                print(f"\n[Grad-CAM] Checkpoint not found: {MODEL_PATH}")
+                print(f"[Grad-CAM] Skipping Grad-CAM generation (checkpoint required)")
+                print(f"[Grad-CAM] But other visualizations (ROC, PR, confusion matrix) are available!\n")
+                sys.stdout.flush()
+                model = None  # Keep as None to skip Grad-CAM generation below
+            else:
+                print(f"\nLoading model for Grad-CAM generation...")
+                sys.stdout.flush()
+                model = get_model(model_name=MODEL_NAME, num_classes=2).to(DEVICE)
+                checkpoint = torch.load(MODEL_PATH, map_location=DEVICE)
                 
-                with torch.enable_grad():
-                    heatmap_batch, _ = generate_gradcam(model.backbone, patch_t)
+                # Handle both checkpoint formats (entire state_dict or dict wrapping it)
+                if 'model_state_dict' in checkpoint:
+                    state_dict = checkpoint['model_state_dict']
+                else:
+                    state_dict = checkpoint
+                    
+                # Remove 'module.' prefix if it exists (from DataParallel)
+                new_state_dict = {}
+                for k, v in state_dict.items():
+                    name = k[7:] if k.startswith('module.') else k
+                    new_state_dict[name] = v
                 
-                # Plot side-by-side visualization (original + heatmap overlay)
-                plot_gradcam_pair(
-                    patch_img, heatmap_batch[0, 0], p_id, rank, idx,
-                    all_attns[rank][1], row['Prob'],
-                    is_false_negative=is_fn, output_dir=OUTPUT_DIR
-                )
+                # Filter out SWA-specific keys that don't exist in the model
+                model_state_dict = model.state_dict()
+                filtered_state_dict = {k: v for k, v in new_state_dict.items() if k in model_state_dict}
+                
+                model.load_state_dict(filtered_state_dict)
+                model.eval()
+                print(f"✓ Model loaded for Grad-CAM\n")
+                sys.stdout.flush()
+        
+        # Generate Grad-CAM only if model was successfully loaded
+        if model is not None:
+            # Initialize dataset (loads metadata, not patches) and build patient→bag index cache
+            if full_dataset is None:
+                print(f"Initializing dataset for Grad-CAM...")
+                if dataset_type.lower() == "helicodataset":
+                    full_dataset = HPyloriDataset(
+                        HOLDOUT, PATIENT_CSV, PATCH_XLSX, 
+                        transform=VAL_TRANSFORM, bag_mode=True, 
+                        max_bag_size=1000, train=False
+                    )
+                elif dataset_type.lower() == "deephp":
+                    if DeepHPDataset is None:
+                        print("ERROR: DeepHP dataset module not available. Install dataset_deepHP.py")
+                        sys.exit(1)
+                    full_dataset = DeepHPDataset(
+                        DEEPHP_DATASET_ROOT, fold_idx=fold_idx, num_folds=num_folds,
+                        train=False, transform=VAL_TRANSFORM, bag_mode=True,
+                        max_bag_size=1000
+                    )
+                print(f"✓ Dataset ready: {len(full_dataset)} patients\n")
+                sys.stdout.flush()
             
-            # Free bag memory after processing
-            del bags_tensor
-            torch.cuda.empty_cache()
+            # Build lightweight patient→bag_index cache
+            cache_file = os.path.join("results", f"{full_prefix}_patient_bag_index.json")
+            patient_bag_map = build_patient_bag_index_cache(full_dataset, cache_file)
+            
+            print(f"Generating Grad-CAM for top predictions and false negatives...")
+            sys.stdout.flush()
+            # Pick Top 3 Positives and Top 3 False Negatives (if any)
+            top_positives = perf_df[perf_df['Label'] == 1].sort_values('Prob', ascending=False).head(3)
+            ghosts = perf_df[(perf_df['Label'] == 1) & (perf_df['Prob'] < 0.5)].sort_values('Prob', ascending=False).head(3)
+            
+            targets = pd.concat([top_positives, ghosts])
+
+            print(f"Generating Grad-CAM for {len(targets)} patients...", file=sys.stderr)
+            sys.stderr.flush()
+            
+            for _, row in targets.iterrows():
+                p_id = row['Patient']
+                is_fn = row['Prob'] < 0.5
+                print(f"  Processing patient {p_id} (prob={row['Prob']:.4f}, FN={is_fn})...", file=sys.stderr)
+                sys.stderr.flush()
+                
+                # Find dataset index for this patient using cached mapping (O(1) lookup)
+                if p_id not in patient_bag_map:
+                    print(f"    WARNING: Patient {p_id} not found in dataset, skipping", file=sys.stderr)
+                    sys.stderr.flush()
+                    continue
+                
+                dataset_idx = patient_bag_map[p_id]
+                
+                bags_tensor, _, _ = full_dataset[dataset_idx]
+                bags_tensor = bags_tensor.squeeze(0)  # (bag_size, C, H, W)
+                
+                print(f"    Loaded bag with {bags_tensor.size(0)} patches", file=sys.stderr)
+                sys.stderr.flush()
+                
+                # Find top 3 most significant patches using attention weights (matching train.py logic)
+                # This ensures consistency between training-generated and post-hoc Grad-CAM visualizations
+                all_indicators = []
+                
+                # Adaptive chunking based on bag size (balanced for GPU performance)
+                if bags_tensor.size(0) > 500:
+                    # Very large bags: use larger chunks for speed
+                    vram_bag_limit = 256
+                elif bags_tensor.size(0) > 200:
+                    # Large bags: use standard chunks
+                    vram_bag_limit = 256
+                else:
+                    # Normal bags: maximum chunk size
+                    vram_bag_limit = 512
+                
+                sys.stderr.flush()
+                
+                with torch.no_grad():
+                    # Process in chunks to avoid VRAM overflow on large bags
+                    total_chunks = (bags_tensor.size(0) + vram_bag_limit - 1) // vram_bag_limit
+                    for chunk_idx, start_idx in enumerate(range(0, bags_tensor.size(0), vram_bag_limit)):
+                        end_idx = min(start_idx + vram_bag_limit, bags_tensor.size(0))
+                        print(f"      Processing chunk {chunk_idx+1}/{total_chunks} (patches {start_idx}-{end_idx})...", end='', file=sys.stderr, flush=True)
+                        
+                        chunk = bags_tensor[start_idx:end_idx].to(DEVICE)
+                        chunk = det_preprocess_batch(chunk, training=False)
+                        
+                        # Forward through model to get attention weights
+                        try:
+                            if hasattr(model, 'forward_bag'):
+                                # Use forward_bag to get attention weights if available
+                                _, indicator = model.forward_bag(chunk)
+                                all_indicators.append(indicator.cpu())
+                            else:
+                                # Fallback: use patch-level class logits for max-pooling models
+                                logits = model(chunk)
+                                indicator = logits[:, 1:2].transpose(0, 1)  # (1, N) - Class 1 confidence
+                                all_indicators.append(indicator.cpu())
+                            print(" ✓", file=sys.stderr, flush=True)
+                        except RuntimeError as e:
+                            if 'out of memory' in str(e).lower():
+                                print(f" OOM! Retrying with 128-patch chunks...", file=sys.stderr)
+                                torch.cuda.empty_cache()
+                                # Retry with 128-patch chunks instead of original 256
+                                for retry_idx in range(start_idx, end_idx, 128):
+                                    retry_end = min(retry_idx + 128, end_idx)
+                                    retry_chunk = bags_tensor[retry_idx:retry_end].to(DEVICE)
+                                    retry_chunk = det_preprocess_batch(retry_chunk, training=False)
+                                    if hasattr(model, 'forward_bag'):
+                                        _, indicator = model.forward_bag(retry_chunk)
+                                        all_indicators.append(indicator.cpu())
+                                    else:
+                                        logits = model(retry_chunk)
+                                        indicator = logits[:, 1:2].transpose(0, 1)
+                                        all_indicators.append(indicator.cpu())
+                                    del retry_chunk
+                                    torch.cuda.empty_cache()
+                                print(" ✓ (recovered)", file=sys.stderr, flush=True)
+                            else:
+                                print(f" ERROR: {e}", file=sys.stderr, flush=True)
+                                raise
+                        finally:
+                            # Aggressive cleanup after each chunk
+                            del chunk
+                            torch.cuda.empty_cache()
+                            
+                            # Every 20 chunks, sync GPU and free system memory
+                            if (chunk_idx + 1) % 20 == 0:
+                                torch.cuda.synchronize()
+                                gc.collect()
+                
+                # Skip if no indicators were computed (shouldn't happen)
+                if len(all_indicators) == 0:
+                    print(f"    WARNING: No indicators computed, skipping", file=sys.stderr)
+                    sys.stderr.flush()
+                    continue
+                
+                indicators = torch.cat(all_indicators, dim=1).squeeze(0)  # (Bag_Size,)
+                
+                # Select top 3 most significant patches (or fewer if bag is small)
+                top_patch_vals, patch_indices = torch.topk(indicators, k=min(3, bags_tensor.size(0)))
+                
+                # Cleanup attention computation
+                del all_indicators, indicators
+                torch.cuda.empty_cache()
+                
+                print(f"      Generating Grad-CAM for top {len(patch_indices)} patches...", file=sys.stderr)
+                sys.stderr.flush()
+                
+                # Generate Grad-CAM for selected patches
+                for rank_idx, (rank, idx) in enumerate(zip(range(len(patch_indices)), patch_indices)):
+                    try:
+                        patch_img = bags_tensor[idx]
+                        patch_t = patch_img.unsqueeze(0).to(DEVICE)
+                        
+                        print(f"        [{rank_idx+1}/{len(patch_indices)}] Patch {idx}...", end='', file=sys.stderr, flush=True)
+                        
+                        with torch.enable_grad():
+                            heatmap_batch, _ = generate_gradcam(model.backbone, patch_t)
+                        
+                        # Plot side-by-side visualization (original + heatmap overlay)
+                        plot_gradcam_pair(
+                            patch_img, heatmap_batch[0, 0], p_id, rank, idx,
+                            top_patch_vals[rank].item(),  # Actual attention weight from topk selection
+                            row['Prob'],
+                            is_false_negative=is_fn, output_dir=OUTPUT_DIR
+                        )
+                        print(" ✓", file=sys.stderr, flush=True)
+                        del heatmap_batch
+                        torch.cuda.empty_cache()
+                    except RuntimeError as e:
+                        if 'out of memory' in str(e).lower():
+                            print(" OOM!", file=sys.stderr, flush=True)
+                            print(f"        Clearing GPU and skipping patch {idx}...", file=sys.stderr)
+                            torch.cuda.empty_cache()
+                            torch.cuda.synchronize()
+                        else:
+                            print(f" ERROR: {e}", file=sys.stderr, flush=True)
+                    finally:
+                        # Cleanup after each patch
+                        if 'patch_img' in locals():
+                            del patch_img
+                        if 'patch_t' in locals():
+                            del patch_t
+                
+                # Free memory after patient
+                del bags_tensor, top_patch_vals, patch_indices
+                torch.cuda.empty_cache()
+                print(f"  ✓ Completed patient {p_id}", file=sys.stderr)
+                print(f"  {'-'*60}", file=sys.stderr, flush=True)
+                sys.stderr.flush()
 
     # Generate ensemble performance dashboards (only once at the end)
     def generate_ensemble_dashboard(results_csv, bootstrap_ci_csv, dashboard_name, output_prefix):
@@ -1021,6 +1286,137 @@ def get_latest_run_id():
         return sorted_ids[-1]
     return None
 
+def generate_cross_fold_dashboards(run_id, model_name, num_folds=5):
+    """
+    Generate cross-fold aggregated dashboards (confusion matrices, ROC/PR curves)
+    
+    Args:
+        run_id: Run ID (e.g., "31")
+        model_name: Model architecture (e.g., "convnext_tiny")
+        num_folds: Number of folds (default: 5)
+    """
+    import glob
+    
+    print(f"\nGenerating Cross-Fold Aggregated Dashboards...")
+    
+    # Load predictions and labels from all folds
+    fold_data_dict = {}
+    folds_found = 0
+    
+    for fold_idx in range(num_folds):
+        # Try to find holdout_consensus.csv (cached predictions from training)
+        pred_pattern = f"results/{run_id}_*_*_f{fold_idx}_{model_name}_holdout_consensus.csv"
+        pred_files = glob.glob(pred_pattern)
+        
+        if pred_files:
+            pred_file = pred_files[0]
+            try:
+                df = pd.read_csv(pred_file)
+                
+                # Ensure required columns exist
+                if all(col in df.columns for col in ['Actual', 'Bag_Mean_Prob']):
+                    labels = df['Actual'].values.astype(int)
+                    probs = df['Bag_Mean_Prob'].values
+                    preds = (probs >= 0.5).astype(int)
+                    
+                    fold_data_dict[fold_idx] = {
+                        'labels': labels,
+                        'probabilities': probs,
+                        'predictions': preds
+                    }
+                    folds_found += 1
+                    print(f"  ✓ Fold {fold_idx}: Loaded {len(df)} predictions")
+            except Exception as e:
+                print(f"  ⚠ Fold {fold_idx}: Failed to load - {e}")
+    
+    if folds_found < 2:
+        print(f"  INFO: Not enough folds found ({folds_found}). Need at least 2 for cross-fold dashboards.")
+        return
+    
+    # Generate cross-fold confusion matrices dashboard
+    try:
+        output_path = f"results/cross_fold_confusion_matrices_dashboard_{run_id}_{model_name}.png"
+        plot_cross_fold_confusion_matrices_dashboard(
+            fold_data_dict,
+            output_path=output_path,
+            figsize=(16, 12)
+        )
+        print(f"  ✓ Cross-fold confusion matrices dashboard saved")
+    except Exception as e:
+        print(f"  ⚠ Cross-fold confusion matrices skipped: {e}")
+    
+    # Generate cross-fold PR curves dashboard
+    try:
+        output_path = f"results/cross_fold_pr_curves_dashboard_{run_id}_{model_name}.png"
+        plot_cross_fold_pr_curves_dashboard(
+            fold_data_dict,
+            output_path=output_path,
+            figsize=(16, 12)
+        )
+        print(f"  ✓ Cross-fold PR curves dashboard saved")
+    except Exception as e:
+        print(f"  ⚠ Cross-fold PR curves skipped: {e}")
+    
+    # Generate combined fold ROC curves
+    try:
+        output_path = f"results/cross_fold_roc_curves_{run_id}_{model_name}.png"
+        plot_combined_fold_roc_curves(
+            fold_data_dict,
+            output_path=output_path,
+            figsize=(12, 9)
+        )
+        print(f"  ✓ Combined fold ROC curves saved")
+    except Exception as e:
+        print(f"  ⚠ Combined ROC curves skipped: {e}")
+
+
+def build_patient_bag_index_cache(dataset, cache_file):
+    """
+    Build and cache a lightweight mapping of patient_id -> bag_index
+    without loading all patch data into memory.
+    
+    Args:
+        dataset: HPyloriDataset or similar with .bags attribute
+        cache_file: Path to save JSON cache
+        
+    Returns:
+        Dict mapping patient_id -> bag_index
+    """
+    import json
+    
+    # Quick check: does cache already exist and is valid?
+    if os.path.exists(cache_file):
+        try:
+            with open(cache_file, 'r') as f:
+                cache = json.load(f)
+                if len(cache) > 0:
+                    print(f"  ✓ Using cached patient→bag index ({len(cache)} patients)")
+                    return cache
+        except Exception as e:
+            print(f"  Cache load failed, rebuilding: {e}")
+    
+    # Build mapping from dataset metadata (doesn't load image data)
+    print(f"  Building patient→bag index...")
+    patient_bag_map = {}
+    
+    if hasattr(dataset, 'bags') and dataset.bags:
+        for idx, bag_tuple in enumerate(dataset.bags):
+            # bag_tuple format: (paths, label, patient_id, pos_samples)
+            _, _, patient_id, _ = bag_tuple
+            patient_bag_map[patient_id] = idx
+    
+    # Save to cache
+    try:
+        os.makedirs(os.path.dirname(cache_file) or '.', exist_ok=True)
+        with open(cache_file, 'w') as f:
+            json.dump(patient_bag_map, f)
+        print(f"  ✓ Cached {len(patient_bag_map)} patient→bag mappings")
+    except Exception as e:
+        print(f"  Warning: Could not save cache - {e}")
+    
+    return patient_bag_map
+
+
 def find_model_path(run_id, fold, model_name):
     """Find model file for given run_id and fold. Uses metadata to pick the correct model.
     If specified fold doesn't exist, searches for any available fold."""
@@ -1052,17 +1448,21 @@ def find_model_path(run_id, fold, model_name):
             with open(metadata_files[0], 'r') as f:
                 metadata = json.load(f)
                 if metadata.get("use_swa") and swa_models:
+                    print(f"  [Model Selection] Using SWA model (from metadata: use_swa=True)")
                     return swa_models[0], fold
                 elif not metadata.get("use_swa") and regular_models:
+                    print(f"  [Model Selection] Using best model (from metadata: use_swa=False)")
                     return regular_models[0], fold
-        except (json.JSONDecodeError, IOError):
-            pass
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"  [Model Selection] Metadata file found but unreadable ({e}). Using fallback logic.")
     
-    # Models found for specified fold
-    if swa_models:
-        return swa_models[0], fold
-    elif regular_models:
+    # Fallback: Prefer best model over SWA (safer default, matching training's best model)
+    if regular_models:
+        print(f"  [Model Selection] No metadata found. Using best model (safer fallback).")
         return regular_models[0], fold
+    elif swa_models:
+        print(f"  [Model Selection] No best model found. Using SWA model (fallback).")
+        return swa_models[0], fold
     
     # If specified fold not found, search for any available fold for this run_id
     fold_pattern = re.compile(rf"^{run_id}_.*_f(\d+)_{model_name}_swa_model_brain\.pth$")
@@ -1090,7 +1490,7 @@ if __name__ == "__main__":
     parser.add_argument("--run_id", type=str, default=None, help="Run ID (e.g., 313). Defaults to latest run.")
     parser.add_argument("--fold", type=int, default=0, help="Fold index (default: 0)")
     parser.add_argument("--num_folds", type=int, default=5, help="Total number of folds")
-    parser.add_argument("--model_name", type=str, default="convnext_tiny", choices=["resnet50", "convnext_tiny"],
+    parser.add_argument("--model_name", type=str, default="convnext_tiny", choices=["resnet50", "convnext_tiny", "convnext_small"],
                          help="Backbone architecture")
     parser.add_argument("--dataset", type=str, default="helicodataset", 
                        choices=["helicodataset", "deephp", "both"],
@@ -1129,6 +1529,9 @@ if __name__ == "__main__":
     parser.add_argument("--transfer_learning_comparison_only", action="store_true",
                        help="FAST MODE: Only generate transfer learning comparison visualizations (performance + learning curves). "
                             "Skips all other visualizations. Requires --compare_baseline.")
+    parser.add_argument("--gradcam_only", action="store_true",
+                       help="FAST MODE: Only generate Grad-CAM visualizations for misclassified and suspicious samples. "
+                            "Skips all other visualizations. Useful for detailed model interpretation.")
     parser.add_argument("--combine_learning_curves", action="store_true",
                        help="Combine multiple learning curve images into a single composite visualization. "
                             "Requires --pretraining_run and --dataset_run. Layout controlled by --learning_curves_layout.")
@@ -1269,6 +1672,17 @@ if __name__ == "__main__":
         sys.exit(0)
     
     # ========================================================================
+    # ========================================================================
+    # FAST MODE: Grad-CAM Only (Skip All Other Visualizations)
+    # ========================================================================
+    if args.gradcam_only:
+        print(f"\n{'='*80}")
+        print(f"FAST MODE: Grad-CAM Visualization Only")
+        print(f"Run: {run_id} | Model: {args.model_name} | Fold: {args.fold}")
+        print(f"Skipping all other visualizations")
+        print(f"{'='*80}\n")
+        args.pipeline_mode = False  # Force Grad-CAM generation
+    
     # COMBINE LEARNING CURVES MODE: Stitch learning curve images together
     # ========================================================================
     if args.combine_learning_curves:
@@ -1338,122 +1752,137 @@ if __name__ == "__main__":
             print("Error: No run ID provided and no models found in results directory")
             sys.exit(1)
         print(f"Using latest run: {run_id}")
-        print(f"\n{'='*80}")
-        print(f"FAST MODE: Model Comparison Only")
-        print(f"Generating model complexity analysis for: {run_id}")
-        print(f"Skipping all other visualizations")
-        print(f"{'='*80}\n")
         
-        try:
-            # Load actual accuracies for all 4 models from experiments
-            model_accuracies = {}  # model_name -> (accuracy, num_folds)
-            model_names = ['resnet50', 'convnext_tiny', 'convnext_small', 'convnext_base']
+        # Skip Model Comparison mode if in gradcam_only or combine_learning_curves mode
+        if args.gradcam_only:
+            print("Entering Grad-CAM visualization pipeline...")
+        else:
+            print(f"\n{'='*80}")
+            print(f"FAST MODE: Model Comparison Only")
+            print(f"Generating model complexity analysis for: {run_id}")
+            print(f"Skipping all other visualizations")
+            print(f"{'='*80}\n")
             
-            for model_name in model_names:
-                fold_accs = []
-                for fold_idx in range(args.num_folds):
-                    eval_report = f"results/{run_id}_{run_id}_f{fold_idx}_{model_name}_evaluation_report.csv"
-                    if os.path.exists(eval_report):
-                        df = pd.read_csv(eval_report)
+            try:
+                # Load actual accuracies for all 4 models from experiments
+                model_accuracies = {}  # model_name -> (accuracy, num_folds)
+                model_names = ['resnet50', 'convnext_tiny', 'convnext_small', 'convnext_base']
+                
+                for model_name in model_names:
+                    fold_accs = []
+                    for fold_idx in range(args.num_folds):
+                        eval_report = f"results/{run_id}_{run_id}_f{fold_idx}_{model_name}_evaluation_report.csv"
+                        if os.path.exists(eval_report):
+                            df = pd.read_csv(eval_report)
                         if 'accuracy' in df.columns:
                             fold_accs.append(df['accuracy'].values[0])
+                    
+                    if fold_accs:
+                        avg_acc = np.mean(fold_accs)
+                        model_accuracies[model_name] = (avg_acc, len(fold_accs))
+                        print(f"  ✓ Loaded actual {model_name} accuracy from {len(fold_accs)} folds: {avg_acc:.4f}")
                 
-                if fold_accs:
-                    avg_acc = np.mean(fold_accs)
-                    model_accuracies[model_name] = (avg_acc, len(fold_accs))
-                    print(f"  ✓ Loaded actual {model_name} accuracy from {len(fold_accs)} folds: {avg_acc:.4f}")
+                # Load inference speed for ConvNeXt-Tiny (reference model)
+                actual_inference_speed = None
+                ct_fold_count = model_accuracies.get('convnext_tiny', (None, 0))[1]
+                metadata_files = []
+                for fold_idx in range(args.num_folds):
+                    metadata_file = f"results/{run_id}_f{fold_idx}_convnext_tiny_model_selection.json"
+                    if os.path.exists(metadata_file):
+                        metadata_files.append(metadata_file)
+                
+                if metadata_files:
+                    try:
+                        import json
+                        speeds = []
+                        for mf in metadata_files:
+                            with open(mf, 'r') as f:
+                                metadata = json.load(f)
+                                speed = metadata.get('inference_speed_patches_per_sec')
+                                if speed:
+                                    speeds.append(speed)
+                        if speeds:
+                            actual_inference_speed = np.mean(speeds)
+                            print(f"  ✓ Loaded actual inference speed: {actual_inference_speed:.0f} patches/sec")
+                    except:
+                        pass
+                
+                if not actual_inference_speed:
+                    actual_inference_speed = 240.0
+                    print(f"  ! Using benchmark inference speed for ConvNeXt-Tiny: {actual_inference_speed:.0f} patches/sec")
+                
+                # Build model comparison data with all measured values
+                ct_acc, ct_folds = model_accuracies.get('convnext_tiny', (0.8900, 0))
+                r50_acc, r50_folds = model_accuracies.get('resnet50', (0.801, 0))
+                cs_acc, cs_folds = model_accuracies.get('convnext_small', (0.830, 0))
+                cb_acc, cb_folds = model_accuracies.get('convnext_base', (0.849, 0))
+                
+                model_comparison_data = [
+                    {
+                        'name': 'ResNet50',
+                        'parameters': 25.6,
+                        'accuracy': r50_acc,
+                        'inference_speed': 220.0,
+                        'source': f'Measured ({r50_folds} folds)' if r50_folds > 0 else 'ImageNet benchmark',
+                        'is_selected': False
+                    },
+                    {
+                        'name': 'ConvNeXt-Tiny',
+                        'parameters': 28.6,
+                        'accuracy': ct_acc,
+                        'inference_speed': actual_inference_speed,
+                        'source': f'Measured ({ct_folds} folds)' if ct_folds > 0 else 'Estimate',
+                        'is_selected': True
+                    },
+                    {
+                        'name': 'ConvNeXt-Small',
+                        'parameters': 50.2,
+                        'accuracy': cs_acc,
+                        'inference_speed': 155.0,
+                        'source': f'Measured ({cs_folds} folds)' if cs_folds > 0 else 'ImageNet benchmark',
+                        'is_selected': False
+                    },
+                    {
+                        'name': 'ConvNeXt-Base',
+                        'parameters': 88.6,
+                        'accuracy': cb_acc,
+                        'inference_speed': 95.0,
+                        'source': f'Measured ({cb_folds} folds)' if cb_folds > 0 else 'ImageNet benchmark',
+                        'is_selected': False
+                    }
+                ]
+                
+                print(f"\n  Model Comparison Data:")
+                for model in model_comparison_data:
+                    mark = " ✓" if model['is_selected'] else ""
+                    print(f"    {model['name']:20s} | {model['parameters']:6.1f}M params | {model['accuracy']:.4f} acc | {model['inference_speed']:5.0f} p/s{mark}")
+                    print(f"      Source: {model['source']}")
+                
+                # Only generate plot if multiple models have measured data
+                models_with_measured_data = sum(1 for m in model_comparison_data if 'Measured' in m['source'])
+                
+                if models_with_measured_data > 1:
+                    plot_model_complexity_analysis(
+                        model_comparison_data,
+                        output_path=f"results/model_complexity_analysis_{run_id}.png",
+                        figsize=(14, 6)
+                    )
+                    print(f"\n✓ Model comparison visualization complete!")
+                else:
+                    print(f"\n  ! Skipping model comparison plot (only {models_with_measured_data} model(s) with measured data)")
+            except Exception as e:
+                print(f"ERROR: Failed to generate model comparison: {e}")
+                import traceback
+                traceback.print_exc()
             
-            # Load inference speed for ConvNeXt-Tiny (reference model)
-            actual_inference_speed = None
-            ct_fold_count = model_accuracies.get('convnext_tiny', (None, 0))[1]
-            metadata_files = []
-            for fold_idx in range(args.num_folds):
-                metadata_file = f"results/{run_id}_f{fold_idx}_convnext_tiny_model_selection.json"
-                if os.path.exists(metadata_file):
-                    metadata_files.append(metadata_file)
-            
-            if metadata_files:
-                try:
-                    import json
-                    speeds = []
-                    for mf in metadata_files:
-                        with open(mf, 'r') as f:
-                            metadata = json.load(f)
-                            speed = metadata.get('inference_speed_patches_per_sec')
-                            if speed:
-                                speeds.append(speed)
-                    if speeds:
-                        actual_inference_speed = np.mean(speeds)
-                        print(f"  ✓ Loaded actual inference speed: {actual_inference_speed:.0f} patches/sec")
-                except:
-                    pass
-            
-            if not actual_inference_speed:
-                actual_inference_speed = 240.0
-                print(f"  ! Using benchmark inference speed for ConvNeXt-Tiny: {actual_inference_speed:.0f} patches/sec")
-            
-            # Build model comparison data with all measured values
-            ct_acc, ct_folds = model_accuracies.get('convnext_tiny', (0.8900, 0))
-            r50_acc, r50_folds = model_accuracies.get('resnet50', (0.801, 0))
-            cs_acc, cs_folds = model_accuracies.get('convnext_small', (0.830, 0))
-            cb_acc, cb_folds = model_accuracies.get('convnext_base', (0.849, 0))
-            
-            model_comparison_data = [
-                {
-                    'name': 'ResNet50',
-                    'parameters': 25.6,
-                    'accuracy': r50_acc,
-                    'inference_speed': 220.0,
-                    'source': f'Measured ({r50_folds} folds)' if r50_folds > 0 else 'ImageNet benchmark',
-                    'is_selected': False
-                },
-                {
-                    'name': 'ConvNeXt-Tiny',
-                    'parameters': 28.6,
-                    'accuracy': ct_acc,
-                    'inference_speed': actual_inference_speed,
-                    'source': f'Measured ({ct_folds} folds)' if ct_folds > 0 else 'Estimate',
-                    'is_selected': True
-                },
-                {
-                    'name': 'ConvNeXt-Small',
-                    'parameters': 50.2,
-                    'accuracy': cs_acc,
-                    'inference_speed': 155.0,
-                    'source': f'Measured ({cs_folds} folds)' if cs_folds > 0 else 'ImageNet benchmark',
-                    'is_selected': False
-                },
-                {
-                    'name': 'ConvNeXt-Base',
-                    'parameters': 88.6,
-                    'accuracy': cb_acc,
-                    'inference_speed': 95.0,
-                    'source': f'Measured ({cb_folds} folds)' if cb_folds > 0 else 'ImageNet benchmark',
-                    'is_selected': False
-                }
-            ]
-            
-            print(f"\n  Model Comparison Data:")
-            for model in model_comparison_data:
-                mark = " ✓" if model['is_selected'] else ""
-                print(f"    {model['name']:20s} | {model['parameters']:6.1f}M params | {model['accuracy']:.4f} acc | {model['inference_speed']:5.0f} p/s{mark}")
-                print(f"      Source: {model['source']}")
-            
-            plot_model_complexity_analysis(
-                model_comparison_data,
-                output_path=f"results/model_complexity_analysis_{run_id}.png",
-                figsize=(14, 6)
-            )
-            print(f"\n✓ Model comparison visualization complete!")
-        except Exception as e:
-            print(f"ERROR: Failed to generate model comparison: {e}")
-            import traceback
-            traceback.print_exc()
-        
-        print(f"\n{'='*80}")
-        print(f"Fast mode complete!")
-        print(f"{'='*80}")
-        sys.exit(0)
+            print(f"\n{'='*80}")
+            print(f"Fast mode complete!")
+            print(f"{'='*80}")
+            sys.exit(0)
+    
+    # ========================================================================
+    # MAIN VISUALIZATION CODE (Skip non-Grad-CAM visualizations if --gradcam_only)
+    # ========================================================================
     
     # Pipeline mode: Automatically enable advanced analyses for comprehensive lightweight reporting
     if args.pipeline_mode:
@@ -1484,9 +1913,10 @@ if __name__ == "__main__":
         else:
             datasets_to_process = [args.dataset.lower()]
         
-        # PIPELINE MODE: Process all folds to generate aggregate analyses
-        if args.pipeline_mode:
-            print(f"\n[Pipeline Mode] Processing all {args.num_folds} folds for aggregate visualizations")
+        # PIPELINE MODE or GRADCAM_ONLY: Process all folds for comprehensive analysis
+        if args.pipeline_mode or args.gradcam_only:
+            fold_mode_label = "Grad-CAM Only" if args.gradcam_only else "Pipeline"
+            print(f"\n[{fold_mode_label} Mode] Processing all {args.num_folds} folds for comprehensive visualizations")
             for fold in range(args.num_folds):
                 fold_model_path, fold_actual = find_model_path(run_id, fold, args.model_name)
                 if fold_model_path is not None and os.path.exists(fold_model_path):
@@ -1505,6 +1935,13 @@ if __name__ == "__main__":
             print(f"\n{'='*80}")
             print(f"AGGREGATE ANALYSES: Cross-Fold Summaries")
             print(f"{'='*80}\n")
+            
+            # Generate cross-fold aggregated dashboards (always in pipeline mode)
+            try:
+                generate_cross_fold_dashboards(run_id, args.model_name, args.num_folds)
+                print(f"\n✓ Cross-fold dashboards completed\n")
+            except Exception as e:
+                print(f"\n⚠ Cross-fold dashboards skipped: {e}\n")
             
             # Generate CV stability across all folds
             if args.include_cv_stability:
@@ -2053,11 +2490,17 @@ if __name__ == "__main__":
                 print(f"    {model['name']:20s} | {model['parameters']:6.1f}M params | {model['accuracy']:.4f} acc | {model['inference_speed']:5.0f} p/s{mark}")
                 print(f"      Source: {model['source']}")
             
-            plot_model_complexity_analysis(
-                model_comparison_data,
-                output_path=f"results/model_complexity_analysis_{run_id}.png",
-                figsize=(14, 6)
-            )
+            # Only generate plot if multiple models have measured data
+            models_with_measured_data = sum(1 for m in model_comparison_data if 'Measured' in m['source'])
+            
+            if models_with_measured_data > 1:
+                plot_model_complexity_analysis(
+                    model_comparison_data,
+                    output_path=f"results/model_complexity_analysis_{run_id}.png",
+                    figsize=(14, 6)
+                )
+            else:
+                print(f"\n  ! Skipping model complexity plot (only {models_with_measured_data} model(s) with measured data)")
         except Exception as e:
             print(f"WARNING: Error generating model complexity analysis: {e}")
 

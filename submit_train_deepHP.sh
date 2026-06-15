@@ -316,7 +316,7 @@ do
         --error=results/slurm_deephp_error_f${FOLD}_%j.txt \
         --ntasks=1 \
         --cpus-per-task=4 \
-        --gres=shard:l40s:12000 \
+        --gres=gpu:l40s:1 --gres=shard:l40s:12000 \
         --mem=20G \
         --time=36:00:00 \
         <<TRAIN_EOF
@@ -340,6 +340,9 @@ GAMMA=$GAMMA
 ITER=$ITER
 
 cd /home/tkeating/model/H.-Pylori-Contamination-Detection
+
+# Force all folds to use GPU 0 for memory consolidation
+export CUDA_VISIBLE_DEVICES=0
 
 # Get scratch directory at runtime from config
 DEEPHP_SCRATCH=\$(python3 -c "from config import DEEPHP_SCRATCH_ROOT; print(DEEPHP_SCRATCH_ROOT)")
@@ -426,7 +429,8 @@ SUMMARY_JOB_OUT=$(sbatch --dependency=$DEPENDENCY_STRING \
     -p pg1tfg12 \
     --time=0-00:30 \
     --mem=16G \
-    --cpus-per-task=4 \
+    --cpus-per-task=1 \
+    --gres=gpu:l40s:1 --gres=shard:l40s:4000 \
     --job-name=deephp_summary \
     --output=results/slurm_deephp_summary_%j.txt \
     --error=results/slurm_deephp_summary_error_%j.txt \

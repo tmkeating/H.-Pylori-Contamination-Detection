@@ -2367,3 +2367,273 @@ def combine_learning_curves(image_paths, labels, output_path, layout='horizontal
     composite.save(output_path, dpi=(150, 150))
     print(f"  ✓ Combined learning curves saved: {output_path}")
     return output_path
+
+
+# ============================================================================
+# CROSS-FOLD DASHBOARDS: Combined Confusion Matrices & PR Curves
+# ============================================================================
+
+def plot_cross_fold_confusion_matrices_dashboard(fold_data_dict, output_path, figsize=(16, 10)):
+    """
+    Create a dashboard with confusion matrices for all 5 folds side-by-side.
+    
+    Shows individual fold performance without averaging, enabling assessment of
+    cross-fold consistency and identification of problematic folds.
+    
+    Args:
+        fold_data_dict: Dict mapping fold_idx (0-4) to dict with 'labels' and 'predictions'
+                       Example: {
+                           0: {'labels': [...], 'predictions': [...]},
+                           1: {'labels': [...], 'predictions': [...]},
+                           ...
+                       }
+        output_path: Path to save PNG file
+        figsize: Figure size (width, height)
+    
+    Output: 5-panel dashboard with individual fold confusion matrices
+    """
+    # Extract folds in order
+    fold_indices = sorted(fold_data_dict.keys())
+    num_folds = len(fold_indices)
+    
+    # Create figure with subplots: 2 rows, 3 columns (for 5 folds max)
+    n_cols = min(3, num_folds)
+    n_rows = (num_folds + n_cols - 1) // n_cols
+    
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=figsize)
+    if num_folds == 1:
+        axes = np.array([[axes]])
+    elif n_rows == 1 or n_cols == 1:
+        axes = axes.reshape(n_rows, n_cols)
+    
+    # Collect metrics for summary
+    all_accuracies = []
+    all_sensitivities = []
+    all_specificities = []
+    
+    # Create confusion matrix for each fold
+    for idx, fold_idx in enumerate(fold_indices):
+        row = idx // n_cols
+        col = idx % n_cols
+        ax = axes[row, col] if n_rows > 1 else axes[col] if n_cols > 1 else axes[0, 0]
+        
+        fold_data = fold_data_dict[fold_idx]
+        labels = fold_data['labels']
+        predictions = fold_data['predictions']
+        
+        # Compute confusion matrix
+        cm = confusion_matrix(labels, predictions)
+        tn, fp, fn, tp = cm.ravel()
+        
+        # Compute metrics
+        accuracy = (tp + tn) / (tp + tn + fp + fn)
+        sensitivity = tp / (tp + fn) if (tp + fn) > 0 else 0
+        specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
+        
+        all_accuracies.append(accuracy)
+        all_sensitivities.append(sensitivity)
+        all_specificities.append(specificity)
+        
+        # Plot confusion matrix
+        disp = ConfusionMatrixDisplay(cm, display_labels=['Negative', 'Positive'])
+        disp.plot(cmap='Blues', ax=ax, values_format='d')
+        
+        # Add metrics to title
+        ax.set_title(f'Fold {fold_idx}\nAcc: {accuracy:.4f} | Sen: {sensitivity:.4f} | Spe: {specificity:.4f}',
+                    fontsize=11, fontweight='bold')
+    
+    # Hide unused subplots
+    for idx in range(num_folds, n_rows * n_cols):
+        row = idx // n_cols
+        col = idx % n_cols
+        ax = axes[row, col] if n_rows > 1 else axes[col]
+        ax.axis('off')
+    
+    # Add summary metrics text box
+    summary_text = f"""
+    CROSS-FOLD SUMMARY
+    
+    Mean Accuracy:     {np.mean(all_accuracies):.4f} ± {np.std(all_accuracies):.4f}
+    Mean Sensitivity:  {np.mean(all_sensitivities):.4f} ± {np.std(all_sensitivities):.4f}
+    Mean Specificity:  {np.mean(all_specificities):.4f} ± {np.std(all_specificities):.4f}
+    
+    Stability Assessment:
+    {'✓ STABLE' if np.std(all_accuracies) < 0.05 else '⚠ VARIABLE'} (Accuracy std: {np.std(all_accuracies):.4f})
+    """
+    
+    fig.text(0.02, 0.02, summary_text, fontsize=10, verticalalignment='bottom',
+            bbox=dict(boxstyle='round', facecolor='lightyellow', alpha=0.8))
+    
+    fig.suptitle('Cross-Fold Confusion Matrices Dashboard\n(Individual Fold Performance - No Averaging)',
+                fontsize=14, fontweight='bold', y=0.98)
+    
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches='tight')
+    plt.close()
+    
+    print(f"  ✓ Cross-fold confusion matrices dashboard saved: {output_path}")
+    for fold_idx, acc, sen, spe in zip(fold_indices, all_accuracies, all_sensitivities, all_specificities):
+        print(f"    - Fold {fold_idx}: Accuracy={acc:.4f}, Sensitivity={sen:.4f}, Specificity={spe:.4f}")
+
+
+def plot_cross_fold_pr_curves_dashboard(fold_data_dict, output_path, figsize=(16, 10)):
+    """
+    Create a dashboard with PR (Precision-Recall) curves for all 5 folds.
+    
+    Shows individual fold PR curve performance without averaging, enabling assessment of
+    cross-fold consistency in the precision-recall trade-off.
+    
+    Args:
+        fold_data_dict: Dict mapping fold_idx (0-4) to dict with 'labels' and 'probabilities'
+                       Example: {
+                           0: {'labels': [...], 'probabilities': [...]},
+                           1: {'labels': [...], 'probabilities': [...]},
+                           ...
+                       }
+        output_path: Path to save PNG file
+        figsize: Figure size (width, height)
+    
+    Output: 5-panel dashboard with individual fold PR curves + summary panel
+    """
+    # Extract folds in order
+    fold_indices = sorted(fold_data_dict.keys())
+    num_folds = len(fold_indices)
+    
+    # Create figure: 2x3 for 5 folds + summary
+    fig, axes = plt.subplots(2, 3, figsize=figsize)
+    
+    # Collect metrics for summary
+    all_ap_scores = []
+    
+    # Create PR curve for each fold
+    for idx, fold_idx in enumerate(fold_indices):
+        row = idx // 3
+        col = idx % 3
+        ax = axes[row, col]
+        
+        fold_data = fold_data_dict[fold_idx]
+        labels = fold_data['labels']
+        probabilities = fold_data['probabilities']
+        
+        # Compute PR curve
+        precision, recall, _ = precision_recall_curve(labels, probabilities)
+        ap_score = average_precision_score(labels, probabilities)
+        all_ap_scores.append(ap_score)
+        
+        # Plot PR curve
+        ax.plot(recall, precision, color='#2E86AB', lw=2.5, label=f'Fold {fold_idx} (AP={ap_score:.4f})')
+        
+        # Add baseline (random classifier)
+        baseline = np.sum(labels) / len(labels)
+        ax.axhline(y=baseline, color='red', lw=2, linestyle='--', alpha=0.5, label=f'Baseline ({baseline:.3f})')
+        
+        # Fill area under curve
+        ax.fill_between(recall, precision, alpha=0.2, color='#2E86AB')
+        
+        ax.set_xlabel('Recall', fontsize=10, fontweight='bold')
+        ax.set_ylabel('Precision', fontsize=10, fontweight='bold')
+        ax.set_title(f'Fold {fold_idx}: Average Precision = {ap_score:.4f}',
+                    fontsize=11, fontweight='bold')
+        ax.legend(loc='best', fontsize=9)
+        ax.grid(True, alpha=0.3)
+        ax.set_xlim([0, 1])
+        ax.set_ylim([0, 1.05])
+    
+    # ========== SUMMARY PANEL (Bottom Right) ==========
+    ax_summary = axes[1, 2]
+    ax_summary.axis('off')
+    
+    # Create summary statistics
+    summary_text = f"""
+    CROSS-FOLD PR SUMMARY
+    
+    Mean Average Precision:  {np.mean(all_ap_scores):.4f}
+    Std Dev:                 {np.std(all_ap_scores):.4f}
+    Min:                     {np.min(all_ap_scores):.4f} (Fold {fold_indices[np.argmin(all_ap_scores)]})
+    Max:                     {np.max(all_ap_scores):.4f} (Fold {fold_indices[np.argmax(all_ap_scores)]})
+    
+    Stability Assessment:
+    {'✓ STABLE' if np.std(all_ap_scores) < 0.05 else '⚠ VARIABLE'} (AP std: {np.std(all_ap_scores):.4f})
+    
+    Individual Fold AP Scores:
+    """
+    for fold_idx, ap in zip(fold_indices, all_ap_scores):
+        summary_text += f"\n  Fold {fold_idx}: {ap:.4f}"
+    
+    ax_summary.text(0.05, 0.95, summary_text, transform=ax_summary.transAxes,
+                   fontsize=10, verticalalignment='top', fontfamily='monospace',
+                   bbox=dict(boxstyle='round', facecolor='lightyellow', alpha=0.8))
+    
+    fig.suptitle('Cross-Fold Precision-Recall Curves Dashboard\n(Individual Fold Performance - No Averaging)',
+                fontsize=14, fontweight='bold', y=0.98)
+    
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches='tight')
+    plt.close()
+    
+    print(f"  ✓ Cross-fold PR curves dashboard saved: {output_path}")
+    for fold_idx, ap in zip(fold_indices, all_ap_scores):
+        print(f"    - Fold {fold_idx}: Average Precision={ap:.4f}")
+    print(f"  ✓ Mean AP across all folds: {np.mean(all_ap_scores):.4f} ± {np.std(all_ap_scores):.4f}")
+
+
+def plot_combined_fold_roc_curves(fold_data_dict, output_path, figsize=(12, 8)):
+    """
+    Create overlay of all fold ROC curves on a single plot for direct comparison.
+    
+    Visualizes generalization robustness: similar ROC curves across folds indicate
+    consistent model performance and good generalization.
+    
+    Args:
+        fold_data_dict: Dict mapping fold_idx (0-4) to dict with 'labels' and 'probabilities'
+        output_path: Path to save PNG file
+        figsize: Figure size (width, height)
+    
+    Output: Single plot with overlaid ROC curves for all folds
+    """
+    fold_indices = sorted(fold_data_dict.keys())
+    
+    fig, ax = plt.subplots(figsize=figsize)
+    
+    all_auc_scores = []
+    colors = plt.cm.tab10(np.linspace(0, 1, len(fold_indices)))
+    
+    # Plot ROC curve for each fold
+    for fold_idx, color in zip(fold_indices, colors):
+        fold_data = fold_data_dict[fold_idx]
+        labels = fold_data['labels']
+        probabilities = fold_data['probabilities']
+        
+        # Compute ROC curve
+        fpr, tpr, _ = roc_curve(labels, probabilities)
+        auc_score = auc(fpr, tpr)
+        all_auc_scores.append(auc_score)
+        
+        # Plot
+        ax.plot(fpr, tpr, color=color, lw=2.5, label=f'Fold {fold_idx} (AUC={auc_score:.4f})',
+               alpha=0.8, marker='o', markersize=3, markevery=max(1, len(fpr)//5))
+    
+    # Add diagonal reference
+    ax.plot([0, 1], [0, 1], 'k--', lw=2, alpha=0.5, label='Random Classifier')
+    ax.fill_between([0, 1], 0, 1, alpha=0.05, color='gray')
+    
+    # Customize
+    ax.set_xlabel('False Positive Rate', fontsize=12, fontweight='bold')
+    ax.set_ylabel('True Positive Rate', fontsize=12, fontweight='bold')
+    ax.set_title(f'Cross-Fold ROC Curves Overlay\nMean AUC: {np.mean(all_auc_scores):.4f} ± {np.std(all_auc_scores):.4f}',
+                fontsize=13, fontweight='bold')
+    ax.legend(loc='lower right', fontsize=10)
+    ax.grid(True, alpha=0.3)
+    ax.set_xlim([-0.02, 1.02])
+    ax.set_ylim([-0.02, 1.02])
+    ax.set_aspect('equal')
+    
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches='tight')
+    plt.close()
+    
+    print(f"  ✓ Combined fold ROC curves saved: {output_path}")
+    print(f"  ✓ Mean AUC across all folds: {np.mean(all_auc_scores):.4f} ± {np.std(all_auc_scores):.4f}")
+    for fold_idx, auc_score in zip(fold_indices, all_auc_scores):
+        print(f"    - Fold {fold_idx}: AUC={auc_score:.4f}")
+
