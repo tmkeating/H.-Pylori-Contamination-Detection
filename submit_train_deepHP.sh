@@ -54,9 +54,9 @@ DEEPHP_EPOCHS=${DEEPHP_EPOCHS:-20}
 BATCH_SIZE=${BATCH_SIZE:-32}  # Training mini-batch size (reduced to fit in 11.5GB GPU memory limit)
 LEARNING_RATE=${LEARNING_RATE:-2e-5}
 WEIGHT_DECAY=${WEIGHT_DECAY:-0.01}
-POS_WEIGHT=${POS_WEIGHT:-2.5}
+POS_WEIGHT=${POS_WEIGHT:-1.5}
 USE_FOCAL_LOSS=${USE_FOCAL_LOSS:-"False"}
-GAMMA=${GAMMA:-1.0}
+GAMMA=${GAMMA:-3.0}
 
 echo "=========================================================================="
 echo "DeepHP H&E Pre-training Pipeline (5-Fold Cross-Validation)"
@@ -92,34 +92,33 @@ else
 fi
 echo ""
 
+# Export all configuration variables for presync job access
+export NUM_EPOCHS NEG_WEIGHT POS_WEIGHT GAMMA USE_FOCAL_LOSS SAVER_METRIC
+export FREEZE_BN FREEZE_BACKBONE CLIP_GRAD PCT_START WEIGHT_DECAY
+export USE_SWA SWA_START JITTER POOL_TYPE DEEPHP_EPOCHS
+export VENV_ROOT PROFILE MODEL_NAME ITER PRETRAINED_BACKBONE
+
 # 1. Submit pre-sync job (prepares scratch directory for data)
 echo "=========================================================================="
-echo "Configuration Summary"
+echo "Configuration Summary (DeepHP Pre-training)"
 echo "=========================================================================="
 echo "Configuration:"
 echo "  Profile: $PROFILE"
 echo "  Model: $MODEL_NAME"
 echo "  Iteration: $ITER"
 echo ""
-echo "Pre-training (DeepHP):"
-echo "  Pre-training Epochs: $DEEPHP_EPOCHS"
-echo "  Pre-trained Backbone: $PRETRAINED_BACKBONE"
-echo ""
-echo "Fine-tuning (HelicoDataSet):"
-echo "  Epochs: $NUM_EPOCHS"
-echo "  Neg Weight: $NEG_WEIGHT"
-echo "  Pos Weight: $POS_WEIGHT"
-echo "  Gamma: $GAMMA"
-echo "  Saver Metric: $SAVER_METRIC"
-echo "  Freeze BN: $FREEZE_BN"
-echo "  Freeze Backbone: $FREEZE_BACKBONE"
-echo "  Clip Grad: $CLIP_GRAD"
-echo "  Pct Start: $PCT_START"
+echo "Pre-training Parameters:"
+echo "  Epochs: $DEEPHP_EPOCHS"
+echo "  Batch Size: $BATCH_SIZE"
+echo "  Learning Rate: $LEARNING_RATE"
 echo "  Weight Decay: $WEIGHT_DECAY"
-echo "  Use SWA: $USE_SWA"
-echo "  SWA Start: $SWA_START"
-echo "  Jitter: $JITTER"
-echo "  Pool Type: $POOL_TYPE"
+echo "  Pos Weight: $POS_WEIGHT"
+echo "  Use Focal Loss: $USE_FOCAL_LOSS"
+echo "  Gamma: $GAMMA"
+echo ""
+echo "Data Processing:"
+echo "  Fold Batching Mode: $FOLD_BATCH_SIZE (0=all parallel)"
+echo "  5 Folds with Cross-Validation"
 echo "=========================================================================="
 echo ""
 
@@ -138,6 +137,29 @@ export HOME=/home/tkeating
 
 # Activate virtual environment with dependencies
 source $VENV_ROOT/bin/activate
+
+echo "=========================================================================="
+echo "Configuration Summary (DeepHP Pre-training)"
+echo "=========================================================================="
+echo "Configuration:"
+echo "  Profile: $PROFILE"
+echo "  Model: $MODEL_NAME"
+echo "  Iteration: $ITER"
+echo ""
+echo "Pre-training Parameters:"
+echo "  Epochs: $DEEPHP_EPOCHS"
+echo "  Batch Size: $BATCH_SIZE"
+echo "  Learning Rate: $LEARNING_RATE"
+echo "  Weight Decay: $WEIGHT_DECAY"
+echo "  Pos Weight: $POS_WEIGHT"
+echo "  Use Focal Loss: $USE_FOCAL_LOSS"
+echo "  Gamma: $GAMMA"
+echo ""
+echo "Data Processing:"
+echo "  Fold Batching Mode: $FOLD_BATCH_SIZE (0=all parallel)"
+echo "  5 Folds with Cross-Validation"
+echo "=========================================================================="
+echo ""
 
 echo "Pre-sync job: Setting up DeepHP dataset for training..."
 
