@@ -65,7 +65,26 @@ fi
 
 echo "Parameters: NegWeight=$NEG_WEIGHT, PosWeight=$POS_WEIGHT, Gamma=$GAMMA, Epochs=$NUM_EPOCHS, FreezeBN=$FREEZE_BN, ClipGrad=$CLIP_GRAD, PctStart=$PCT_START, Saver=$SAVER_METRIC, WD=$WEIGHT_DECAY, SWA=$USE_SWA, SWAStart=$SWA_START, Jitter=$JITTER"
 
-echo "-------------------------------------------"
+echo ""
+echo "=========================================="
+echo "PROFILE SETTINGS"
+echo "=========================================="
+echo "NEG_WEIGHT=$NEG_WEIGHT"
+echo "POS_WEIGHT=$POS_WEIGHT"
+echo "GAMMA=$GAMMA"
+echo "WEIGHT_DECAY=$WEIGHT_DECAY"
+echo "NUM_EPOCHS=$NUM_EPOCHS"
+echo "SAVER_METRIC=$SAVER_METRIC"
+echo "FREEZE_BN=$FREEZE_BN"
+echo "FREEZE_BACKBONE=$FREEZE_BACKBONE"
+echo "CLIP_GRAD=$CLIP_GRAD"
+echo "PCT_START=$PCT_START"
+echo "USE_SWA=$USE_SWA"
+echo "SWA_START=$SWA_START"
+echo "JITTER=$JITTER"
+echo "POOL_TYPE=$POOL_TYPE"
+echo "=========================================="
+echo ""
 echo "Submitting pre-sync job to populate scratch directory before training..."
 # Submit a pre-sync job that syncs data once, blocking until complete
 # All fold jobs will depend on this pre-sync job to avoid concurrent sync/training operations

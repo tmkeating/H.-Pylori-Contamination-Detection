@@ -295,6 +295,7 @@ GAMMA=${GAMMA:-1.0}
 NUM_EPOCHS=${NUM_EPOCHS:-15}
 SAVER_METRIC=${SAVER_METRIC:-"recall"}
 FREEZE_BN=${FREEZE_BN:-"False"}
+FREEZE_BACKBONE=${FREEZE_BACKBONE:-"False"}
 CLIP_GRAD=${CLIP_GRAD:-0.0}
 PCT_START=${PCT_START:-0.1}
 WEIGHT_DECAY=${WEIGHT_DECAY:-0.01}
@@ -308,6 +309,28 @@ SKIP_SYNC=${SKIP_SYNC:-0}
 
 # Capture standard output and error to the results directory manually if not on SLURM
 SLURM_JOB_ID=${SLURM_JOB_ID:-"manual"}
+
+# Display profile settings
+echo ""
+echo "=========================================="
+echo "PROFILE SETTINGS (Fold $((FOLD + 1))/$NUM_FOLDS)"
+echo "=========================================="
+echo "NEG_WEIGHT=$NEG_WEIGHT"
+echo "POS_WEIGHT=$POS_WEIGHT"
+echo "GAMMA=$GAMMA"
+echo "WEIGHT_DECAY=$WEIGHT_DECAY"
+echo "NUM_EPOCHS=$NUM_EPOCHS"
+echo "SAVER_METRIC=$SAVER_METRIC"
+echo "FREEZE_BN=$FREEZE_BN"
+echo "FREEZE_BACKBONE=$FREEZE_BACKBONE"
+echo "CLIP_GRAD=$CLIP_GRAD"
+echo "PCT_START=$PCT_START"
+echo "USE_SWA=$USE_SWA"
+echo "SWA_START=$SWA_START"
+echo "JITTER=$JITTER"
+echo "POOL_TYPE=$POOL_TYPE"
+echo "=========================================="
+echo ""
 
 # If running on SLURM, SBATCH already handles -o and -e logic.
 # Only use manual redirection if SLURM_JOB_ID is "manual".
