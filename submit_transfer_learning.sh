@@ -184,38 +184,6 @@ export FREEZE_BN FREEZE_BACKBONE CLIP_GRAD PCT_START WEIGHT_DECAY
 export USE_SWA SWA_START JITTER POOL_TYPE DEEPHP_EPOCHS
 export VENV_ROOT PROFILE MODEL_NAME ITER PRETRAINED_BACKBONE
 
-echo "=========================================================================="
-echo "Configuration Summary"
-echo "=========================================================================="
-echo "Configuration:"
-echo "  Profile: $PROFILE"
-echo "  Model: $MODEL_NAME"
-echo "  Iteration: $ITER"
-echo ""
-echo "Pre-training (DeepHP):"
-echo "  Pre-training Epochs: $DEEPHP_EPOCHS"
-echo "  Pre-trained Backbone: $PRETRAINED_BACKBONE"
-echo ""
-echo "Fine-tuning (HelicoDataSet):"
-echo "  Epochs: $NUM_EPOCHS"
-echo "  Neg Weight: $NEG_WEIGHT"
-echo "  Pos Weight: $POS_WEIGHT"
-echo "  Gamma: $GAMMA"
-echo "  Use Focal Loss: $USE_FOCAL_LOSS"
-echo "  Saver Metric: $SAVER_METRIC"
-echo "  Freeze BN: $FREEZE_BN"
-echo "  Freeze Backbone: $FREEZE_BACKBONE"
-echo "  Clip Grad: $CLIP_GRAD"
-echo "  Pct Start: $PCT_START"
-echo "  Weight Decay: $WEIGHT_DECAY"
-echo "  Use SWA: $USE_SWA"
-echo "  SWA Start: $SWA_START"
-echo "  Jitter: $JITTER"
-echo "  Pool Type: $POOL_TYPE"
-echo "=========================================================================="
-echo ""
-
-
 # 1. Pre-sync handling: only submit if SKIP_PRETRAINING=true
 #    If pre-training is enabled, DeepHP presync runs first, then transfer folds depend on DeepHP summary
 echo "Pre-sync job handling..."

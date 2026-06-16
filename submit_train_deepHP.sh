@@ -99,29 +99,6 @@ export USE_SWA SWA_START JITTER POOL_TYPE DEEPHP_EPOCHS
 export VENV_ROOT PROFILE MODEL_NAME ITER PRETRAINED_BACKBONE
 
 # 1. Submit pre-sync job (prepares scratch directory for data)
-echo "=========================================================================="
-echo "Configuration Summary (DeepHP Pre-training)"
-echo "=========================================================================="
-echo "Configuration:"
-echo "  Profile: $PROFILE"
-echo "  Model: $MODEL_NAME"
-echo "  Iteration: $ITER"
-echo ""
-echo "Pre-training Parameters:"
-echo "  Epochs: $DEEPHP_EPOCHS"
-echo "  Batch Size: $BATCH_SIZE"
-echo "  Learning Rate: $LEARNING_RATE"
-echo "  Weight Decay: $WEIGHT_DECAY"
-echo "  Pos Weight: $POS_WEIGHT"
-echo "  Use Focal Loss: $USE_FOCAL_LOSS"
-echo "  Gamma: $GAMMA"
-echo ""
-echo "Data Processing:"
-echo "  Fold Batching Mode: $FOLD_BATCH_SIZE (0=all parallel)"
-echo "  5 Folds with Cross-Validation"
-echo "=========================================================================="
-echo ""
-
 echo "Submitting pre-sync job to prepare environment..."
 PRE_SYNC_JOB=$(sbatch -p pg1tfg12 --job-name=deephp_presync --output=results/slurm_deephp_presync_%j.txt <<'PRESYNC_EOF'
 #!/bin/bash
