@@ -178,6 +178,12 @@ SWA_START=${SWA_START:-10}
 JITTER=${JITTER:-0.15}
 POOL_TYPE=${POOL_TYPE:-"attention"}
 
+# Export all configuration variables for presync job access
+export NUM_EPOCHS NEG_WEIGHT POS_WEIGHT GAMMA USE_FOCAL_LOSS SAVER_METRIC
+export FREEZE_BN FREEZE_BACKBONE CLIP_GRAD PCT_START WEIGHT_DECAY
+export USE_SWA SWA_START JITTER POOL_TYPE DEEPHP_EPOCHS
+export VENV_ROOT PROFILE MODEL_NAME ITER PRETRAINED_BACKBONE
+
 echo "=========================================================================="
 echo "Configuration Summary"
 echo "=========================================================================="
@@ -215,222 +221,17 @@ echo ""
 echo "Pre-sync job handling..."
 echo ""
 
+
+# Determine sbatch flags based on whether pre-training is enabled
 if [ "$SKIP_PRETRAINING" = "True" ] || [ "$SKIP_PRETRAINING" = "true" ]; then
-    # SKIP_PRETRAINING=true: submit transfer learning presync to sync HelicoDataSet
     echo "Pre-training skipped: submitting transfer learning presync..."
-    
-    PRE_SYNC_JOB=$(sbatch -p pg1tfg12 --job-name=transfer_presync --output=results/slurm_transfer_presync_%j.txt <<'PRESYNC_EOF'
-#!/bin/bash
-#SBATCH -p pg1tfg12
-#SBATCH -t 0-01:00
-#SBATCH --cpus-per-task=1
-#SBATCH --mem=2G
-#SBATCH --gres=gpu:1
-#SBATCH -J transfer_presync
-
-export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH
-export HOME=/home/tkeating
-source $VENV_ROOT/bin/activate
-
-LOCAL_SCRATCH=$(python3 -c "from config import SCRATCH_ROOT; print(SCRATCH_ROOT)" 2>/dev/null || echo "/home/tkeating/.scratch/h_pylori_data")
-REMOTE_DATA=$(python3 -c "from config import DATASET_ROOT; print(DATASET_ROOT)" 2>/dev/null || echo "/home/tkeating/datasets/HelicoDataSet")
-
-echo "=========================================================================="
-echo "Transfer Learning Pre-Sync: Syncing HelicoDataSet to Local Scratch"
-echo "=========================================================================="
-
-mkdir -p "$LOCAL_SCRATCH"
-mkdir -p "$LOCAL_SCRATCH/CrossValidation" "$LOCAL_SCRATCH/HoldOut" "$LOCAL_SCRATCH/HoldOut"
-
-# Copy metadata
-cp "$REMOTE_DATA"/*.xlsx "$LOCAL_SCRATCH/" 2>/dev/null || true
-cp "$REMOTE_DATA"/*.csv "$LOCAL_SCRATCH/" 2>/dev/null || true
-
-echo "[PRESYNC] Cleaning blacklisted items from scratch..."
-python3 << CLEANUP_EOF
-import json
-import shutil
-from pathlib import Path
-
-blacklist_path = Path("./blacklist.json")
-scratch_path = Path("$LOCAL_SCRATCH")
-
-print(f"[CLEANUP] Checking for blacklisted items to remove...")
-print(f"[CLEANUP] Blacklist file: {blacklist_path}")
-print(f"[CLEANUP] Scratch path: {scratch_path}")
-
-# First, remove all Thumbs.db files since rsync --exclude won't delete them
-if scratch_path.exists():
-    thumbs_count = 0
-    for thumbs_file in scratch_path.rglob('Thumbs.db'):
-        try:
-            thumbs_file.unlink()
-            thumbs_count += 1
-        except:
-            pass
-    if thumbs_count > 0:
-        print(f"[CLEANUP] Removed {thumbs_count} Thumbs.db files from scratch")
-
-if blacklist_path.exists() and scratch_path.exists():
-    with open(blacklist_path, 'r') as f:
-        data = json.load(f)
-        conflict_bags = list(data.get('conflict_blacklist', {}).keys())
-        image_blacklist = data.get('image_blacklist', [])
-        
-        bag_removed = 0
-        image_removed = 0
-        
-        if conflict_bags:
-            print(f"[CLEANUP] Found {len(conflict_bags)} blacklisted bags to remove")
-            for bag_id in conflict_bags:
-                for dir_name in ['CrossValidation/Annotated', 'CrossValidation/Cropped', 'HoldOut']:
-                    bag_path = scratch_path / dir_name / bag_id
-                    if bag_path.exists():
-                        shutil.rmtree(bag_path)
-                        bag_removed += 1
-            print(f"[CLEANUP] Removed {bag_removed} blacklisted bags")
-        
-        if image_blacklist:
-            print(f"[CLEANUP] Found {len(image_blacklist)} image-level blacklist items to clean")
-            for item in image_blacklist:
-                if isinstance(item, dict):
-                    folder = item.get('folder')
-                    filename = item.get('filename')
-                    for dir_name in ['CrossValidation/Annotated', 'CrossValidation/Cropped', 'HoldOut']:
-                        bag_path = scratch_path / dir_name / folder
-                        if bag_path.exists():
-                            file_path = bag_path / filename
-                            if file_path.exists():
-                                file_path.unlink()
-                                image_removed += 1
-            print(f"[CLEANUP] Removed {image_removed} image-level files")
-else:
-    print(f"[CLEANUP] Scratch doesn't exist yet - no cleanup needed")
-CLEANUP_EOF
-
-echo "[PRESYNC] Generating exclude filters from blacklist..."
-export EXCLUDE_FILE="/tmp/transfer_presync_exclude_filters_$$.txt"
-python3 << FILTER_EOF
-import json
-import os
-
-exclude_file = os.environ['EXCLUDE_FILE']
-excludes = []
-
-with open('./blacklist.json') as f:
-    data = json.load(f)
-
-conflict_bags = data.get('conflict_blacklist', {})
-image_blacklist = data.get('image_blacklist', [])
-
-for bag in conflict_bags.keys():
-    excludes.append(f"{bag}/")
-
-for item in image_blacklist:
-    if isinstance(item, dict):
-        folder = item.get('folder', '')
-        filename = item.get('filename', '')
-        if folder and filename:
-            excludes.append(f"{folder}/{filename}")
-
-
-
-# Also exclude Thumbs.db
-excludes.append("*/Thumbs.db")
-
-with open(exclude_file, 'w') as out:
-    for exclude in excludes:
-        out.write(exclude + "\n")
-
-print(f"[DEBUG] Blacklist: {len(conflict_bags)} bags + {len(image_blacklist)} images")
-# Show sample patterns for debugging
-# Also exclude Thumbs.db
-excludes.append("*/Thumbs.db")
-
-with open(exclude_file, "r") as f:
-    lines = f.readlines()
-    bags = [l.strip() for l in lines if l.endswith("/\n")]
-    images = [l.strip() for l in lines if "/" in l.strip() and not l.endswith("/\n")]
-    other = [l.strip() for l in lines if "/" not in l.strip() and not l.endswith("/\n")]
-print(f"[DEBUG] Patterns breakdown: {len(bags)} bag patterns, {len(images)} image patterns, {len(other)} other")
-print(f"[DEBUG] Wrote {len(excludes)} total exclusion rules (with filter syntax)")
-FILTER_EOF
-echo ""
-echo "[DEBUG] Verifying exclude file creation..."
-if [ -f "$EXCLUDE_FILE" ]; then
-    echo "[DEBUG] ✓ File exists: $EXCLUDE_FILE"
-    LINES=$(wc -l < "$EXCLUDE_FILE")
-    SIZE=$(wc -c < "$EXCLUDE_FILE")
-    echo "[DEBUG] Size: $SIZE bytes, Lines: $LINES"
-    echo "[DEBUG] First 3 patterns:"
-    head -3 "$EXCLUDE_FILE" | sed 's/^/    /'
+    PRESYNC_SBATCH_FLAGS=""
 else
-    echo "[DEBUG] ✗ CRITICAL: File NOT found!"
-    echo "[DEBUG] Expected: $EXCLUDE_FILE"
-    ls -la /tmp/transfer_presync_exclude_filters_* 2>/dev/null || echo "[DEBUG] No matching files in /tmp"
-fi
-echo ""
-
-echo "[PRESYNC] Syncing HelicoDataSet to local scratch..."
-mkdir -p "$LOCAL_SCRATCH/CrossValidation" "$LOCAL_SCRATCH/HoldOut"
-echo "[RSYNC] Syncing with exclusion filters..."
-rsync -a --delete --exclude='*/Thumbs.db' --exclude='B22-124_0' --exclude='B22-68_0' --exclude='B22-141_1' --exclude='B22-03_1' --exclude='B22-01_1' --exclude-from="$EXCLUDE_FILE" "$REMOTE_DATA/CrossValidation/Annotated/" "$LOCAL_SCRATCH/CrossValidation/Annotated/" 2>&1 | tail -5 || true
-rsync -a --delete --exclude='*/Thumbs.db' --exclude='B22-124_0' --exclude='B22-68_0' --exclude='B22-141_1' --exclude='B22-03_1' --exclude='B22-01_1' --exclude-from="$EXCLUDE_FILE" "$REMOTE_DATA/CrossValidation/Cropped/" "$LOCAL_SCRATCH/CrossValidation/Cropped/" 2>&1 | tail -5 || true
-rsync -a --delete --exclude='*/Thumbs.db' --exclude='B22-124_0' --exclude='B22-68_0' --exclude='B22-141_1' --exclude='B22-03_1' --exclude='B22-01_1' --exclude-from="$EXCLUDE_FILE" "$REMOTE_DATA/HoldOut/" "$LOCAL_SCRATCH/HoldOut/" 2>&1 | tail -5 || true
-rm -f "$EXCLUDE_FILE"
-
-echo "[PRESYNC] Sync complete - calculating statistics..."
-echo ""
-echo "=========================================================================="
-echo "Pre-Sync Statistics"
-echo "=========================================================================="
-echo ""
-echo "Scratch Directory: $LOCAL_SCRATCH"
-echo "Total size:"
-du -sh "$LOCAL_SCRATCH" 2>/dev/null || echo "  (calculating...)"
-echo ""
-echo "Directory breakdown:"
-for dir in "CrossValidation/Annotated" "CrossValidation/Cropped" "HoldOut"; do
-    path="$LOCAL_SCRATCH/$dir"
-    if [ -d "$path" ]; then
-        size=$(du -sh "$path" 2>/dev/null | cut -f1)
-        echo "  $dir:"
-        echo "    $size	$path"
-    fi
-done
-echo ""
-echo "File counts:"
-annotated_count=$(find "$LOCAL_SCRATCH/CrossValidation/Annotated" -type f 2>/dev/null | wc -l)
-cropped_count=$(find "$LOCAL_SCRATCH/CrossValidation/Cropped" -type f 2>/dev/null | wc -l)
-holdout_count=$(find "$LOCAL_SCRATCH/HoldOut" -type f 2>/dev/null | wc -l)
-echo "  Annotated: $annotated_count files"
-echo "  Cropped: $cropped_count files"
-echo "  HoldOut: $holdout_count files"
-total_count=$((annotated_count + cropped_count + holdout_count))
-echo "  Total: $total_count files"
-echo ""
-echo "Blacklist Summary:"
-echo "  Conflict bags excluded: 5"
-echo "  Image-level exclusions: 2788"
-echo "  Total exclusions: 2793"
-echo ""
-echo "✓ Pre-sync complete. Ready for transfer learning fine-tuning."
-PRESYNC_EOF
-)
-    
-    PRE_SYNC_ID=$(echo $PRE_SYNC_JOB | awk '{print $4}')
-    PRE_SYNC_DEPENDENCY="afterok:$PRE_SYNC_ID"
-    
-    echo "Pre-sync job ID: $PRE_SYNC_ID"
-    if [ -z "$PRE_SYNC_ID" ] || [ "$PRE_SYNC_ID" = "" ]; then
-        echo "ERROR: Failed to extract pre-sync job ID!"
-        exit 1
-    fi
-else
-    # Pre-training enabled: submit transfer presync with dependency on DeepHP summary
     echo "Pre-training enabled: submitting transfer learning presync after pre-training..."
-    
-    PRE_SYNC_JOB=$(sbatch --dependency=afterok:$DEEPHP_SUMMARY_JOB_ID -p pg1tfg12 --nodelist=dcc-gr1 --job-name=transfer_presync --output=results/slurm_transfer_presync_%j.txt <<'PRESYNC_EOF'
+    PRESYNC_SBATCH_FLAGS="--dependency=afterok:$DEEPHP_SUMMARY_JOB_ID --nodelist=dcc-gr1"
+fi
+
+PRE_SYNC_JOB=$(sbatch $PRESYNC_SBATCH_FLAGS -p pg1tfg12 --job-name=transfer_presync --output=results/slurm_transfer_presync_%j.txt <<'PRESYNC_EOF'
 #!/bin/bash
 #SBATCH -p pg1tfg12
 #SBATCH -t 0-01:00
@@ -667,7 +468,6 @@ PRESYNC_EOF
     if [ -z "$PRE_SYNC_ID" ] || [ "$PRE_SYNC_ID" = "" ]; then
         echo "ERROR: Failed to extract pre-sync job ID!"
         exit 1
-    fi
 fi
 
 
