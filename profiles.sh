@@ -17,6 +17,7 @@ function set_profile_SEARCHER() {
     export POS_WEIGHT=1.5 
     # Maintained 3.0 to focus gradients on 'Hard' sparse bacterial targets
     export GAMMA=3.0
+    export USE_FOCAL_LOSS="False"
     # Higher WD to prevent 100% Training Accuracy (Overfitting)
     export WEIGHT_DECAY=0.05
     # Reduced epochs with early stopping potential
@@ -38,6 +39,7 @@ function set_profile_SEARCHERTRANSFER() {
     export POS_WEIGHT=1.5 
     # Maintained 3.0 to focus gradients on 'Hard' sparse bacterial targets
     export GAMMA=3.0
+    export USE_FOCAL_LOSS="False"
     # Higher WD to prevent 100% Training Accuracy (Overfitting)
     export WEIGHT_DECAY=0.05
     # Reduced epochs with early stopping potential
@@ -59,6 +61,7 @@ function set_profile_AUDITOR() {
     export NEG_WEIGHT=1.0
     export POS_WEIGHT=7.5
     export GAMMA=1.0
+    export USE_FOCAL_LOSS="False"
     export NUM_EPOCHS=20
     export DEEPHP_EPOCHS=20
     export SAVER_METRIC="f1"
@@ -76,6 +79,7 @@ function set_profile_AUDITOR() {
 function set_profile_EXTREME() {
     export POS_WEIGHT=25.0
     export GAMMA=5.0
+    export USE_FOCAL_LOSS="False"
     export NUM_EPOCHS=25
     export DEEPHP_EPOCHS=25
     export SAVER_METRIC="recall"
@@ -86,6 +90,7 @@ function set_profile_TEST() {
     export NEG_WEIGHT=1.0
     export POS_WEIGHT=1.0 
     export GAMMA=3.0
+    export USE_FOCAL_LOSS="False"
     export NUM_EPOCHS=1
     export DEEPHP_EPOCHS=1
     export SAVER_METRIC="f1"

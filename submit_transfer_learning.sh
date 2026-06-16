@@ -167,6 +167,7 @@ NUM_EPOCHS=${NUM_EPOCHS:-15}
 NEG_WEIGHT=${NEG_WEIGHT:-1.0}
 POS_WEIGHT=${POS_WEIGHT:-1.0}
 GAMMA=${GAMMA:-1.0}
+USE_FOCAL_LOSS=${USE_FOCAL_LOSS:-"False"}
 SAVER_METRIC=${SAVER_METRIC:-"loss"}
 FREEZE_BN=${FREEZE_BN:-"False"}
 CLIP_GRAD=${CLIP_GRAD:-1.0}
@@ -194,6 +195,7 @@ echo "  Epochs: $NUM_EPOCHS"
 echo "  Neg Weight: $NEG_WEIGHT"
 echo "  Pos Weight: $POS_WEIGHT"
 echo "  Gamma: $GAMMA"
+echo "  Use Focal Loss: $USE_FOCAL_LOSS"
 echo "  Saver Metric: $SAVER_METRIC"
 echo "  Freeze BN: $FREEZE_BN"
 echo "  Freeze Backbone: $FREEZE_BACKBONE"
@@ -298,6 +300,7 @@ echo "  Epochs: $NUM_EPOCHS"
 echo "  Neg Weight: $NEG_WEIGHT"
 echo "  Pos Weight: $POS_WEIGHT"
 echo "  Gamma: $GAMMA"
+echo "  Use Focal Loss: $USE_FOCAL_LOSS"
 echo "  Saver Metric: $SAVER_METRIC"
 echo "  Freeze BN: $FREEZE_BN"
 echo "  Freeze Backbone: $FREEZE_BACKBONE"
