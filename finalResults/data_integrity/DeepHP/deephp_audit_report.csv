@@ -6,14 +6,14 @@ H. PYLORI DEEPHP DATASET PNG AUDIT - SUMMARY REPORT,,,
 CLASS DISTRIBUTION,,,
 ----------------------------------------------------------------------,,,
 Permanent Dataset,111005,283921,394926
-Scratch Directory,111005,283921,394926
+Scratch Directory,111004,283921,394925
 ======================================================================,,,
 ,,,
 SYNC STATUS,,,
 ----------------------------------------------------------------------,,,
-Status,FULLY SYNCED,,
+Status,NOT SYNCED: 1 patches missing,,
 ,,,
 METADATA,,,
 ----------------------------------------------------------------------,,,
-Permanent Dataset Root,/export/hhome/ricse03/8117177,,
-Scratch Directory Root,/tmp/ricse03_deephp_data,,
+Permanent Dataset Root,/home/tkeating/datasets/8117177,,
+Scratch Directory Root,/home/tkeating/.scratch/deephp_data,,

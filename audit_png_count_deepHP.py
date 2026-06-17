@@ -220,10 +220,10 @@ class DeepHPAuditor:
 
 def main():
     # Configuration
-    from config import DEEPHP_DATASET_ROOT
+    from config import DEEPHP_DATASET_ROOT, DEEPHP_SCRATCH_ROOT
     
     dataset_root = Path(DEEPHP_DATASET_ROOT)
-    scratch_root = Path(f"/tmp/{os.environ.get('USER', 'tkeating')}_deephp_data")
+    scratch_root = Path(DEEPHP_SCRATCH_ROOT)
     output_csv = Path('deephp_audit_report.csv')
     
     # Run audit

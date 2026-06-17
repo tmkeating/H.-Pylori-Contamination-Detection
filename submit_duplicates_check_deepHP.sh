@@ -4,7 +4,7 @@
 #SBATCH -n 1
 #SBATCH -c 4
 #SBATCH -t 0-02:00
-#SBATCH --mem=32G
+#SBATCH --mem=30G
 #SBATCH -o results/slurm_deephp_duplicates_%j.txt
 #SBATCH -e results/slurm_deephp_duplicates_error_%j.txt
 

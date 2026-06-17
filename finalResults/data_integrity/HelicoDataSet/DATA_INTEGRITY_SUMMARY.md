@@ -77,12 +77,6 @@
 - They're in PatientDiagnosis.csv but have no folders in permanent storage
 - These are orphaned clinical records (data quality issue, not sync issue)
 
-### 4. The 1,682-Patch Gap Explained
-
-**Issue:** 
-- Scratch has 216,326 patches (raw PNG file count, verified by audit_png_count.py)
-- verify_data_integrity audits 214,644 patches (through HPyloriDataset with leakage dedup)
-- Gap: 1,682 patches
 
 **Two-Layer Dedup Strategy:**
 
