@@ -101,8 +101,8 @@ def create_reference():
     print("Creating Macenko reference from DeepHP dataset...")
     print("=" * 60)
     
-    # Path to dataset (use scratch for faster I/O)
-    deephp_root = DEEPHP_SCRATCH_ROOT
+    # Path to dataset (use original dataset for authoritative source)
+    deephp_root = DEEPHP_DATASET_ROOT
     output_path = os.path.join(os.getcwd(), "macenko_reference.png")
     
     if not os.path.exists(deephp_root):
@@ -246,11 +246,24 @@ def create_reference():
     # Save blacklist entry for the Macenko reference patch
     # This ensures it's excluded from all training/validation folds
     blacklist_path = "blacklistDeepHP.json"
+    
+    # Always construct path from original dataset, not scratch
+    # Extract folder and filename from best_path
+    if best_path:
+        folder_name = os.path.dirname(best_path).split("/")[-1]  # "Positive" or "Negative"
+        filename = os.path.basename(best_path)
+        # Construct path using original dataset root
+        original_path = os.path.join(DEEPHP_DATASET_ROOT, folder_name, filename)
+    else:
+        folder_name = "Unknown"
+        filename = "unknown.jpg"
+        original_path = None
+    
     blacklist_data = {
         "macenko_reference_patch": {
-            "folder": os.path.dirname(best_path).split("/")[-1] if best_path else "Unknown",
-            "filename": os.path.basename(best_path) if best_path else "unknown.jpg",
-            "full_path": best_path,
+            "folder": folder_name,
+            "filename": filename,
+            "full_path": original_path,
             "reason": "Macenko H&E normalization reference - excluded from training/validation to prevent data leakage",
             "score": float(best_score)
         }

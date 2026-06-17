@@ -16,12 +16,15 @@
 #
 # Usage:
 #   PROFILE=SEARCHER MODEL_NAME=convnext_tiny ITER=30.0 ./submit_transfer_learning.sh
+#   PROFILE_DEEPHP=AUDITOR PROFILE=SEARCHER ./submit_transfer_learning.sh
 #
 # Environment Variables:
-#   PROFILE:              Model profile from profiles.sh (default: SEARCHER)
+#   PROFILE:              Model profile for transfer learning (default: SEARCHER)
+#   PROFILE_DEEPHP:       Model profile for pre-training (default: same as PROFILE)
 #   MODEL_NAME:           Backbone architecture (default: convnext_tiny)
 #   ITER:                 Iteration number for tracking (default: 31.0)
 #   SKIP_PRETRAINING:     Skip Phase 1 if backbone already trained (default: False)
+#   SKIP_TRANSFER_LEARNING: Skip Phase 2 fine-tuning (default: False)
 #   DEEPHP_SUMMARY_JOB_ID: Force specific pre-training job dependency (optional)
 #   FREEZE_BACKBONE:      Keep pre-trained weights frozen (default: False)
 #
@@ -59,19 +62,22 @@ fi
 
 MODEL_NAME=${MODEL_NAME:-"convnext_tiny"}
 PROFILE=${PROFILE:-"SEARCHER"}
+PROFILE_DEEPHP=${PROFILE_DEEPHP:-"$PROFILE"}  # Default to PROFILE if not specified
 ITER=${ITER:-"31.0"}
 FOLD_BATCH_SIZE=${FOLD_BATCH_SIZE:-"0"}  # 0=all parallel (default), N=batch in groups of N (e.g., 3 = 3+2)
-PRETRAINED_BACKBONE="results/deephp_backbone_final_${MODEL_NAME}.pth"
+PRETRAINED_BACKBONE="results/deephp_backbone_final_${MODEL_NAME}_${ITER}.pth"
 FREEZE_BACKBONE=${FREEZE_BACKBONE:-"False"}
 SKIP_PRETRAINING=${SKIP_PRETRAINING:-"False"}
+SKIP_TRANSFER_LEARNING=${SKIP_TRANSFER_LEARNING:-"False"}
 GRADCAM_ONLY=${GRADCAM_ONLY:-"False"}  # True to generate only Grad-CAM visualizations (skip other plots)
 DEEPHP_SUMMARY_JOB_ID=${DEEPHP_SUMMARY_JOB_ID:-""}
 
 echo "=========================================================================="
 echo "TRANSFER LEARNING: Complete End-to-End Pipeline (Option B)"
 echo "=========================================================================="
-echo ""
-echo "Phase 1: DeepHP H&E Pre-training"
+echo ""echo "Pre-training Profile: $PROFILE_DEEPHP"
+echo "Transfer Learning Profile: $PROFILE"
+echo ""echo "Phase 1: DeepHP H&E Pre-training"
 echo "Phase 2: HelicoDataSet Transfer Learning Fine-tuning"
 echo ""
 
@@ -107,10 +113,12 @@ else
     # Call submit_train_deepHP.sh to start pre-training orchestration
     if [ -f "submit_train_deepHP.sh" ]; then
         chmod +x submit_train_deepHP.sh
-        # Export ITER so submit_train_deepHP.sh picks it up
-        export MODEL_NAME PROFILE ITER
+        # Export ITER and use PROFILE_DEEPHP for pre-training, PROFILE for transfer learning
+        export MODEL_NAME PROFILE=$PROFILE_DEEPHP ITER
         PRETRAINING_OUTPUT=$(./submit_train_deepHP.sh 2>&1)
         echo "$PRETRAINING_OUTPUT"
+        # Restore PROFILE for transfer learning phase
+        export PROFILE
         
         # Extract summary job ID from the output or file
         if [ -f "results/deephp_summary_job_id.txt" ]; then
@@ -137,11 +145,23 @@ fi
 # ===========================================================================
 # PHASE 2: FINE-TUNING ON HELICODATASET (depends on Phase 1 completion)
 # ===========================================================================
-echo "=========================================================================="
-echo "PHASE 2: HelicoDataSet Transfer Learning Fine-tuning"
-echo "=========================================================================="
-echo "(This phase will start automatically after pre-training completes)"
-echo ""
+if [ "$SKIP_TRANSFER_LEARNING" = "True" ] || [ "$SKIP_TRANSFER_LEARNING" = "true" ]; then
+    echo "=========================================================================="
+    echo "PHASE 2: SKIPPED (Transfer learning fine-tuning disabled)"
+    echo "=========================================================================="
+    echo ""
+    echo "✓ Skipping HelicoDataSet fine-tuning"
+    echo "  Pre-trained backbone available at: $PRETRAINED_BACKBONE"
+    echo ""
+    echo "To re-enable fine-tuning, run:"
+    echo "  SKIP_TRANSFER_LEARNING=False ./submit_transfer_learning.sh"
+    echo ""
+else
+    echo "=========================================================================="
+    echo "PHASE 2: HelicoDataSet Transfer Learning Fine-tuning"
+    echo "=========================================================================="
+    echo "(This phase will start automatically after pre-training completes)"
+    echo ""
 
 # Source the Model Profiles (for consistency with HelicoDataSet training)
 if [ -f "profiles.sh" ]; then
@@ -186,16 +206,17 @@ export VENV_ROOT PROFILE MODEL_NAME ITER PRETRAINED_BACKBONE
 
 # 1. Pre-sync handling: only submit if SKIP_PRETRAINING=true
 #    If pre-training is enabled, DeepHP presync runs first, then transfer folds depend on DeepHP summary
-echo "Pre-sync job handling..."
+echo "Pre-training Job handling (using PROFILE_DEEPHP=$PROFILE_DEEPHP)..."
 echo ""
 
 
 # Determine sbatch flags based on whether pre-training is enabled
 if [ "$SKIP_PRETRAINING" = "True" ] || [ "$SKIP_PRETRAINING" = "true" ]; then
-    echo "Pre-training skipped: submitting transfer learning presync..."
+    echo "Pre-training skipped: submitting transfer learning presync with PROFILE=$PROFILE..."
     PRESYNC_SBATCH_FLAGS=""
 else
     echo "Pre-training enabled: submitting transfer learning presync after pre-training..."
+    echo "  (Pre-training used PROFILE_DEEPHP=$PROFILE_DEEPHP, transfer learning will use PROFILE=$PROFILE)"
     PRESYNC_SBATCH_FLAGS="--dependency=afterok:$DEEPHP_SUMMARY_JOB_ID --nodelist=dcc-gr1"
 fi
 
@@ -534,7 +555,7 @@ TRAIN_CMD="python3 -u train.py \
 
 # Only include backbone path if not skipping pre-training
 if [ "\$SKIP_PRETRAINING" != "True" ] && [ "\$SKIP_PRETRAINING" != "true" ]; then
-    TRAIN_CMD="\$TRAIN_CMD --pretrained_backbone_path results/deephp_backbone_final_${MODEL_NAME}.pth"
+    TRAIN_CMD="\$TRAIN_CMD --pretrained_backbone_path results/deephp_backbone_final_${MODEL_NAME}_${ITER}.pth"
 fi
 
 TRAIN_CMD="\$TRAIN_CMD --freeze_backbone \$FREEZE_BACKBONE"
@@ -819,3 +840,4 @@ echo "  - Ensemble/Summary: ~10 minutes"
 echo "  - Visualization generation: ~10 minutes"
 echo "  Total: ~6-8 hours"
 echo ""
+fi

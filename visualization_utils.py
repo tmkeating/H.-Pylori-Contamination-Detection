@@ -356,6 +356,43 @@ def plot_confusion_matrix(all_labels, all_preds, output_path, figsize=(8, 6)):
     plt.close()
 
 
+def plot_combined_confusion_matrices(fold_cms, output_path, figsize=(16, 12)):
+    """
+    Plot a dashboard of all fold confusion matrices plus overall combined matrix.
+    
+    Args:
+        fold_cms (list): List of 5 confusion matrices (2x2 numpy arrays), one per fold
+        output_path (str): Path to save PNG file
+        figsize (tuple): Figure size (width, height)
+    
+    Creates a 2x3 grid showing:
+        - Fold 0, 1, 2, 3, 4 (top 2 rows)
+        - Overall combined matrix (bottom right)
+    """
+    fig, axes = plt.subplots(2, 3, figsize=figsize)
+    axes = axes.flatten()  # Flatten for easier indexing
+    
+    # Plot individual fold matrices
+    for fold_idx, cm in enumerate(fold_cms):
+        ax = axes[fold_idx]
+        disp = ConfusionMatrixDisplay(cm, display_labels=['Negative', 'Positive'])
+        disp.plot(ax=ax, cmap='Blues', values_format='d')
+        ax.set_title(f'Fold {fold_idx} Confusion Matrix', fontsize=12, fontweight='bold')
+    
+    # Compute and plot overall combined matrix
+    overall_cm = sum(fold_cms)
+    ax = axes[5]
+    disp = ConfusionMatrixDisplay(overall_cm, display_labels=['Negative', 'Positive'])
+    disp.plot(ax=ax, cmap='Greens', values_format='d')
+    ax.set_title('Overall Combined (All Folds)', fontsize=12, fontweight='bold')
+    
+    fig.suptitle('DeepHP Pre-training: Confusion Matrices Across All Folds', 
+                 fontsize=14, fontweight='bold', y=0.995)
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches='tight')
+    plt.close()
+
+
 def plot_probability_histogram(all_probs, all_labels, output_path, figsize=(8, 6)):
     """
     Plot predicted probability distribution.
@@ -427,6 +464,66 @@ def plot_pr_curve(all_labels, all_probs, output_path):
     plt.legend(loc='lower left')
     plt.tight_layout()
     plt.savefig(output_path)
+    plt.close()
+
+
+def plot_combined_pr_roc_curves(fold_data_list, output_path, figsize=(16, 12)):
+    """
+    Plot a dashboard of PR and ROC curves for all folds.
+    
+    Args:
+        fold_data_list (list): List of 5 dicts, each with 'labels' and 'probs' keys
+        output_path (str): Path to save PNG file
+        figsize (tuple): Figure size (width, height)
+    
+    Creates a 5x2 grid showing:
+        - Column 1: ROC curves for folds 0-4
+        - Column 2: PR curves for folds 0-4
+    """
+    fig, axes = plt.subplots(5, 2, figsize=figsize)
+    
+    colors_roc = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']  # 5 distinct colors
+    colors_pr = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
+    
+    for fold_idx, fold_data in enumerate(fold_data_list):
+        labels = fold_data['labels']
+        probs = fold_data['probs']
+        
+        # ROC curve (left column)
+        ax_roc = axes[fold_idx, 0]
+        fpr, tpr, _ = roc_curve(labels, probs)
+        roc_auc = auc(fpr, tpr)
+        
+        ax_roc.plot(fpr, tpr, color=colors_roc[fold_idx], lw=2.5, 
+                   label=f'ROC (AUC = {roc_auc:.4f})')
+        ax_roc.plot([0, 1], [0, 1], color='gray', lw=1.5, linestyle='--', alpha=0.7)
+        ax_roc.set_xlim([0.0, 1.0])
+        ax_roc.set_ylim([0.0, 1.05])
+        ax_roc.set_xlabel('False Positive Rate', fontsize=10)
+        ax_roc.set_ylabel('True Positive Rate', fontsize=10)
+        ax_roc.set_title(f'Fold {fold_idx} - ROC Curve', fontsize=11, fontweight='bold')
+        ax_roc.legend(loc='lower right', fontsize=9)
+        ax_roc.grid(True, alpha=0.3)
+        
+        # PR curve (right column)
+        ax_pr = axes[fold_idx, 1]
+        precision, recall, _ = precision_recall_curve(labels, probs)
+        avg_prec = average_precision_score(labels, probs)
+        
+        ax_pr.plot(recall, precision, color=colors_pr[fold_idx], lw=2.5, 
+                  label=f'PR (AP = {avg_prec:.4f})')
+        ax_pr.set_xlim([0.0, 1.0])
+        ax_pr.set_ylim([0.0, 1.05])
+        ax_pr.set_xlabel('Recall', fontsize=10)
+        ax_pr.set_ylabel('Precision', fontsize=10)
+        ax_pr.set_title(f'Fold {fold_idx} - Precision-Recall Curve', fontsize=11, fontweight='bold')
+        ax_pr.legend(loc='lower left', fontsize=9)
+        ax_pr.grid(True, alpha=0.3)
+    
+    fig.suptitle('DeepHP Pre-training: ROC & PR Curves Across All Folds', 
+                 fontsize=14, fontweight='bold', y=0.995)
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches='tight')
     plt.close()
 
 

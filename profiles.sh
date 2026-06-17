@@ -34,7 +34,7 @@ function set_profile_SEARCHER() {
     export POOL_TYPE="attention"
 }
 
-function set_profile_SEARCHERTRANSFER() {
+function set_profile_SEARCHERDEEPHP() {
     export NEG_WEIGHT=1.0
     export POS_WEIGHT=1.5 
     # Maintained 3.0 to focus gradients on 'Hard' sparse bacterial targets

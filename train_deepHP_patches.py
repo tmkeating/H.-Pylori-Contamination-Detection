@@ -47,6 +47,8 @@ Output:
 
 import os
 import sys
+import json
+import time
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -73,7 +75,7 @@ from dataset_deepHP import DeepHPDataset, create_deephp_transforms_train, create
 from model import get_model
 from config import DATASET_ROOT, SCRATCH_ROOT, DEEPHP_DATASET_ROOT
 from normalization import MacenkoNormalizer
-from visualization_utils import plot_learning_curves, plot_confusion_matrix, plot_roc_curve, plot_pr_curve
+from visualization_utils import plot_learning_curves, plot_confusion_matrix, plot_roc_curve, plot_pr_curve, plot_calibration_curve
 
 # Function to get next run number (matching train.py pattern)
 def get_next_run_number(results_dir="results", current_slurm_id=None):
@@ -115,7 +117,9 @@ class FocalLoss(nn.Module):
 
 def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", num_epochs=20, 
                           batch_size=128, learning_rate=2e-5, weight_decay=0.01, 
-                          use_focal_loss=False, pos_weight=2.5, gamma=1.0, iter_name="deephp"):
+                          use_focal_loss=False, pos_weight=2.5, neg_weight=1.0, gamma=1.0, 
+                          iter_name="deephp", use_swa=True, swa_start=12, jitter=0.15, pct_start=0.1,
+                          clip_grad=0.0, saver_metric="loss"):
     """
     Train a CNN backbone on DeepHP H&E patches for pre-training.
     
@@ -241,6 +245,67 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
     except Exception as e:
         print(f"Note: Could not read blacklist status: {e}\n")
     
+    # Generate cross-leakage audit (verifies validation set not in training set)
+    # One row per experiment
+    print("\n" + "="*60)
+    print("Generating Cross-Leakage Audit:")
+    print("="*60)
+    
+    # Extract experiment IDs from fold-specific indices (not full sample lists)
+    train_experiments = set()
+    val_experiments = set()
+    
+    # Get actual indices used in each dataset (after fold split)
+    train_indices = set(train_dataset.indices)
+    val_indices = set(val_dataset.indices)
+    
+    # Extract experiments from training fold
+    for idx in train_indices:
+        path, label = train_dataset.samples[idx]
+        filename = os.path.basename(path)
+        exp_id = filename.split('_b0s')[0]
+        train_experiments.add(exp_id)
+    
+    # Extract experiments from validation fold
+    for idx in val_indices:
+        path, label = val_dataset.samples[idx]
+        filename = os.path.basename(path)
+        exp_id = filename.split('_b0s')[0]
+        val_experiments.add(exp_id)
+    
+    # Verify no overlap (should have perfect stratification)
+    overlap = train_experiments & val_experiments
+    if overlap:
+        print(f"⚠ WARNING: Found {len(overlap)} experiments in both train and validation sets!")
+        for exp_id in sorted(overlap)[:5]:
+            print(f"  - {exp_id}")
+    else:
+        print(f"✓ Perfect stratification verified: 0 experiments in overlap")
+    
+    # Create audit data - one row per experiment in this fold
+    audit_data = []
+    fold_experiments = sorted(train_experiments | val_experiments)
+    
+    for exp_id in fold_experiments:
+        in_train = exp_id in train_experiments
+        in_val = exp_id in val_experiments
+        audit_data.append({
+            'Clinical_ID': exp_id,
+            'In_Training_Pool': in_train,
+            'In_Validation_Set': in_val,
+            'Audit_Status': 'VERIFIED_UNIQUE' if not (in_train and in_val) else 'LEAKAGE_DETECTED'
+        })
+    
+    # Save audit to CSV
+    audit_df = pd.DataFrame(audit_data)
+    cross_leakage_audit_path = os.path.join(results_dir, f"{prefix}_cross_leakage_audit.csv")
+    audit_df.to_csv(cross_leakage_audit_path, index=False)
+    print(f"✓ Saved cross-leakage audit to {cross_leakage_audit_path}")
+    print(f"  Total experiments audited: {len(audit_data)}")
+    print(f"  Training set experiments: {len(train_experiments)}")
+    print(f"  Validation set experiments: {len(val_experiments)}")
+    print("="*60 + "\n")
+    
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
@@ -266,13 +331,13 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
     
     # Loss function
     if use_focal_loss:
-        loss_weights = torch.FloatTensor([1.0, pos_weight]).to(device)
+        loss_weights = torch.FloatTensor([neg_weight, pos_weight]).to(device)
         criterion = FocalLoss(gamma=gamma, weight=loss_weights, smoothing=0.0)
-        print(f"Using Focal Loss (gamma={gamma}, pos_weight={pos_weight})")
+        print(f"Using Focal Loss (gamma={gamma}, neg_weight={neg_weight}, pos_weight={pos_weight})")
     else:
-        loss_weights = torch.FloatTensor([1.0, pos_weight]).to(device)
+        loss_weights = torch.FloatTensor([neg_weight, pos_weight]).to(device)
         criterion = nn.CrossEntropyLoss(weight=loss_weights)
-        print(f"Using Cross-Entropy Loss (pos_weight={pos_weight})")
+        print(f"Using Cross-Entropy Loss (neg_weight={neg_weight}, pos_weight={pos_weight})")
     
     # Optimizer & Scheduler
     optimizer = AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
@@ -308,7 +373,13 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
     
     # Training loop
     history = {'train_loss': [], 'train_acc': [], 'val_loss': [], 'val_acc': []}
-    best_loss = float('inf')
+    best_metric_value = float('inf') if saver_metric == 'loss' else float('-inf')
+    best_recall = 0.0
+    last_val_recall = 0.0
+    
+    # Track timing and performance
+    start_time = time.time()
+    peak_gpu_memory = 0.0
     
     # Use the non-deprecated torch.amp.GradScaler API
     device_type = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -366,11 +437,14 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
             if scaler:
                 scaler.scale(loss).backward()
                 scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                if clip_grad > 0:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), clip_grad)
                 scaler.step(optimizer)
                 scaler.update()
             else:
                 loss.backward()
+                if clip_grad > 0:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), clip_grad)
                 optimizer.step()
         
         train_loss /= max(epoch_valid_batches, 1)  # Avoid division by zero
@@ -419,32 +493,69 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
         val_acc = 100.0 * val_correct / val_total
         
         # Metrics
-        from sklearn.metrics import f1_score
+        from sklearn.metrics import f1_score, precision_score, recall_score
         val_f1 = f1_score(all_labels, all_preds, zero_division=0)
+        val_precision = precision_score(all_labels, all_preds, zero_division=0)
+        val_recall = recall_score(all_labels, all_preds, zero_division=0)
         
         print(f"Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.2f}%")
-        print(f"Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.2f}% | F1: {val_f1:.4f}")
+        print(f"Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.2f}% | Prec: {val_precision:.4f} | Rec: {val_recall:.4f} | F1: {val_f1:.4f}")
         
         history['train_loss'].append(train_loss)
         history['train_acc'].append(train_acc)
         history['val_loss'].append(val_loss)
         history['val_acc'].append(val_acc)
         
-        # Save best model (defensive: always save on last epoch as fallback)
-        is_best = val_loss < best_loss
+        # Determine metric to optimize based on saver_metric
+        if saver_metric == 'loss':
+            current_metric = val_loss
+            is_best = current_metric < best_metric_value
+        elif saver_metric == 'accuracy':
+            current_metric = val_acc
+            is_best = current_metric > best_metric_value
+        elif saver_metric == 'precision':
+            current_metric = val_precision
+            is_best = current_metric > best_metric_value
+        elif saver_metric == 'recall':
+            current_metric = val_recall
+            is_best = current_metric > best_metric_value
+        elif saver_metric == 'f1':
+            current_metric = val_f1
+            is_best = current_metric > best_metric_value
+        else:
+            current_metric = val_loss
+            is_best = current_metric < best_metric_value
+            print(f"WARNING: Unknown saver_metric '{saver_metric}', using 'loss'")
+        
         is_last_epoch = (epoch == num_epochs - 1)
         
         if is_best or is_last_epoch:
-            best_loss = val_loss
+            if is_best:
+                best_metric_value = current_metric
             torch.save(model.state_dict(), best_model_path)
-            status = "best (lowest val loss)" if is_best else "final epoch (fallback)"
+            status = f"best ({saver_metric}: {current_metric:.4f})" if is_best else "final epoch (fallback)"
             print(f"✓ Saved {status} model to {best_model_path}")
         
         scheduler.step()
+        
+        # Track peak GPU memory during training
+        if torch.cuda.is_available():
+            peak_gpu_memory = max(peak_gpu_memory, torch.cuda.max_memory_allocated(device) / (1024**3))
+    
+    # Calculate training time
+    end_time = time.time()
+    training_time_seconds = end_time - start_time
+    training_time_hours = training_time_seconds / 3600.0
     
     # Save learning curves
     plot_learning_curves(history, history_path)
     print(f"\n✓ Saved learning curves to {history_path}")
+    
+    # Save learning curves as JSON
+    json_path = os.path.join(results_dir, f"{prefix}_learning_curves.json")
+    with open(json_path, 'w') as f:
+        json.dump(history, f, indent=2)
+    print(f"✓ Saved learning curves JSON to {json_path}")
     
     # Final evaluation on validation set
     print(f"\n{'='*80}")
@@ -499,6 +610,9 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
     kappa = cohen_kappa_score(all_labels, all_preds)
     balanced_accuracy = (sensitivity + specificity) / 2.0
     
+    # Store final recall for model selection metrics and SWA comparison
+    last_val_recall = recall
+    
     print(f"Accuracy:  {accuracy*100:.2f}%")
     print(f"Precision: {precision*100:.2f}%")
     print(f"Recall:    {recall*100:.2f}%")
@@ -536,6 +650,159 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
     report_df.to_csv(results_csv_path)
     print(f"✓ Saved evaluation report to {results_csv_path}")
     
+    # Save probabilities and labels for threshold analysis
+    # This enables post-hoc threshold optimization without retraining
+    probabilities_json_path = os.path.join(results_dir, f"{prefix}_probabilities.json")
+    probabilities_data = {
+        "fold_idx": fold_idx,
+        "model_name": model_name,
+        "total_samples": len(all_labels),
+        "num_positive": int(np.sum(all_labels)),
+        "num_negative": int(len(all_labels) - np.sum(all_labels)),
+        "labels": all_labels.tolist(),
+        "probabilities": all_probs.tolist(),
+        "predictions_at_0_5": all_preds.tolist()
+    }
+    
+    with open(probabilities_json_path, 'w') as f:
+        json.dump(probabilities_data, f, indent=2)
+    print(f"✓ Saved probabilities JSON to {probabilities_json_path}")
+    
+    # Save probability statistics summary (useful for quick reference)
+    prob_summary_json_path = os.path.join(results_dir, f"{prefix}_probability_summary.json")
+    prob_summary_data = {
+        "fold_idx": fold_idx,
+        "model_name": model_name,
+        "total_patches": int(len(all_labels)),
+        "positive_patches": int(np.sum(all_labels)),
+        "negative_patches": int(len(all_labels) - np.sum(all_labels)),
+        "positive_class_stats": {
+            "mean_probability": float(np.mean(all_probs[all_labels == 1])) if np.any(all_labels == 1) else 0.0,
+            "std_probability": float(np.std(all_probs[all_labels == 1])) if np.any(all_labels == 1) else 0.0,
+            "min_probability": float(np.min(all_probs[all_labels == 1])) if np.any(all_labels == 1) else 0.0,
+            "max_probability": float(np.max(all_probs[all_labels == 1])) if np.any(all_labels == 1) else 0.0,
+            "median_probability": float(np.median(all_probs[all_labels == 1])) if np.any(all_labels == 1) else 0.0
+        },
+        "negative_class_stats": {
+            "mean_probability": float(np.mean(all_probs[all_labels == 0])) if np.any(all_labels == 0) else 0.0,
+            "std_probability": float(np.std(all_probs[all_labels == 0])) if np.any(all_labels == 0) else 0.0,
+            "min_probability": float(np.min(all_probs[all_labels == 0])) if np.any(all_labels == 0) else 0.0,
+            "max_probability": float(np.max(all_probs[all_labels == 0])) if np.any(all_labels == 0) else 0.0,
+            "median_probability": float(np.median(all_probs[all_labels == 0])) if np.any(all_labels == 0) else 0.0
+        },
+        "overall_stats": {
+            "mean_probability": float(np.mean(all_probs)),
+            "std_probability": float(np.std(all_probs)),
+            "min_probability": float(np.min(all_probs)),
+            "max_probability": float(np.max(all_probs)),
+            "median_probability": float(np.median(all_probs))
+        }
+    }
+    
+    with open(prob_summary_json_path, 'w') as f:
+        json.dump(prob_summary_data, f, indent=2)
+    print(f"✓ Saved probability statistics to {prob_summary_json_path}")
+    
+    # Generate bootstrap CI metrics summary (matching format from summarize_results.py)
+    # This enables statistical confidence interval reporting per fold
+    from scipy import stats
+    
+    metrics_summary_data = []
+    
+    # List of metrics to compute with bootstrap CIs
+    metrics_to_compute = [
+        ('Recall', recall),
+        ('Precision', precision),
+        ('Accuracy', accuracy),
+        ('F1_Score', f1),
+        ('Sensitivity', sensitivity),
+        ('Specificity', specificity),
+        ('Balanced_Accuracy', balanced_accuracy),
+        ('PPV_(Positive_Predictive_Value)', ppv),
+        ('NPV_(Negative_Predictive_Value)', npv),
+        ('FPR_(False_Positive_Rate)', fpr_metric),
+        ('FNR_(False_Negative_Rate)', fnr),
+        ('Matthews_Correlation_Coefficient', mcc),
+        ('Cohen_Kappa', kappa)
+    ]
+    
+    # For bootstrap CI, we need to resample from our predictions
+    # Bootstrap over the sample level (not individual patches, but overall metric stability)
+    np.random.seed(42)  # For reproducibility
+    n_bootstrap = 1000
+    bootstrap_samples = []
+    
+    for _ in range(n_bootstrap):
+        # Resample with replacement
+        indices = np.random.choice(len(all_labels), size=len(all_labels), replace=True)
+        sampled_labels = all_labels[indices]
+        sampled_preds = all_preds[indices]
+        sampled_probs = all_probs[indices]
+        
+        # Compute metrics on this bootstrap sample
+        if len(np.unique(sampled_labels)) > 1 and len(np.unique(sampled_preds)) > 1:
+            try:
+                tn_b, fp_b, fn_b, tp_b = confusion_matrix(sampled_labels, sampled_preds, labels=[0, 1]).ravel()
+            except:
+                tn_b, fp_b, fn_b, tp_b = 0, 0, 0, 0
+        else:
+            tn_b, fp_b, fn_b, tp_b = 0, 0, 0, 0
+        
+        # Calculate metrics for this sample
+        sample_metrics = {
+            'Recall': tp_b / (tp_b + fn_b) if (tp_b + fn_b) > 0 else 0.0,
+            'Precision': tp_b / (tp_b + fp_b) if (tp_b + fp_b) > 0 else 0.0,
+            'Accuracy': (tp_b + tn_b) / (tp_b + tn_b + fp_b + fn_b) if (tp_b + tn_b + fp_b + fn_b) > 0 else 0.0,
+            'F1_Score': 2 * (tp_b / (tp_b + fp_b) if (tp_b + fp_b) > 0 else 0) * (tp_b / (tp_b + fn_b) if (tp_b + fn_b) > 0 else 0) / ((tp_b / (tp_b + fp_b) if (tp_b + fp_b) > 0 else 0) + (tp_b / (tp_b + fn_b) if (tp_b + fn_b) > 0 else 0)) if ((tp_b / (tp_b + fp_b) if (tp_b + fp_b) > 0 else 0) + (tp_b / (tp_b + fn_b) if (tp_b + fn_b) > 0 else 0)) > 0 else 0.0,
+            'Sensitivity': tp_b / (tp_b + fn_b) if (tp_b + fn_b) > 0 else 0.0,
+            'Specificity': tn_b / (tn_b + fp_b) if (tn_b + fp_b) > 0 else 0.0,
+            'Balanced_Accuracy': ((tp_b / (tp_b + fn_b) if (tp_b + fn_b) > 0 else 0.0) + (tn_b / (tn_b + fp_b) if (tn_b + fp_b) > 0 else 0.0)) / 2,
+            'PPV_(Positive_Predictive_Value)': tp_b / (tp_b + fp_b) if (tp_b + fp_b) > 0 else 0.0,
+            'NPV_(Negative_Predictive_Value)': tn_b / (tn_b + fn_b) if (tn_b + fn_b) > 0 else 0.0,
+            'FPR_(False_Positive_Rate)': fp_b / (fp_b + tn_b) if (fp_b + tn_b) > 0 else 0.0,
+            'FNR_(False_Negative_Rate)': fn_b / (fn_b + tp_b) if (fn_b + tp_b) > 0 else 0.0,
+            'Matthews_Correlation_Coefficient': matthews_corrcoef(sampled_labels, sampled_preds) if len(np.unique(sampled_labels)) > 1 else 0.0,
+            'Cohen_Kappa': cohen_kappa_score(sampled_labels, sampled_preds) if len(np.unique(sampled_labels)) > 1 else 0.0
+        }
+        bootstrap_samples.append(sample_metrics)
+    
+    # Compute bootstrap statistics for each metric
+    for metric_name, point_est in metrics_to_compute:
+        bootstrap_values = [s[metric_name] for s in bootstrap_samples]
+        bootstrap_mean = np.mean(bootstrap_values)
+        bootstrap_std = np.std(bootstrap_values)
+        ci_lower = np.percentile(bootstrap_values, 2.5)
+        ci_upper = np.percentile(bootstrap_values, 97.5)
+        ci_margin = (ci_upper - ci_lower) / 2
+        
+        metrics_summary_data.append({
+            'Metric': metric_name,
+            'Point_Estimate': float(point_est),
+            'Bootstrap_Mean': float(bootstrap_mean),
+            'Bootstrap_Std': float(bootstrap_std),
+            'CI_Lower_95%': float(ci_lower),
+            'CI_Upper_95%': float(ci_upper),
+            'CI_Margin': float(ci_margin)
+        })
+    
+    # Add confusion matrix values (no bootstrap variation for these)
+    metrics_summary_data.extend([
+        {'Metric': 'TP_(True_Positives)', 'Point_Estimate': float(tp), 'Bootstrap_Mean': float(tp), 'Bootstrap_Std': 0.0, 'CI_Lower_95%': float(tp), 'CI_Upper_95%': float(tp), 'CI_Margin': 0.0},
+        {'Metric': 'FP_(False_Positives)', 'Point_Estimate': float(fp), 'Bootstrap_Mean': float(fp), 'Bootstrap_Std': 0.0, 'CI_Lower_95%': float(fp), 'CI_Upper_95%': float(fp), 'CI_Margin': 0.0},
+        {'Metric': 'FN_(False_Negatives)', 'Point_Estimate': float(fn), 'Bootstrap_Mean': float(fn), 'Bootstrap_Std': 0.0, 'CI_Lower_95%': float(fn), 'CI_Upper_95%': float(fn), 'CI_Margin': 0.0},
+        {'Metric': 'TN_(True_Negatives)', 'Point_Estimate': float(tn), 'Bootstrap_Mean': float(tn), 'Bootstrap_Std': 0.0, 'CI_Lower_95%': float(tn), 'CI_Upper_95%': float(tn), 'CI_Margin': 0.0}
+    ])
+    
+    metrics_summary_df = pd.DataFrame(metrics_summary_data)
+    metrics_summary_csv_path = os.path.join(results_dir, f"{prefix}_metrics_summary.csv")
+    metrics_summary_df.to_csv(metrics_summary_csv_path, index=False)
+    print(f"✓ Saved bootstrap CI metrics summary to {metrics_summary_csv_path}")
+    
+    # Generate calibration curve image (shows prediction reliability)
+    calibration_curve_path = os.path.join(results_dir, f"{prefix}_calibration_curve.png")
+    plot_calibration_curve(all_labels, all_probs, calibration_curve_path)
+    print(f"✓ Saved calibration curve to {calibration_curve_path}")
+    
     # Plot metrics
     fpr, tpr, _ = roc_curve(all_labels, all_probs)
     roc_auc = auc(fpr, tpr)
@@ -569,6 +836,36 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
     plt.close()
     print(f"✓ Saved PR curve to {pr_path}")
     
+    # Calculate throughput
+    total_train_patches = len(train_loader.dataset)
+    throughput_patches_per_sec = total_train_patches / training_time_seconds if training_time_seconds > 0 else 0.0
+    
+    # Determine whether to use SWA based on performance comparison
+    # If SWA is enabled, check if best recall from training exceeds final validation recall
+    model_selection_use_swa = use_swa
+    if use_swa and best_recall > last_val_recall:
+        print(f"\nNote: Best validation recall ({best_recall:.4f}) exceeds final recall ({last_val_recall:.4f})")
+        print(f"Setting use_swa=False to use best model instead of final model")
+        model_selection_use_swa = False
+    
+    # Generate model_selection.json
+    model_selection_data = {
+        "use_swa": model_selection_use_swa,
+        "best_recall": float(best_recall),
+        "last_val_recall": float(last_val_recall),
+        "training_time_hours": round(training_time_hours, 2),
+        "training_time_seconds": round(training_time_seconds, 1),
+        "peak_gpu_memory_gb": round(peak_gpu_memory, 2),
+        "throughput_patches_per_sec": round(throughput_patches_per_sec, 1),
+        "num_epochs": num_epochs,
+        "fold": fold_idx
+    }
+    
+    model_selection_path = os.path.join(results_dir, f"{prefix}_model_selection.json")
+    with open(model_selection_path, 'w') as f:
+        json.dump(model_selection_data, f, indent=2)
+    print(f"✓ Saved model selection metrics to {model_selection_path}")
+    
     # Clean up
     gc.collect()
     torch.cuda.empty_cache()
@@ -591,8 +888,15 @@ if __name__ == "__main__":
     parser.add_argument("--weight_decay", type=float, default=0.01, help="Weight decay")
     parser.add_argument("--use_focal_loss", type=bool, default=False, help="Use Focal Loss")
     parser.add_argument("--pos_weight", type=float, default=2.5, help="Positive class weight (for DeepHP 1:2.5 imbalance)")
+    parser.add_argument("--neg_weight", type=float, default=1.0, help="Negative class weight")
     parser.add_argument("--gamma", type=float, default=1.0, help="Focal Loss gamma")
     parser.add_argument("--iter", type=str, default="deephp", help="Iteration name for tracking (e.g., 'deephp' or '31.0')")
+    parser.add_argument("--use_swa", type=str, default="True", help="Whether to use SWA (Stochastic Weight Averaging)")
+    parser.add_argument("--swa_start", type=int, default=12, help="Epoch to start SWA averaging")
+    parser.add_argument("--jitter", type=float, default=0.15, help="ColorJitter intensity (brightness/contrast augmentation)")
+    parser.add_argument("--pct_start", type=float, default=0.1, help="Warmup percentage for learning rate schedule")
+    parser.add_argument("--clip_grad", type=float, default=0.0, help="Gradient clipping norm (0=disabled)")
+    parser.add_argument("--saver_metric", type=str, default="loss", help="Metric for model selection (loss/accuracy/precision/recall/f1)")
     
     args = parser.parse_args()
     
@@ -606,6 +910,13 @@ if __name__ == "__main__":
         weight_decay=args.weight_decay,
         use_focal_loss=args.use_focal_loss,
         pos_weight=args.pos_weight,
+        neg_weight=args.neg_weight,
         gamma=args.gamma,
-        iter_name=args.iter
+        iter_name=args.iter,
+        use_swa=args.use_swa == "True",
+        swa_start=args.swa_start,
+        jitter=args.jitter,
+        pct_start=args.pct_start,
+        clip_grad=args.clip_grad,
+        saver_metric=args.saver_metric
     )

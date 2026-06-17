@@ -96,43 +96,61 @@ class DeepHPDataset(Dataset):
                 with open(blacklist_path, 'r') as f:
                     bl_data = json.load(f)
                 
-                # DEBUG: Print what we loaded
-                print(f"[DEBUG] Loaded blacklistDeepHP.json successfully")
-                print(f"[DEBUG] Blacklist data keys: {bl_data.keys() if isinstance(bl_data, dict) else 'not a dict'}")
-                    
-                # Extract all paths to exclude
+                # Extract all paths to exclude (prefer folder/filename construction for robustness)
                 if isinstance(bl_data, dict):
                     for key, entry in bl_data.items():
-                        print(f"[DEBUG] Processing blacklist entry: {key}")
                         if isinstance(entry, dict):
-                            if "full_path" in entry:
-                                blacklist_paths.add(entry["full_path"])
-                                print(f"[DEBUG]   Added via full_path: {entry['full_path']}")
-                            elif "filename" in entry and "folder" in entry:
-                                # Construct path from folder and filename
+                            # Prioritize folder/filename construction (more robust across systems)
+                            if "filename" in entry and "folder" in entry:
                                 folder_name = entry["folder"]
                                 filename = entry["filename"]
                                 potential_path = os.path.join(root_dir, folder_name, filename)
                                 blacklist_paths.add(potential_path)
-                                print(f"[DEBUG]   Added via folder/filename: {potential_path}")
+                                if self.train:
+                                    print(f"[DEBUG] Blacklist entry '{key}': {folder_name}/{filename}")
+                            elif "full_path" in entry:
+                                # Fallback: use full_path if it exists
+                                blacklist_paths.add(entry["full_path"])
+                                if self.train:
+                                    print(f"[DEBUG] Blacklist entry '{key}' (via full_path)")
                 
                 # Filter out blacklisted samples
                 if blacklist_paths:
                     original_count = len(self.samples)
-                    print(f"[DEBUG] Original samples count: {original_count}")
-                    print(f"[DEBUG] Blacklist paths to exclude: {blacklist_paths}")
-                    self.samples = [(path, label) for path, label in self.samples if path not in blacklist_paths]
-                    excluded_count = original_count - len(self.samples)
-                    print(f"[DEBUG] After exclusion count: {len(self.samples)}, excluded: {excluded_count}")
-                    # Only print once during training dataset initialization
-                    if self.train and excluded_count > 0:
-                        print(f"DeepHP Blacklist: Excluded {excluded_count} patches")
-                        print(f"  Reason: Macenko reference and problematic patches")
+                    
+                    # Detailed exclusion with logging
+                    excluded_list = []
+                    filtered_samples = []
+                    for path, label in self.samples:
+                        if path in blacklist_paths:
+                            excluded_list.append(path)
+                        else:
+                            filtered_samples.append((path, label))
+                    
+                    self.samples = filtered_samples
+                    excluded_count = len(excluded_list)
+                    
+                    # Print results only during training dataset init (to avoid duplication)
+                    if self.train:
+                        print(f"[DEBUG] Original samples count: {original_count}")
+                        print(f"[DEBUG] After blacklist exclusion: {len(self.samples)}, excluded: {excluded_count}")
+                        if excluded_list:
+                            for excluded_path in excluded_list:
+                                print(f"[DEBUG]   Excluded: {os.path.basename(excluded_path)}")
+                        else:
+                            print(f"[DEBUG]   ⚠ No files were excluded. Checking if they exist...")
+                            for bl_path in blacklist_paths:
+                                exists = os.path.exists(bl_path)
+                                in_samples = any(p == bl_path for p, _ in [(path, label) for path, label in self.samples])
+                                print(f"[DEBUG]   Path exists: {exists}, In samples: {in_samples}")
+                                print(f"[DEBUG]   {bl_path}")
                 else:
-                    print(f"[DEBUG] No blacklist paths found to exclude")
+                    if self.train:
+                        print(f"[DEBUG] No blacklist paths to exclude")
                         
             except Exception as e:
-                print(f"Warning: Could not load blacklist {blacklist_path}: {e}")
+                if self.train:
+                    print(f"Warning: Could not load blacklist {blacklist_path}: {e}")
         
         # Stratified k-fold split (ensure class distribution across folds)
         self.fold_indices = self._stratified_fold_split()
@@ -148,40 +166,96 @@ class DeepHPDataset(Dataset):
         
     def _stratified_fold_split(self):
         """
-        Create stratified k-fold split ensuring class balance across folds.
+        Create stratified k-fold split at the EXPERIMENT level to prevent data leakage.
+        Groups patches by experiment ID, then splits experiments (not patches) into folds.
+        This ensures patches from the same patient/experiment don't leak between train/val.
+        
+        Experiment ID is extracted from filename: "Experiment-108_b0s..." -> "Experiment-108"
+        All patches from the same experiment stay together in the same fold.
         """
-        # Separate indices by class
-        pos_indices = [i for i, (_, label) in enumerate(self.samples) if label == 1]
-        neg_indices = [i for i, (_, label) in enumerate(self.samples) if label == 0]
+        # Group samples by experiment ID (extracted from filename before _b0s)
+        experiment_groups = {}  # {experiment_id: [(index, label), ...]}
         
-        # Shuffle both classes deterministically
+        for idx, (path, label) in enumerate(self.samples):
+            # Extract experiment ID: "Experiment-108_b0s..." -> "Experiment-108"
+            filename = os.path.basename(path)
+            experiment_id = filename.split('_b0s')[0]
+            
+            if experiment_id not in experiment_groups:
+                experiment_groups[experiment_id] = []
+            experiment_groups[experiment_id].append((idx, label))
+        
+        print(f"[DEBUG] Grouped {len(self.samples)} patches into {len(experiment_groups)} experiments")
+        
+        # Separate experiments by label
+        pos_experiments = []  # List of (experiment_id, patch_indices)
+        neg_experiments = []
+        
+        for exp_id, patch_indices in experiment_groups.items():
+            # Get the label from first patch (all patches from same experiment have same label)
+            label = patch_indices[0][1]
+            indices = [idx for idx, _ in patch_indices]
+            
+            if label == 1:
+                pos_experiments.append((exp_id, indices))
+            else:
+                neg_experiments.append((exp_id, indices))
+        
+        print(f"[DEBUG] Separated into {len(pos_experiments)} positive and {len(neg_experiments)} negative experiments")
+        print(f"[DEBUG] Fold {self.fold}/{self.num_folds}: Splitting experiments to prevent data leakage")
+        
+        # Shuffle experiments deterministically (per-fold seed for reproducibility)
         rng = np.random.RandomState(42 + self.fold)
-        rng.shuffle(pos_indices)
-        rng.shuffle(neg_indices)
+        rng.shuffle(pos_experiments)
+        rng.shuffle(neg_experiments)
         
-        # Determine fold boundaries per class
-        pos_fold_size = len(pos_indices) // self.num_folds
-        neg_fold_size = len(neg_indices) // self.num_folds
+        # Create stratified folds at experiment level (NOT patch level)
+        pos_fold_size = len(pos_experiments) // self.num_folds
+        neg_fold_size = len(neg_experiments) // self.num_folds
         
         pos_val_start = self.fold * pos_fold_size
-        pos_val_end = pos_val_start + pos_fold_size if self.fold < self.num_folds - 1 else len(pos_indices)
+        pos_val_end = pos_val_start + pos_fold_size if self.fold < self.num_folds - 1 else len(pos_experiments)
         
         neg_val_start = self.fold * neg_fold_size
-        neg_val_end = neg_val_start + neg_fold_size if self.fold < self.num_folds - 1 else len(neg_indices)
+        neg_val_end = neg_val_start + neg_fold_size if self.fold < self.num_folds - 1 else len(neg_experiments)
         
-        # Combine train and val
-        val_indices = pos_indices[pos_val_start:pos_val_end] + neg_indices[neg_val_start:neg_val_end]
-        train_indices = (pos_indices[:pos_val_start] + pos_indices[pos_val_end:] + 
-                        neg_indices[:neg_val_start] + neg_indices[neg_val_end:])
+        # Collect all patch indices for validation experiments
+        val_indices = []
+        val_experiment_ids = []
+        for exp_id, indices in pos_experiments[pos_val_start:pos_val_end]:
+            val_indices.extend(indices)
+            val_experiment_ids.append(exp_id)
+        for exp_id, indices in neg_experiments[neg_val_start:neg_val_end]:
+            val_indices.extend(indices)
+            val_experiment_ids.append(exp_id)
         
-        # DEBUG: Verify indices are disjoint
+        # Collect all patch indices for training experiments
+        train_indices = []
+        train_experiment_ids = []
+        for exp_id, indices in pos_experiments[:pos_val_start] + pos_experiments[pos_val_end:]:
+            train_indices.extend(indices)
+            train_experiment_ids.append(exp_id)
+        for exp_id, indices in neg_experiments[:neg_val_start] + neg_experiments[neg_val_end:]:
+            train_indices.extend(indices)
+            train_experiment_ids.append(exp_id)
+        
+        # Verify no data leakage at experiment level
         train_set = set(train_indices)
         val_set = set(val_indices)
         overlap = train_set & val_set
+        
         if overlap:
             print(f"[ERROR] CRITICAL: Train and validation indices overlap! {len(overlap)} samples in both!")
+            print(f"[ERROR] This indicates experiment-level separation failed!")
         else:
             print(f"[DEBUG] ✓ Train/Val indices are disjoint ({len(train_indices)} train, {len(val_indices)} val)")
+            print(f"[DEBUG] ✓ Validation fold has {len(val_experiment_ids)} experiments, training has {len(train_experiment_ids)}")
+            
+            if self.train:
+                print(f"[DEBUG] TRAIN split: {len(train_experiment_ids)} experiments, {len(train_indices)} patches")
+            else:
+                print(f"[DEBUG] VAL split: {len(val_experiment_ids)} experiments, {len(val_indices)} patches")
+                print(f"[DEBUG] Validation experiments: {sorted(val_experiment_ids)}")
         
         return {'train': train_indices, 'val': val_indices}
     
