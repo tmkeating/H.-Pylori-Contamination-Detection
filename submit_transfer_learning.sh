@@ -65,7 +65,10 @@ PROFILE=${PROFILE:-"SEARCHER"}
 PROFILE_DEEPHP=${PROFILE_DEEPHP:-"$PROFILE"}  # Default to PROFILE if not specified
 ITER=${ITER:-"31.0"}
 FOLD_BATCH_SIZE=${FOLD_BATCH_SIZE:-"0"}  # 0=all parallel (default), N=batch in groups of N (e.g., 3 = 3+2)
-PRETRAINED_BACKBONE="results/deephp_backbone_final_${MODEL_NAME}_${ITER}.pth"
+PRETRAINED_BACKBONE=$(ls -t results/deephp_backbone_final_*_${MODEL_NAME}_${ITER}.pth 2>/dev/null | head -1)
+if [ -z "$PRETRAINED_BACKBONE" ]; then
+    PRETRAINED_BACKBONE="results/deephp_backbone_final_${MODEL_NAME}_${ITER}.pth"  # Fallback (won't exist yet)
+fi
 FREEZE_BACKBONE=${FREEZE_BACKBONE:-"False"}
 SKIP_PRETRAINING=${SKIP_PRETRAINING:-"False"}
 SKIP_TRANSFER_LEARNING=${SKIP_TRANSFER_LEARNING:-"False"}
@@ -91,9 +94,11 @@ if [ "$SKIP_PRETRAINING" = "True" ] || [ "$SKIP_PRETRAINING" = "true" ]; then
     echo ""
     
     if [ -z "$DEEPHP_SUMMARY_JOB_ID" ]; then
-        # Try to read from file
-        if [ -f "results/deephp_summary_job_id.txt" ]; then
-            DEEPHP_SUMMARY_JOB_ID=$(cat results/deephp_summary_job_id.txt)
+        # Try to read from file (now uses pattern: {run_id}_{ITER}_summary_job_id.txt)
+        SUMMARY_JOB_FILE=$(ls -t results/*_${ITER}_summary_job_id.txt 2>/dev/null | head -1)
+        if [ -f "$SUMMARY_JOB_FILE" ]; then
+            DEEPHP_SUMMARY_JOB_ID=$(cat "$SUMMARY_JOB_FILE")
+            echo "Found summary job file: $SUMMARY_JOB_FILE"
         else
             echo "WARNING: No DEEPHP_SUMMARY_JOB_ID provided and file not found"
             echo "Using immediate scheduling (no dependency)"
@@ -113,22 +118,57 @@ else
     # Call submit_train_deepHP.sh to start pre-training orchestration
     if [ -f "submit_train_deepHP.sh" ]; then
         chmod +x submit_train_deepHP.sh
+        # Extract RUN_ID from existing results if not specified (for parallel safety)
+        if [ -z "$RUN_ID" ]; then
+            # Generate next available RUN_ID
+            RUN_ID=$(python3 << 'RUN_ID_GEN_EOF'
+import os
+import re
+
+results_dir = "results"
+if not os.path.exists(results_dir):
+    print("01")
+else:
+    files = os.listdir(results_dir)
+    max_run = 0
+    
+    for f in files:
+        match = re.match(r"^(\d+)_[\d.]+_(\d+)_", f)
+        if match:
+            try:
+                run_id = int(match.group(1))
+                max_run = max(max_run, run_id)
+            except:
+                pass
+    
+    print(f"{max_run + 1:02d}")
+RUN_ID_GEN_EOF
+)
+        fi
+        
+        echo "Phase 1 Run ID: $RUN_ID"
+        echo ""
+        
         # Export ITER and use PROFILE_DEEPHP for pre-training, PROFILE for transfer learning
-        export MODEL_NAME PROFILE=$PROFILE_DEEPHP ITER
+        export MODEL_NAME PROFILE=$PROFILE_DEEPHP ITER RUN_ID
         PRETRAINING_OUTPUT=$(./submit_train_deepHP.sh 2>&1)
         echo "$PRETRAINING_OUTPUT"
         # Restore PROFILE for transfer learning phase
         export PROFILE
         
-        # Extract summary job ID from the output or file
-        if [ -f "results/deephp_summary_job_id.txt" ]; then
-            DEEPHP_SUMMARY_JOB_ID=$(cat results/deephp_summary_job_id.txt)
+        # Extract summary job ID from file (written immediately by submit_train_deepHP.sh)
+        # Pattern: {run_id}_{ITER}_summary_job_id.txt
+        SUMMARY_JOB_FILE="results/${RUN_ID}_${ITER}_summary_job_id.txt"
+        if [ -f "$SUMMARY_JOB_FILE" ]; then
+            DEEPHP_SUMMARY_JOB_ID=$(cat "$SUMMARY_JOB_FILE")
             echo ""
             echo "✓ Pre-training orchestrator started"
             echo "  Summary Job ID: $DEEPHP_SUMMARY_JOB_ID"
+            echo "  Summary Job File: $SUMMARY_JOB_FILE"
             echo ""
         else
-            echo "ERROR: submit_train_deepHP.sh did not produce summary job ID file"
+            echo "ERROR: Summary job ID file not found"
+            echo "       Expected: $SUMMARY_JOB_FILE"
             exit 1
         fi
     else
@@ -555,7 +595,14 @@ TRAIN_CMD="python3 -u train.py \
 
 # Only include backbone path if not skipping pre-training
 if [ "\$SKIP_PRETRAINING" != "True" ] && [ "\$SKIP_PRETRAINING" != "true" ]; then
-    TRAIN_CMD="\$TRAIN_CMD --pretrained_backbone_path results/deephp_backbone_final_${MODEL_NAME}_${ITER}.pth"
+    # Find the latest matching backbone file (includes run_id in filename)
+    BACKBONE_FILE=\$(ls -t results/deephp_backbone_final_*_\${MODEL_NAME}_\${ITER}.pth 2>/dev/null | head -1)
+    if [ -n "\$BACKBONE_FILE" ]; then
+        TRAIN_CMD="\$TRAIN_CMD --pretrained_backbone_path \$BACKBONE_FILE"
+    else
+        echo "WARNING: No pre-trained backbone found for MODEL_NAME=\$MODEL_NAME, ITER=\$ITER"
+        echo "Expected pattern: results/deephp_backbone_final_*_\${MODEL_NAME}_\${ITER}.pth"
+    fi
 fi
 
 TRAIN_CMD="\$TRAIN_CMD --freeze_backbone \$FREEZE_BACKBONE"

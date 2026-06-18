@@ -32,6 +32,7 @@ from torch.utils.data import Dataset
 from PIL import Image
 from tqdm import tqdm
 from torchvision import transforms as T
+from sklearn.model_selection import StratifiedKFold
 
 
 class DeepHPDataset(Dataset):
@@ -166,19 +167,22 @@ class DeepHPDataset(Dataset):
         
     def _stratified_fold_split(self):
         """
-        Create stratified k-fold split at the EXPERIMENT level to prevent data leakage.
-        Groups patches by experiment ID, then splits experiments (not patches) into folds.
-        This ensures patches from the same patient/experiment don't leak between train/val.
+        Create stratified k-fold split that:
+        1. Prevents data leakage (experiments not split across folds)
+        2. Balances PATCH-LEVEL class distribution (~2:1 ratio per fold)
         
-        Experiment ID is extracted from filename: "Experiment-108_b0s..." -> "Experiment-108"
-        All patches from the same experiment stay together in the same fold.
+        Strategy:
+        - Group patches by experiment (no leakage)
+        - Sort experiments by patch count within each class
+        - Use round-robin distribution to assign experiments to folds
+        - This naturally balances both experiment count and patch count per fold
         """
-        # Group samples by experiment ID (extracted from filename before _b0s)
+        # Step 1: Group patches by experiment ID
         experiment_groups = {}  # {experiment_id: [(index, label), ...]}
         
         for idx, (path, label) in enumerate(self.samples):
-            # Extract experiment ID: "Experiment-108_b0s..." -> "Experiment-108"
             filename = os.path.basename(path)
+            # Extract experiment ID: "Experiment-100_b0s..." -> "Experiment-100"
             experiment_id = filename.split('_b0s')[0]
             
             if experiment_id not in experiment_groups:
@@ -187,75 +191,112 @@ class DeepHPDataset(Dataset):
         
         print(f"[DEBUG] Grouped {len(self.samples)} patches into {len(experiment_groups)} experiments")
         
-        # Separate experiments by label
-        pos_experiments = []  # List of (experiment_id, patch_indices)
-        neg_experiments = []
+        # Step 2: Create experiment-level records with patch counts
+        experiments_by_label = {'positive': [], 'negative': []}
         
         for exp_id, patch_indices in experiment_groups.items():
-            # Get the label from first patch (all patches from same experiment have same label)
-            label = patch_indices[0][1]
+            label = patch_indices[0][1]  # All patches from same experiment have same label
             indices = [idx for idx, _ in patch_indices]
+            patch_count = len(indices)
             
-            if label == 1:
-                pos_experiments.append((exp_id, indices))
-            else:
-                neg_experiments.append((exp_id, indices))
+            label_key = 'positive' if label == 1 else 'negative'
+            experiments_by_label[label_key].append({
+                'exp_id': exp_id,
+                'indices': indices,
+                'patch_count': patch_count,
+                'label': label
+            })
         
-        print(f"[DEBUG] Separated into {len(pos_experiments)} positive and {len(neg_experiments)} negative experiments")
-        print(f"[DEBUG] Fold {self.fold}/{self.num_folds}: Splitting experiments to prevent data leakage")
+        pos_exp_count = len(experiments_by_label['positive'])
+        neg_exp_count = len(experiments_by_label['negative'])
+        pos_patch_count = sum(e['patch_count'] for e in experiments_by_label['positive'])
+        neg_patch_count = sum(e['patch_count'] for e in experiments_by_label['negative'])
+        overall_ratio = neg_patch_count / pos_patch_count if pos_patch_count > 0 else 0
         
-        # Shuffle experiments deterministically (per-fold seed for reproducibility)
-        rng = np.random.RandomState(42 + self.fold)
-        rng.shuffle(pos_experiments)
-        rng.shuffle(neg_experiments)
+        print(f"[DEBUG] Positive: {pos_exp_count} experiments, {pos_patch_count:,} patches")
+        print(f"[DEBUG] Negative: {neg_exp_count} experiments, {neg_patch_count:,} patches")
+        print(f"[DEBUG] Patch-level ratio (Neg:Pos): {overall_ratio:.2f}:1")
         
-        # Create stratified folds at experiment level (NOT patch level)
-        pos_fold_size = len(pos_experiments) // self.num_folds
-        neg_fold_size = len(neg_experiments) // self.num_folds
+        # Step 3: Sort experiments by patch count (descending) within each label
+        # This ensures alternating large/small experiments during round-robin distribution
+        for label_key in experiments_by_label:
+            experiments_by_label[label_key].sort(key=lambda e: e['patch_count'], reverse=True)
         
-        pos_val_start = self.fold * pos_fold_size
-        pos_val_end = pos_val_start + pos_fold_size if self.fold < self.num_folds - 1 else len(pos_experiments)
+        # Step 4: Round-robin assign experiments to folds to balance patches per fold
+        fold_experiments = [[] for _ in range(self.num_folds)]
+        fold_patch_counts = [0] * self.num_folds
+        fold_pos_counts = [0] * self.num_folds
+        fold_neg_counts = [0] * self.num_folds
         
-        neg_val_start = self.fold * neg_fold_size
-        neg_val_end = neg_val_start + neg_fold_size if self.fold < self.num_folds - 1 else len(neg_experiments)
+        # Distribute positive experiments first (round-robin by patch count)
+        for i, exp in enumerate(experiments_by_label['positive']):
+            fold_idx = i % self.num_folds
+            fold_experiments[fold_idx].append(exp)
+            fold_patch_counts[fold_idx] += exp['patch_count']
+            fold_pos_counts[fold_idx] += exp['patch_count']
         
-        # Collect all patch indices for validation experiments
-        val_indices = []
-        val_experiment_ids = []
-        for exp_id, indices in pos_experiments[pos_val_start:pos_val_end]:
-            val_indices.extend(indices)
-            val_experiment_ids.append(exp_id)
-        for exp_id, indices in neg_experiments[neg_val_start:neg_val_end]:
-            val_indices.extend(indices)
-            val_experiment_ids.append(exp_id)
+        # Distribute negative experiments (round-robin by patch count)
+        for i, exp in enumerate(experiments_by_label['negative']):
+            fold_idx = i % self.num_folds
+            fold_experiments[fold_idx].append(exp)
+            fold_patch_counts[fold_idx] += exp['patch_count']
+            fold_neg_counts[fold_idx] += exp['patch_count']
         
-        # Collect all patch indices for training experiments
+        # Step 5: Extract indices for this specific fold
         train_indices = []
-        train_experiment_ids = []
-        for exp_id, indices in pos_experiments[:pos_val_start] + pos_experiments[pos_val_end:]:
-            train_indices.extend(indices)
-            train_experiment_ids.append(exp_id)
-        for exp_id, indices in neg_experiments[:neg_val_start] + neg_experiments[neg_val_end:]:
-            train_indices.extend(indices)
-            train_experiment_ids.append(exp_id)
+        val_indices = []
         
-        # Verify no data leakage at experiment level
+        for fold_idx in range(self.num_folds):
+            fold_indices = []
+            for exp in fold_experiments[fold_idx]:
+                fold_indices.extend(exp['indices'])
+            
+            if fold_idx == self.fold:
+                # This is the validation fold
+                val_indices = fold_indices
+            else:
+                # This is part of the training fold
+                train_indices.extend(fold_indices)
+        
+        # Step 6: Verify no data leakage
         train_set = set(train_indices)
         val_set = set(val_indices)
         overlap = train_set & val_set
         
         if overlap:
-            print(f"[ERROR] CRITICAL: Train and validation indices overlap! {len(overlap)} samples in both!")
-            print(f"[ERROR] This indicates experiment-level separation failed!")
+            print(f"[ERROR] CRITICAL: {len(overlap)} patches in both train and val!")
         else:
-            print(f"[DEBUG] ✓ Train/Val indices are disjoint ({len(train_indices)} train, {len(val_indices)} val)")
-            print(f"[DEBUG] ✓ Validation fold has {len(val_experiment_ids)} experiments, training has {len(train_experiment_ids)}")
-            
-            if self.train:
-                print(f"[DEBUG] TRAIN split: {len(train_experiment_ids)} experiments, {len(train_indices)} patches")
+            print(f"[DEBUG] ✓ No patch-level overlap ({len(train_indices)} train, {len(val_indices)} val)")
+        
+        # Step 7: Report patch-level distribution
+        train_labels = np.array([self.samples[i][1] for i in train_indices])
+        train_pos = np.sum(train_labels == 1)
+        train_neg = np.sum(train_labels == 0)
+        train_ratio = train_neg / train_pos if train_pos > 0 else 0
+        
+        val_labels = np.array([self.samples[i][1] for i in val_indices])
+        val_pos = np.sum(val_labels == 1)
+        val_neg = np.sum(val_labels == 0)
+        val_ratio = val_neg / val_pos if val_pos > 0 else 0
+        
+        if self.train:
+            print(f"[DEBUG] TRAIN split: {len(train_indices)} patches")
+            print(f"[DEBUG]   Positive: {train_pos:,} ({100*train_pos/len(train_indices):.1f}%)")
+            print(f"[DEBUG]   Negative: {train_neg:,} ({100*train_neg/len(train_indices):.1f}%)")
+            print(f"[DEBUG]   Ratio (Neg:Pos): {train_ratio:.2f}:1")
+        else:
+            print(f"[DEBUG] VAL split: {len(val_indices)} patches")
+            print(f"[DEBUG]   Positive: {val_pos:,} ({100*val_pos/len(val_indices):.1f}%)")
+            print(f"[DEBUG]   Negative: {val_neg:,} ({100*val_neg/len(val_indices):.1f}%)")
+            print(f"[DEBUG]   Ratio (Neg:Pos): {val_ratio:.2f}:1")
+            print(f"[DEBUG]   Expected (overall): {overall_ratio:.2f}:1")
+            ratio_drift = abs(val_ratio - overall_ratio) / overall_ratio * 100 if overall_ratio > 0 else 0
+            if ratio_drift < 5:
+                print(f"[DEBUG]   ✓ Val ratio within 5% of expected (drift: {ratio_drift:.1f}%)")
+            elif ratio_drift < 10:
+                print(f"[DEBUG]   ⚠ Val ratio slightly off (drift: {ratio_drift:.1f}%)")
             else:
-                print(f"[DEBUG] VAL split: {len(val_experiment_ids)} experiments, {len(val_indices)} patches")
-                print(f"[DEBUG] Validation experiments: {sorted(val_experiment_ids)}")
+                print(f"[DEBUG]   ✗ Val ratio significantly off (drift: {ratio_drift:.1f}%)")
         
         return {'train': train_indices, 'val': val_indices}
     

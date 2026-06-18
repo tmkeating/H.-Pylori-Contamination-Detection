@@ -32,6 +32,9 @@ PROFILE=${PROFILE:-"SEARCHER"}
 ITER=${ITER:-"31.0"}
 FOLD_BATCH_SIZE=${FOLD_BATCH_SIZE:-"0"}  # 0=all parallel (default), N=batch in groups of N
 
+# RUN_ID for parallel job safety (optional; auto-generated if not provided)
+RUN_ID=${RUN_ID:-""}
+
 # Source the Model Profiles (for consistency with HelicoDataSet training)
 if [ -f "profiles.sh" ]; then
     source profiles.sh
@@ -99,11 +102,67 @@ else
 fi
 echo ""
 
+# Generate or validate RUN_ID for parallel job safety
+if [ -z "$RUN_ID" ]; then
+    # Auto-generate next available RUN_ID based on existing results
+    python3 << 'RUN_ID_GEN_EOF'
+import os
+import re
+
+results_dir = "results"
+if not os.path.exists(results_dir):
+    print("01")
+else:
+    files = os.listdir(results_dir)
+    max_run = 0
+    
+    # Look for existing run IDs in filename patterns (e.g., "302_25.1_106069_...")
+    for f in files:
+        match = re.match(r"^(\d+)_[\d.]+_(\d+)_", f)
+        if match:
+            try:
+                run_id = int(match.group(1))
+                max_run = max(max_run, run_id)
+            except:
+                pass
+    
+    # Use next available number
+    next_run = max_run + 1
+    print(f"{next_run:02d}")
+RUN_ID_GEN_EOF
+    RUN_ID=$(python3 << 'RUN_ID_GEN_EOF'
+import os
+import re
+
+results_dir = "results"
+if not os.path.exists(results_dir):
+    print("01")
+else:
+    files = os.listdir(results_dir)
+    max_run = 0
+    
+    for f in files:
+        match = re.match(r"^(\d+)_[\d.]+_(\d+)_", f)
+        if match:
+            try:
+                run_id = int(match.group(1))
+                max_run = max(max_run, run_id)
+            except:
+                pass
+    
+    print(f"{max_run + 1:02d}")
+RUN_ID_GEN_EOF
+)
+fi
+
+echo "Using RUN_ID: $RUN_ID"
+echo ""
+
 # Export all configuration variables for presync job access
 export NUM_EPOCHS NEG_WEIGHT POS_WEIGHT GAMMA USE_FOCAL_LOSS SAVER_METRIC
 export FREEZE_BN FREEZE_BACKBONE CLIP_GRAD PCT_START WEIGHT_DECAY
 export USE_SWA SWA_START JITTER POOL_TYPE DEEPHP_EPOCHS BATCH_SIZE LEARNING_RATE
-export VENV_ROOT PROFILE MODEL_NAME ITER PRETRAINED_BACKBONE
+export VENV_ROOT PROFILE MODEL_NAME ITER PRETRAINED_BACKBONE RUN_ID
 
 # 1. Submit pre-sync job (prepares scratch directory for data)
 echo "Submitting pre-sync job to prepare environment..."
@@ -374,7 +433,7 @@ do
         --error=results/slurm_deephp_error_f${FOLD}_%j.txt \
         --ntasks=1 \
         --cpus-per-task=4 \
-        --gres=gpu:l40s:1 --gres=shard:l40s:12000 \
+        --gres=shard:l40s:12000 \
         --mem=20G \
         --time=36:00:00 \
         <<TRAIN_EOF
@@ -396,11 +455,12 @@ POS_WEIGHT=$POS_WEIGHT
 USE_FOCAL_LOSS=$USE_FOCAL_LOSS
 GAMMA=$GAMMA
 ITER=$ITER
+RUN_ID=$RUN_ID
 
 cd /home/tkeating/model/H.-Pylori-Contamination-Detection
 
-# Force all folds to use GPU 0 for memory consolidation
-export CUDA_VISIBLE_DEVICES=0
+# Let SLURM shard scheduler distribute jobs across available GPUs
+# Do not force GPU 0 - shards will be assigned by scheduler
 
 # Get scratch directory at runtime from config
 DEEPHP_SCRATCH=\$(python3 -c "from config import DEEPHP_SCRATCH_ROOT; print(DEEPHP_SCRATCH_ROOT)")
@@ -426,7 +486,8 @@ python3 -u train_deepHP_patches.py \
     --pct_start \$PCT_START \
     --clip_grad \$CLIP_GRAD \
     --saver_metric \$SAVER_METRIC \
-    --iter \$ITER
+    --iter \$ITER \
+    --run_id \$RUN_ID
 
 echo ""
 echo "✓ Fold \$FOLD complete: results/deephp_backbone_pretrained_\${MODEL_NAME}_f\${FOLD}.pth"
@@ -495,7 +556,7 @@ SUMMARY_JOB_OUT=$(sbatch --dependency=$DEPENDENCY_STRING \
     --time=0-00:30 \
     --mem=16G \
     --cpus-per-task=1 \
-    --gres=gpu:l40s:1 --gres=shard:l40s:4000 \
+    --gres=shard:l40s:4000 \
     --job-name=deephp_summary \
     --output=results/slurm_deephp_summary_%j.txt \
     --error=results/slurm_deephp_summary_error_%j.txt \
@@ -543,10 +604,16 @@ if len(fold_checkpoints) < 5:
 
 fold_paths = [fold_checkpoints[i] for i in range(5)]
 
-# Build output path using MODEL_NAME and ITER from environment
+# Extract run_id from first fold checkpoint filename
+# Pattern: {run_id}_{iter_name}_{slurm_id}_f{fold}_{model_name}_model_brain.pth
+# E.g., "302_31.0_113456_f0_convnext_tiny_model_brain.pth"
+run_id_match = re.search(r'^(\d+)_[\d.]+_\d+_f0_convnext_tiny', os.path.basename(fold_paths[0]))
+run_id = run_id_match.group(1) if run_id_match else "unknown"
+
+# Build output path using RUN_ID, MODEL_NAME and ITER from environment
 model_name = os.environ.get('MODEL_NAME', 'convnext_tiny')
 iter_name = os.environ.get('ITER', '31.0')
-output_path = f"results/deephp_backbone_final_{model_name}_{iter_name}.pth"
+output_path = f"results/deephp_backbone_final_{run_id}_{model_name}_{iter_name}.pth"
 
 print(f"Found backbone checkpoints:")
 for i, path in enumerate(fold_paths):
@@ -577,6 +644,9 @@ print(f"\n3. Generate ensemble and analysis:")
 print(f"   python3 ensemble_voting.py --runs 31_0,31_1,31_2,31_3,31_4")
 print(f"{'='*80}\n")
 
+# Output run_id for reference
+print(f"__RUN_ID_OUTPUT__:{run_id}")
+
 PYTHON_EOF
 
 # Generate cross-validation summary CSVs for DeepHP pre-training
@@ -593,9 +663,9 @@ from pathlib import Path
 iter_num = os.environ.get('ITER', '31.0')
 print(f"[CSV] Processing iteration: {iter_num}")
 
-# Find all DeepHP evaluation reports for THIS specific iteration (one per fold)
-# Pattern: {run_id}_{iter}_{slurm_id}_f{fold}_{model_name}_evaluation_report.csv
-all_reports = sorted(glob.glob("results/*_f[0-4]_convnext_tiny_evaluation_report.csv"))
+# Find all DeepHP metrics_summary reports for THIS specific iteration (one per fold)
+# Pattern: {run_id}_{iter}_{slurm_id}_f{fold}_{model_name}_metrics_summary.csv
+all_reports = sorted(glob.glob("results/*_f[0-4]_convnext_tiny_metrics_summary.csv"))
 
 # Filter to only reports matching this iteration
 eval_reports = []
@@ -612,51 +682,63 @@ print(f"[CSV] Found {len(eval_reports)} evaluation reports for iteration {iter_n
 if not eval_reports:
     print(f"WARNING: No evaluation reports found for DeepHP iteration {iter_num}")
 else:
-    # Load all fold evaluation reports
+    # Load all fold metrics_summary reports
     fold_data = []
     for report_path in eval_reports:
         try:
             df = pd.read_csv(report_path)
+            # metrics_summary.csv has: Metric, Point_Estimate, Bootstrap_Mean, Bootstrap_Std, CI_Lower_95%, CI_Upper_95%, CI_Margin
             # Extract fold number from filename (pattern: ..._f{N}_...)
             match = re.search(r'_f(\d+)_', report_path)
             if match:
                 fold_idx = int(match.group(1))
-                # Add fold column
+                # Rename columns to include fold
                 df['Fold'] = fold_idx
-                fold_data.append(df)
-                print(f"  ✓ Loaded fold {fold_idx}: {Path(report_path).name}")
+                # Only keep Metric and Point_Estimate columns for aggregation (ignore per-fold CI)
+                if 'Metric' in df.columns and 'Point_Estimate' in df.columns:
+                    fold_data.append(df[['Fold', 'Metric', 'Point_Estimate']])
+                    print(f"  ✓ Loaded fold {fold_idx}: {Path(report_path).name}")
+                else:
+                    print(f"  WARNING: Missing Metric or Point_Estimate column in {report_path}")
         except Exception as e:
             print(f"  WARNING: Could not load {report_path}: {e}")
-    
     if fold_data:
-        # Combine all fold data
+        # Combine all fold data (now in long format: Fold, Metric, Point_Estimate)
         all_metrics = pd.concat(fold_data, ignore_index=True)
         
-        # Generate summary CSV with per-fold metrics (include iteration in filename)
-        summary_output = f"results/grand_cv_pretraining_summary_{iter_num}.csv"
+        # Rename Point_Estimate to Mean for consistency in downstream processing
+        all_metrics = all_metrics.rename(columns={'Point_Estimate': 'Mean'})
+        
+        # Extract run_id from first metrics file filename
+        # Pattern: {run_id}_{iter}_{slurm_id}_f{fold}_{model_name}_metrics_summary.csv
+        run_id = None
+        if eval_reports:
+            match = re.search(r'^(\d+)_[\d.]+_\d+_f\d+_', os.path.basename(eval_reports[0]))
+            if match:
+                run_id = match.group(1)
+        
+        # Generate summary CSV with per-fold metrics in long format
+        if run_id:
+            summary_output = f"results/grand_cv_pretraining_summary_{run_id}_{iter_num}.csv"
+        else:
+            summary_output = f"results/grand_cv_pretraining_summary_{iter_num}.csv"
         all_metrics.to_csv(summary_output, index=False)
         print(f"\n✓ Pre-training summary CSV: {summary_output}")
-        print(f"  ({len(fold_data)} folds, {len(all_metrics)} total rows)")
+        print(f"  ({len(fold_data)} folds, {len(all_metrics)} total metric rows)")
         
-        # Generate averages CSV
-        metric_cols = [col for col in all_metrics.columns if col not in ['Fold', 'RunID', 'FoldIdx']]
+        # Generate averages CSV from long-format data
+        # Group by Metric and calculate mean/std across folds
+        averages_data = []
+        for metric in all_metrics['Metric'].unique():
+            metric_values = all_metrics[all_metrics['Metric'] == metric]['Mean'].values
+            
+            averages_data.append({
+                'Metric': metric,
+                'Mean': metric_values.mean(),
+                'Std': metric_values.std()
+            })
         
-        averages = {}
-        stds = {}
-        
-        for col in metric_cols:
-            if all_metrics[col].dtype in [np.float64, np.int64]:
-                try:
-                    averages[col] = all_metrics[col].mean()
-                    stds[col] = all_metrics[col].std()
-                except:
-                    pass
-        
-        avg_df = pd.DataFrame({
-            'Metric': list(averages.keys()),
-            'Mean': list(averages.values()),
-            'Std': list(stds.values())
-        })
+        avg_df = pd.DataFrame(averages_data)
         
         # Add formatted column
         avg_df['Formatted'] = avg_df.apply(
@@ -664,46 +746,64 @@ else:
         )
         avg_df['Run_Range'] = iter_num
         
-        avg_output = f"results/grand_cv_pretraining_averages_{iter_num}.csv"
+        if run_id:
+            avg_output = f"results/grand_cv_pretraining_averages_{run_id}_{iter_num}.csv"
+        else:
+            avg_output = f"results/grand_cv_pretraining_averages_{iter_num}.csv"
         avg_df.to_csv(avg_output, index=False)
-        print(f"✓ Pre-training averages CSV: {avg_output}")
+        print(f"✓ Pre-training averages CSV: {avg_output}\n")
         
-        # Generate bootstrap CI CSV
+        # Print formatted averages table
+        print(f"{'='*80}")
+        print(f"CROSS-VALIDATION AVERAGES (Iteration {iter_num})")
+        print(f"{'='*80}")
+        print(f"{'Metric':<40} {'Mean':>15} {'Std Dev':>15}")
+        print(f"{'-'*80}")
+        for _, row in avg_df.iterrows():
+            metric_name = row['Metric']
+            mean_val = row['Mean']
+            std_val = row['Std']
+            print(f"{metric_name:<40} {mean_val:>15.4f} {std_val:>15.4f}")
+        print(f"{'='*80}\n")
+        
+        # Generate bootstrap CI CSV from long-format data
         from scipy import stats
         
         ci_data = []
-        for col in metric_cols:
-            if all_metrics[col].dtype in [np.float64, np.int64]:
-                try:
-                    values = all_metrics[col].dropna().values
-                    point_est = values.mean()
-                    fold_std = values.std()
-                    
-                    # Bootstrap CI
-                    bootstrap_samples = np.random.choice(values, size=(1000, len(values)), replace=True)
-                    bootstrap_means = bootstrap_samples.mean(axis=1)
-                    bootstrap_mean = bootstrap_means.mean()
-                    bootstrap_std = bootstrap_means.std()
-                    
-                    ci_lower = np.percentile(bootstrap_means, 2.5)
-                    ci_upper = np.percentile(bootstrap_means, 97.5)
-                    ci_margin = (ci_upper - ci_lower) / 2
-                    
-                    ci_data.append({
-                        'Metric': col,
-                        'Point_Estimate': point_est,
-                        'Fold_Std': fold_std,
-                        'Bootstrap_Mean': bootstrap_mean,
-                        'Bootstrap_Std': bootstrap_std,
-                        'CI_Lower_95%': ci_lower,
-                        'CI_Upper_95%': ci_upper,
-                        'CI_Margin': ci_margin
-                    })
-                except:
-                    pass
+        for metric in all_metrics['Metric'].unique():
+            try:
+                values = all_metrics[all_metrics['Metric'] == metric]['Mean'].values
+                point_est = values.mean()
+                fold_std = values.std()
+                
+                # Bootstrap CI (resample from fold-level means)
+                bootstrap_samples = np.random.choice(values, size=(1000, len(values)), replace=True)
+                bootstrap_means = bootstrap_samples.mean(axis=1)
+                bootstrap_mean = bootstrap_means.mean()
+                bootstrap_std = bootstrap_means.std()
+                
+                ci_lower = np.percentile(bootstrap_means, 2.5)
+                ci_upper = np.percentile(bootstrap_means, 97.5)
+                ci_margin = (ci_upper - ci_lower) / 2
+                
+                ci_data.append({
+                    'Metric': metric,
+                    'Point_Estimate': point_est,
+                    'Fold_Std': fold_std,
+                    'Bootstrap_Mean': bootstrap_mean,
+                    'Bootstrap_Std': bootstrap_std,
+                    'CI_Lower_95%': ci_lower,
+                    'CI_Upper_95%': ci_upper,
+                    'CI_Margin': ci_margin
+                })
+            except:
+                pass
         
         ci_df = pd.DataFrame(ci_data)
-        ci_output = f"results/grand_cv_pretraining_bootstrap_ci_{iter_num}.csv"
+        if run_id:
+            ci_output = f"results/grand_cv_pretraining_bootstrap_ci_{run_id}_{iter_num}.csv"
+        else:
+            ci_output = f"results/grand_cv_pretraining_bootstrap_ci_{iter_num}.csv"
         ci_df.to_csv(ci_output, index=False)
         print(f"✓ Pre-training bootstrap CI CSV: {ci_output}")
         
@@ -722,6 +822,7 @@ echo "Generating combined confusion matrices dashboard..."
 python3 << 'CM_DASH_EOF'
 import pandas as pd
 import numpy as np
+import json
 import glob
 import os
 import re
@@ -748,39 +849,44 @@ for report_path in all_reports:
 print(f"[CM] Found {len(eval_reports)} evaluation reports for iteration {iter_num}")
 
 if len(eval_reports) == 5:
-    # Load evaluation reports and extract confusion matrices
+    # Load probabilities JSON files to get labels and predictions for confusion matrices
     fold_cms = []
-    for report_path in sorted(eval_reports):
+    prob_files = glob.glob(f"results/*{iter_num}*_probabilities.json")
+    
+    for prob_file in sorted(prob_files):
         try:
-            df = pd.read_csv(report_path)
+            with open(prob_file, 'r') as f:
+                data = json.load(f)
+            
             # Extract fold number
-            match = re.search(r'_f(\d+)_', report_path)
+            match = re.search(r'_f(\d+)_', prob_file)
             fold_idx = int(match.group(1)) if match else -1
             
-            # Get labels and predictions from evaluation report
-            if 'Label' in df.columns and 'Prediction' in df.columns:
-                labels = df['Label'].values
-                preds = df['Prediction'].values
-                cm = confusion_matrix(labels, preds, labels=[0, 1])
-                fold_cms.append(cm)
-                print(f"  ✓ Fold {fold_idx}: {cm.shape} confusion matrix")
-            else:
-                print(f"  ✗ Fold {fold_idx}: Missing Label or Prediction columns")
+            # Get labels and predictions from probabilities file
+            labels = np.array(data['labels'])
+            predictions = np.array(data['predictions_at_0_5'])
+            cm = confusion_matrix(labels, predictions, labels=[0, 1])
+            fold_cms.append(cm)
+            print(f"  ✓ Fold {fold_idx}: {cm.shape} confusion matrix")
         except Exception as e:
-            print(f"  ✗ Error loading {report_path}: {e}")
+            print(f"  ✗ Error loading {prob_file}: {e}")
     
     # Generate combined dashboard if all 5 folds loaded successfully
     if len(fold_cms) == 5:
         model_name = os.environ.get('MODEL_NAME', 'convnext_tiny')
-        dashboard_output = f"results/{iter_num}_confusion_matrices_combined_{model_name}.png"
+        run_id = os.environ.get('RUN_ID', '')
+        
+        # Build filename with run_id if available
+        if run_id:
+            dashboard_output = f"results/{run_id}_{iter_num}_confusion_matrices_combined_{model_name}.png"
+        else:
+            dashboard_output = f"results/{iter_num}_confusion_matrices_combined_{model_name}.png"
         
         plot_combined_confusion_matrices(fold_cms, dashboard_output, figsize=(16, 10))
         print(f"\n✓ Combined confusion matrices dashboard saved:")
         print(f"  {dashboard_output}")
     else:
         print(f"WARNING: Only {len(fold_cms)}/5 folds loaded. Skipping dashboard.")
-else:
-    print(f"WARNING: Expected 5 reports for iteration {iter_num}, found {len(eval_reports)}")
 
 CM_DASH_EOF
 echo ""
@@ -843,7 +949,13 @@ if len(prob_files) == 5:
         fold_data_list = sorted(fold_data_list, key=lambda x: x['fold_idx'])
         
         model_name = os.environ.get('MODEL_NAME', 'convnext_tiny')
-        dashboard_output = f"results/{iter_num}_pr_roc_curves_combined_{model_name}.png"
+        run_id = os.environ.get('RUN_ID', '')
+        
+        # Build filename with run_id if available
+        if run_id:
+            dashboard_output = f"results/{run_id}_{iter_num}_pr_roc_curves_combined_{model_name}.png"
+        else:
+            dashboard_output = f"results/{iter_num}_pr_roc_curves_combined_{model_name}.png"
         
         plot_combined_pr_roc_curves(fold_data_list, dashboard_output, figsize=(16, 14))
         print(f"\n✓ Combined PR and ROC curves dashboard saved:")
@@ -865,13 +977,19 @@ echo ""
 echo "Averaged backbone:"
 model_name=$(python3 -c "import os; print(os.environ.get('MODEL_NAME', 'convnext_tiny'))")
 iter_name=$(python3 -c "import os; print(os.environ.get('ITER', '31.0'))")
-ls -lah "results/deephp_backbone_final_${model_name}_${iter_name}.pth" 2>/dev/null
+# Note: Run ID is extracted in the summary script and embedded in the filename
+ls -lah results/deephp_backbone_final_*_${model_name}_${iter_name}.pth 2>/dev/null
 echo ""
 
 SUMMARY_EOF
 )
 
 SUMMARY_JOB_ID=$(echo $SUMMARY_JOB_OUT | awk '{print $4}')
+
+# Write summary job ID file immediately (for parallel job safety)
+# This allows transfer_learning.sh to proceed without waiting
+SUMMARY_JOB_ID_FILE="results/${RUN_ID}_${ITER}_summary_job_id.txt"
+echo "$SUMMARY_JOB_ID" > "$SUMMARY_JOB_ID_FILE"
 
 echo "=========================================================================="
 echo "✓ All jobs submitted successfully!"
@@ -881,14 +999,15 @@ echo "Pre-sync Job ID: $PRE_SYNC_JOB_ID"
 echo "Fold Jobs: $DEPENDENCIES"
 echo "Summary Job ID: $SUMMARY_JOB_ID"
 echo ""
+echo "Run ID: $RUN_ID"
+echo "Iteration: $ITER"
+echo ""
+echo "Summary job ID file written immediately:"
+echo "  $SUMMARY_JOB_ID_FILE"
+echo ""
 echo "Monitor progress with:"
 echo "  squeue -u \$USER | grep deephp"
 echo ""
 echo "View logs with:"
 echo "  tail -f results/slurm_deephp_f0_*.txt"
-echo ""
-
-# Output summary job ID to file for orchestrator scripts to read
-echo "$SUMMARY_JOB_ID" > results/deephp_summary_job_id.txt
-echo "Summary job ID written to: results/deephp_summary_job_id.txt"
 echo ""

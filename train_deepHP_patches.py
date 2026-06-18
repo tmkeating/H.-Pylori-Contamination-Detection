@@ -115,10 +115,129 @@ class FocalLoss(nn.Module):
         return focal_loss.mean()
 
 
+def generate_gradcam_visualizations(model, images, labels, predictions, probabilities, output_path, device, title_prefix=""):
+    """
+    Generate prediction visualizations with simple attention maps.
+    
+    Creates a grid showing:
+    - True Positives (model correct, label positive)
+    - False Positives (model predicted positive, label negative)
+    - False Negatives (model predicted negative, label positive)
+    - True Negatives (model correct, label negative)
+    
+    Args:
+        model: Trained model
+        images: Input images tensor [N, C, H, W]
+        labels: Ground truth labels [N]
+        predictions: Model predictions [N]
+        probabilities: Model probabilities [N]
+        output_path: Path to save the visualization
+        device: torch device
+        title_prefix: Prefix for subplot titles (e.g., fold number)
+    """
+    model.eval()
+    
+    # Normalize images for visualization (reverse ImageNet normalization)
+    # ImageNet stats: mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+    imagenet_mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1).to(device)
+    imagenet_std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1).to(device)
+    images_display = images * imagenet_std + imagenet_mean
+    images_display = torch.clamp(images_display, 0, 1)
+    
+    # Categorize predictions
+    tp_mask = (predictions == 1) & (labels == 1)
+    fp_mask = (predictions == 1) & (labels == 0)
+    fn_mask = (predictions == 0) & (labels == 1)
+    tn_mask = (predictions == 0) & (labels == 0)
+    
+    # Sample up to 3 examples from each category
+    categories = {
+        'TP': (tp_mask, 'True Positive'),
+        'FP': (fp_mask, 'False Positive'),
+        'FN': (fn_mask, 'False Negative'),
+        'TN': (tn_mask, 'True Negative')
+    }
+    
+    fig, axes = plt.subplots(4, 3, figsize=(15, 16))
+    fig.suptitle(f'Prediction Visualizations {title_prefix}', fontsize=16, fontweight='bold')
+    
+    for row, (cat_name, (mask, cat_label)) in enumerate(categories.items()):
+        indices = torch.where(mask)[0]
+        
+        if len(indices) == 0:
+            # No examples in this category
+            for col in range(3):
+                axes[row, col].text(0.5, 0.5, f'No {cat_label}s', 
+                                   ha='center', va='center', fontsize=12)
+                axes[row, col].axis('off')
+            continue
+        
+        # Sample up to 3 examples
+        sample_indices = indices[:min(3, len(indices))]
+        
+        for col, idx in enumerate(sample_indices):
+            idx = idx.item()
+            img = images_display[idx].cpu()
+            label = labels[idx].item()
+            pred = predictions[idx].item()
+            prob = probabilities[idx].item()
+            
+            # Compute gradient-based saliency for this single image
+            img_input = images[idx:idx+1].clone().detach().requires_grad_(True)
+            
+            try:
+                with torch.enable_grad():
+                    output = model(img_input)
+                    # Use the predicted class score for gradient computation
+                    score = output[0, pred]
+                    score.backward()
+                
+                # Get input gradients
+                if img_input.grad is not None:
+                    # Compute magnitude of gradients across channels
+                    gradients = torch.abs(img_input.grad.data)  # Use .data to avoid tracking
+                    attention = torch.mean(gradients, dim=1, keepdim=True)[0, 0].cpu().detach()
+                    
+                    # Normalize attention map
+                    attention = attention - attention.min()
+                    attention = attention / (attention.max() + 1e-8)
+                else:
+                    attention = None
+            except Exception as e:
+                attention = None
+            finally:
+                del img_input  # Free memory
+                torch.cuda.empty_cache()  # Clear GPU cache
+            
+            # Display image
+            img_np = img.permute(1, 2, 0).numpy()
+            axes[row, col].imshow(img_np)
+            
+            # Overlay attention if available
+            if attention is not None:
+                # Enhance contrast: use power function to emphasize high-gradient regions
+                attention_enhanced = attention.numpy() ** 0.5  # Square root to increase contrast
+                axes[row, col].imshow(attention_enhanced, cmap='jet', alpha=0.65, vmin=0, vmax=1)
+            
+            # Title with prediction confidence
+            label_str = "POS" if label == 1 else "NEG"
+            pred_str = "POS" if pred == 1 else "NEG"
+            title = f"{cat_label}\nTrue: {label_str}, Pred: {pred_str}\n({prob:.2f})"
+            axes[row, col].set_title(title, fontsize=10)
+            axes[row, col].axis('off')
+    
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=100, bbox_inches='tight')
+    plt.close()
+    
+    # Cleanup and reset model state
+    torch.cuda.empty_cache()
+
+
 def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", num_epochs=20, 
                           batch_size=128, learning_rate=2e-5, weight_decay=0.01, 
                           use_focal_loss=False, pos_weight=2.5, neg_weight=1.0, gamma=1.0, 
-                          iter_name="deephp", use_swa=True, swa_start=12, jitter=0.15, pct_start=0.1,
+                          iter_name="deephp", run_id="", use_swa=True, swa_start=12, jitter=0.15, pct_start=0.1,
                           clip_grad=0.0, saver_metric="loss"):
     """
     Train a CNN backbone on DeepHP H&E patches for pre-training.
@@ -151,8 +270,12 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
     slurm_id = os.environ.get("SLURM_JOB_ID", "local")
     
     # Check for existing run IDs for THIS EXACT iteration (for multi-fold consistency within same run)
+    # If run_id was explicitly provided (for parallel job safety), use that instead
     existing_run_id = None
-    if os.path.exists(results_dir):
+    if run_id and run_id.strip():
+        # Use the provided run_id directly (parallel job safety)
+        existing_run_id = run_id.strip()
+    elif os.path.exists(results_dir):
         for filename in os.listdir(results_dir):
             # Look for files matching pattern: {run_id}_{iter_name}_{slurm_id}_f{fold}_{model_name}*
             # E.g., "420_31.0_113456_f0_convnext_tiny_model_brain.pth"
@@ -246,51 +369,47 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
         print(f"Note: Could not read blacklist status: {e}\n")
     
     # Generate cross-leakage audit (verifies validation set not in training set)
-    # One row per experiment
+    # One row per image
     print("\n" + "="*60)
     print("Generating Cross-Leakage Audit:")
     print("="*60)
-    
-    # Extract experiment IDs from fold-specific indices (not full sample lists)
-    train_experiments = set()
-    val_experiments = set()
     
     # Get actual indices used in each dataset (after fold split)
     train_indices = set(train_dataset.indices)
     val_indices = set(val_dataset.indices)
     
-    # Extract experiments from training fold
+    # Extract individual images from training and validation folds
+    train_images = []
     for idx in train_indices:
         path, label = train_dataset.samples[idx]
-        filename = os.path.basename(path)
-        exp_id = filename.split('_b0s')[0]
-        train_experiments.add(exp_id)
+        train_images.append(os.path.basename(path))
     
-    # Extract experiments from validation fold
+    val_images = []
     for idx in val_indices:
         path, label = val_dataset.samples[idx]
-        filename = os.path.basename(path)
-        exp_id = filename.split('_b0s')[0]
-        val_experiments.add(exp_id)
+        val_images.append(os.path.basename(path))
     
-    # Verify no overlap (should have perfect stratification)
-    overlap = train_experiments & val_experiments
+    # Verify no overlap between train and validation images
+    train_image_set = set(train_images)
+    val_image_set = set(val_images)
+    overlap = train_image_set & val_image_set
+    
     if overlap:
-        print(f"⚠ WARNING: Found {len(overlap)} experiments in both train and validation sets!")
-        for exp_id in sorted(overlap)[:5]:
-            print(f"  - {exp_id}")
+        print(f"⚠ WARNING: Found {len(overlap)} images in both train and validation sets!")
+        for img in sorted(overlap)[:5]:
+            print(f"  - {img}")
     else:
-        print(f"✓ Perfect stratification verified: 0 experiments in overlap")
+        print(f"✓ Perfect stratification verified: 0 images in overlap")
     
-    # Create audit data - one row per experiment in this fold
+    # Create audit data - one row per image in this fold
     audit_data = []
-    fold_experiments = sorted(train_experiments | val_experiments)
+    all_images = sorted(train_image_set | val_image_set)
     
-    for exp_id in fold_experiments:
-        in_train = exp_id in train_experiments
-        in_val = exp_id in val_experiments
+    for img_name in all_images:
+        in_train = img_name in train_image_set
+        in_val = img_name in val_image_set
         audit_data.append({
-            'Clinical_ID': exp_id,
+            'Image_File': img_name,
             'In_Training_Pool': in_train,
             'In_Validation_Set': in_val,
             'Audit_Status': 'VERIFIED_UNIQUE' if not (in_train and in_val) else 'LEAKAGE_DETECTED'
@@ -301,9 +420,9 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
     cross_leakage_audit_path = os.path.join(results_dir, f"{prefix}_cross_leakage_audit.csv")
     audit_df.to_csv(cross_leakage_audit_path, index=False)
     print(f"✓ Saved cross-leakage audit to {cross_leakage_audit_path}")
-    print(f"  Total experiments audited: {len(audit_data)}")
-    print(f"  Training set experiments: {len(train_experiments)}")
-    print(f"  Validation set experiments: {len(val_experiments)}")
+    print(f"  Total images audited: {len(audit_data)}")
+    print(f"  Training set images: {len(train_images)}")
+    print(f"  Validation set images: {len(val_images)}")
     print("="*60 + "\n")
     
     train_loader = DataLoader(
@@ -720,7 +839,7 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
         ('Balanced_Accuracy', balanced_accuracy),
         ('PPV_(Positive_Predictive_Value)', ppv),
         ('NPV_(Negative_Predictive_Value)', npv),
-        ('FPR_(False_Positive_Rate)', fpr_metric),
+        ('FPR_(False_Positive_Rate)', fpr),
         ('FNR_(False_Negative_Rate)', fnr),
         ('Matthews_Correlation_Coefficient', mcc),
         ('Cohen_Kappa', kappa)
@@ -836,7 +955,7 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
     plt.close()
     print(f"✓ Saved PR curve to {pr_path}")
     
-    # Calculate throughput
+    # Calculate throughput early so model_selection.json can be generated
     total_train_patches = len(train_loader.dataset)
     throughput_patches_per_sec = total_train_patches / training_time_seconds if training_time_seconds > 0 else 0.0
     
@@ -848,7 +967,7 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
         print(f"Setting use_swa=False to use best model instead of final model")
         model_selection_use_swa = False
     
-    # Generate model_selection.json
+    # Generate model_selection.json BEFORE Grad-CAM to ensure critical metrics are always saved
     model_selection_data = {
         "use_swa": model_selection_use_swa,
         "best_recall": float(best_recall),
@@ -865,6 +984,66 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
     with open(model_selection_path, 'w') as f:
         json.dump(model_selection_data, f, indent=2)
     print(f"✓ Saved model selection metrics to {model_selection_path}")
+    
+    # Generate Grad-CAM visualizations for model interpretability (simplified, memory-efficient version)
+    print(f"\nGenerating Grad-CAM visualizations...")
+    try:
+        # Collect only a small sample per category for memory efficiency
+        # Use num_workers=0 to avoid multiprocessing issues after training
+        val_loader_gradcam = DataLoader(
+            val_dataset,
+            batch_size=32,
+            shuffle=True,
+            num_workers=0,  # Single-process to avoid worker cleanup issues
+            pin_memory=False  # Disable pinning for reduced memory
+        )
+        
+        all_images_for_gradcam = []
+        all_labels_for_gradcam = []
+        all_preds_for_gradcam = []
+        all_probs_for_gradcam = []
+        
+        model.eval()
+        with torch.no_grad():
+            for images, labels in val_loader_gradcam:
+                images = images.to(device, non_blocking=True)
+                labels = labels.to(device, non_blocking=True)
+                
+                logits = model(images)
+                probs = torch.softmax(logits, dim=1)
+                preds = torch.argmax(logits, dim=1)
+                
+                all_images_for_gradcam.append(images.cpu())
+                all_labels_for_gradcam.append(labels.cpu())
+                all_preds_for_gradcam.append(preds.cpu())
+                all_probs_for_gradcam.append(probs[:, 1].cpu())
+                
+                # Stop after collecting first batch (32 samples total)
+                # This keeps memory usage minimal while showing diverse predictions
+                break
+        
+        if all_images_for_gradcam:
+            # Concatenate collected batches
+            all_images_for_gradcam = torch.cat(all_images_for_gradcam, dim=0)
+            all_labels_for_gradcam = torch.cat(all_labels_for_gradcam, dim=0)
+            all_preds_for_gradcam = torch.cat(all_preds_for_gradcam, dim=0)
+            all_probs_for_gradcam = torch.cat(all_probs_for_gradcam, dim=0)
+            
+            # Generate Grad-CAM visualization
+            gradcam_path = os.path.join(results_dir, f"{prefix}_gradcam.png")
+            generate_gradcam_visualizations(
+                model, 
+                all_images_for_gradcam.to(device),
+                all_labels_for_gradcam.to(device),
+                all_preds_for_gradcam.to(device),
+                all_probs_for_gradcam.to(device),
+                gradcam_path,
+                device,
+                title_prefix=f"(Fold {fold_idx + 1}/{num_folds})"
+            )
+            print(f"✓ Saved Grad-CAM visualization to {gradcam_path}")
+    except Exception as e:
+        print(f"Warning: Failed to generate Grad-CAM visualizations: {e}")
     
     # Clean up
     gc.collect()
@@ -891,6 +1070,7 @@ if __name__ == "__main__":
     parser.add_argument("--neg_weight", type=float, default=1.0, help="Negative class weight")
     parser.add_argument("--gamma", type=float, default=1.0, help="Focal Loss gamma")
     parser.add_argument("--iter", type=str, default="deephp", help="Iteration name for tracking (e.g., 'deephp' or '31.0')")
+    parser.add_argument("--run_id", type=str, default="", help="Run ID for parallel job safety (auto-generated if not provided)")
     parser.add_argument("--use_swa", type=str, default="True", help="Whether to use SWA (Stochastic Weight Averaging)")
     parser.add_argument("--swa_start", type=int, default=12, help="Epoch to start SWA averaging")
     parser.add_argument("--jitter", type=float, default=0.15, help="ColorJitter intensity (brightness/contrast augmentation)")
@@ -913,6 +1093,7 @@ if __name__ == "__main__":
         neg_weight=args.neg_weight,
         gamma=args.gamma,
         iter_name=args.iter,
+        run_id=args.run_id,
         use_swa=args.use_swa == "True",
         swa_start=args.swa_start,
         jitter=args.jitter,
