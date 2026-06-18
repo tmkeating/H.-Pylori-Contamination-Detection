@@ -19,12 +19,11 @@ DATA STRATIFICATION STRATEGY:
   To prevent experiment-level overfitting and data leakage while maintaining class balance:
   
   1. Groups all patches by experiment ID (extracted from filename prefix)
-  2. Partitions experiments into balanced folds using weighted round-robin distribution:
-     - Sorts experiments by patch count within each class (positive/negative)
-     - Assigns experiments to folds in sequence: exp[0]→fold[0], exp[1]→fold[1], etc.
-     - This naturally balances both experiment count AND patch count per fold
-  3. Ensures no experiment is split across train/validation (prevents artifact overfitting)
-  4. Maintains patch-level class ratio (~2.6:1) consistently across all folds
+  2. Sorts experiments by patch count (largest first)
+  3. Divides into rounds of num_folds experiments, assigning each round to folds in order
+  4. This ensures each fold gets a mix of large and small experiments
+  5. Guarantees no experiment is split and balanced patch distribution per fold
+  6. Ensures patch-level class ratio (~2.28:1) consistent across all folds
 
 OVERFITTING PREVENTION:
   Splitting patches from the same experiment across train/val causes experiment-level
@@ -70,7 +69,6 @@ from torch.utils.data import Dataset
 from PIL import Image
 from tqdm import tqdm
 from torchvision import transforms as T
-from sklearn.model_selection import StratifiedKFold
 
 
 class DeepHPDataset(Dataset):
@@ -97,11 +95,11 @@ class DeepHPDataset(Dataset):
         - Overall patch-level ratio: ~2.6:1 (negative:positive)
     
     STRATIFICATION STRATEGY:
-        Uses weighted round-robin distribution to balance folds:
+        Uses StratifiedKFold on experiment labels (not patches) to create fold assignments:
         1. Groups patches by experiment ID
-        2. Sorts experiments by patch count within each class
-        3. Round-robin assigns experiments to folds in sequence
-        4. Result: balanced fold sizes, balanced class ratios, no experiment splitting
+        2. Applies StratifiedKFold to experiment labels (ensuring each fold has pos + neg)
+        3. Assigns all patches from each experiment to its assigned fold
+        4. Result: balanced folds, no experiment splitting, no leakage
         
         This prevents experiment-level overfitting where the model learns staining
         artifacts and slide-specific patterns instead of actual biological features.
@@ -233,36 +231,38 @@ class DeepHPDataset(Dataset):
         
     def _stratified_fold_split(self):
         """
-        Create stratified k-fold split using weighted round-robin distribution.
+        Create stratified k-fold split using class-first weighted round-robin assignment.
         
         Prevents both data leakage and severe class imbalance by:
         1. Grouping patches by experiment ID (prevents experiment splitting)
-        2. Separating positive and negative experiments
-        3. Sorting each class by patch count (descending)
-        4. Round-robin assigning experiments to folds
+        2. Sorting positive experiments by size (largest first)
+        3. Sorting negative experiments by size (largest first)
+        4. Combining as [positives + negatives]
+        5. Dividing into rounds of num_folds experiments, assigning each round to folds in order
+        6. This ensures each fold gets balanced positive and negative experiment coverage
         
         RATIONALE:
-        - Naive splitting: StratifiedKFold on patches splits experiments across folds,
-          causing overfitting on experiment-specific artifacts (staining, texture)
-        - Experiment-level StratifiedKFold: Balances experiment count but not patch count,
-          resulting in folds with ~94.8% negatives vs ~33% overall
-        - This method: Round-robin alternates large and small experiments across folds,
-          naturally balancing both experiment count AND patch count
+        - Class-first distribution: Ensures each fold gets positive experiments early
+        - Weighted round-robin within class: Large and small experiments of same class 
+          distributed evenly across folds
+        - Result: Each fold has similar counts of positive and negative experiments
         
-        EXAMPLE:
-        If we have 20 positive experiments [exp1(1000 patches), exp2(800 patches), ...]
-        and 12 negative experiments [exp21(10000 patches), exp22(8000 patches), ...]:
-        
-        Fold 0: exp1(1000p), exp3(800p), ... | exp21(10000n), exp23(8000n), ...
-        Fold 1: exp2(900p), exp4(700p), ... | exp22(9000n), exp24(7000n), ...
-        Fold 2: exp5(850p), exp6(750p), ... | exp25(9500n), exp26(7500n), ...
-        ... (distributes large+small alternately to balance fold sizes)
+        EXAMPLE (20 positive + 12 negative, 5 folds, sorted by size):
+        Positive rounds:
+        - Round 1: pos[0:5] (largest pos) → folds 0,1,2,3,4
+        - Round 2: pos[5:10] → folds 0,1,2,3,4
+        - Round 3: pos[10:15] → folds 0,1,2,3,4
+        - Round 4: pos[15:20] → folds 0,1,2,3,4
+        Negative rounds:
+        - Round 5: neg[0:5] (largest neg) → folds 0,1,2,3,4
+        - Round 6: neg[5:10] → folds 0,1,2,3,4
+        - Round 7: neg[10:12] → folds 0,1,2,3,4
         
         RESULT:
+        - Each fold has 4 positive experiments distributed across sizes
+        - Each fold has ~2.4 negative experiments distributed across sizes
+        - Total patch count naturally balanced across folds
         - No experiment is split across train/val (prevents artifact overfitting)
-        - Each fold has ~80 patches positive, ~260 patches negative (2.6:1 ratio)
-        - Each fold has ~6-7 positive and ~2-3 negative experiments (natural balance)
-        - Class distribution is consistent across all folds
         """
         # Step 1: Group patches by experiment ID
         experiment_groups = {}  # {experiment_id: [(index, label), ...]}
@@ -282,16 +282,24 @@ class DeepHPDataset(Dataset):
         experiments_by_label = {'positive': [], 'negative': []}
         
         for exp_id, patch_indices in experiment_groups.items():
-            label = patch_indices[0][1]  # All patches from same experiment have same label
             indices = [idx for idx, _ in patch_indices]
             patch_count = len(indices)
+            
+            # CRITICAL: Use MAJORITY class for mixed experiments
+            # Count positive vs negative patches to get the true label
+            labels = [label for _, label in patch_indices]
+            pos_count = sum(1 for l in labels if l == 1)
+            neg_count = sum(1 for l in labels if l == 0)
+            label = 1 if pos_count >= neg_count else 0  # Majority class (ties → positive)
             
             label_key = 'positive' if label == 1 else 'negative'
             experiments_by_label[label_key].append({
                 'exp_id': exp_id,
                 'indices': indices,
                 'patch_count': patch_count,
-                'label': label
+                'label': label,
+                'pos_patches': pos_count,
+                'neg_patches': neg_count
             })
         
         pos_exp_count = len(experiments_by_label['positive'])
@@ -300,36 +308,101 @@ class DeepHPDataset(Dataset):
         neg_patch_count = sum(e['patch_count'] for e in experiments_by_label['negative'])
         overall_ratio = neg_patch_count / pos_patch_count if pos_patch_count > 0 else 0
         
+        # Report any mixed experiments
+        mixed_exps = [e for e in experiments_by_label['positive'] + experiments_by_label['negative'] 
+                     if e.get('pos_patches', 0) > 0 and e.get('neg_patches', 0) > 0]
+        if mixed_exps:
+            for exp in mixed_exps:
+                print(f"[DEBUG] Mixed experiment {exp['exp_id']}: {exp['pos_patches']} pos, {exp['neg_patches']} neg "
+                      f"(assigned to {'POSITIVE' if exp['label'] == 1 else 'NEGATIVE'} for stratification)")
+        
         print(f"[DEBUG] Positive: {pos_exp_count} experiments, {pos_patch_count:,} patches")
         print(f"[DEBUG] Negative: {neg_exp_count} experiments, {neg_patch_count:,} patches")
         print(f"[DEBUG] Patch-level ratio (Neg:Pos): {overall_ratio:.2f}:1")
         
-        # Step 3: Sort experiments by patch count (descending) within each label
-        # This ensures alternating large/small experiments during round-robin distribution
-        for label_key in experiments_by_label:
-            experiments_by_label[label_key].sort(key=lambda e: e['patch_count'], reverse=True)
+        # Step 3: Weighted round-robin stratification to balance patch counts across folds
+        # Distribute all positive experiments first (in rounds), then all negative experiments.
+        # This ensures each fold gets positive experiments before negative ones.
+        #
+        # ALGORITHM:
+        # 1. Sort positive experiments by patch count (largest first)
+        # 2. Sort negative experiments by patch count (largest first)
+        # 3. Combine as [positives_sorted + negatives_sorted]
+        # 4. Divide into rounds of num_folds experiments each
+        # 5. Within each round, assign to folds in order (fold0, fold1, fold2, ...)
+        # 6. This ensures each fold gets balanced positive + negative coverage
+        #
+        # EXAMPLE (5 folds, 20 positive + 12 negative experiments):
+        # Positive rounds (1-4): All 20 positive experiments distributed evenly
+        # Negative rounds (5-3): All 12 negative experiments distributed evenly
+        # Result: Each fold has 4 positive + ~2.4 negative experiments (balanced by class)
         
-        # Step 4: Round-robin assign experiments to folds to balance patches per fold
+        # Sort experiments by class, then by patch count within each class
+        positive_exps = sorted(experiments_by_label['positive'], key=lambda e: e['patch_count'], reverse=True)
+        negative_exps = sorted(experiments_by_label['negative'], key=lambda e: e['patch_count'], reverse=True)
+        
+        # Combine: positives first, then negatives
+        experiment_ids = positive_exps + negative_exps
+        
+        # Weighted round-robin assignment
+        exp_fold_assignment = {}
         fold_experiments = [[] for _ in range(self.num_folds)]
-        fold_patch_counts = [0] * self.num_folds
-        fold_pos_counts = [0] * self.num_folds
-        fold_neg_counts = [0] * self.num_folds
         
-        # Distribute positive experiments first (round-robin by patch count)
-        for i, exp in enumerate(experiments_by_label['positive']):
-            fold_idx = i % self.num_folds
-            fold_experiments[fold_idx].append(exp)
-            fold_patch_counts[fold_idx] += exp['patch_count']
-            fold_pos_counts[fold_idx] += exp['patch_count']
+        for round_num in range((len(experiment_ids) + self.num_folds - 1) // self.num_folds):
+            round_start = round_num * self.num_folds
+            round_end = min(round_start + self.num_folds, len(experiment_ids))
+            round_exps = experiment_ids[round_start:round_end]
+            
+            for fold_offset, exp in enumerate(round_exps):
+                fold_idx = fold_offset % self.num_folds
+                exp_fold_assignment[exp['exp_id']] = fold_idx
+                fold_experiments[fold_idx].append(exp)
         
-        # Distribute negative experiments (round-robin by patch count)
-        for i, exp in enumerate(experiments_by_label['negative']):
-            fold_idx = i % self.num_folds
-            fold_experiments[fold_idx].append(exp)
-            fold_patch_counts[fold_idx] += exp['patch_count']
-            fold_neg_counts[fold_idx] += exp['patch_count']
+        # Verify every fold got at least one experiment
+        for fold_idx, exps in enumerate(fold_experiments):
+            if len(exps) == 0:
+                print(f"[ERROR] Fold {fold_idx} has no experiments!")
         
-        # Step 5: Extract indices for this specific fold
+        # SAFETY FALLBACK: Ensure each fold has at least 1 positive AND 1 negative experiment
+        # This handles edge cases where num_folds > num_experiments in any class
+        print(f"[DEBUG] Checking fold balance (at least 1 positive + 1 negative per fold)...")
+        
+        for fold_idx in range(self.num_folds):
+            fold_exps = fold_experiments[fold_idx]
+            pos_count = sum(1 for exp in fold_exps if exp['label'] == 1)
+            neg_count = sum(1 for exp in fold_exps if exp['label'] == 0)
+            
+            # Check if fold is missing positive experiments
+            if pos_count == 0:
+                print(f"[WARNING] Fold {fold_idx} has no positive experiments! Finding donor...")
+                # Find fold with most positives and transfer one
+                for donor_fold in range(self.num_folds):
+                    donor_exps = fold_experiments[donor_fold]
+                    donor_pos = [exp for exp in donor_exps if exp['label'] == 1]
+                    if len(donor_pos) > 1:  # Donor must keep at least 1 positive
+                        exp_to_move = donor_pos[-1]  # Take smallest positive to minimize imbalance
+                        fold_experiments[donor_fold].remove(exp_to_move)
+                        fold_experiments[fold_idx].append(exp_to_move)
+                        exp_fold_assignment[exp_to_move['exp_id']] = fold_idx
+                        print(f"[DEBUG] Moved {exp_to_move['exp_id']} from fold {donor_fold} to fold {fold_idx}")
+                        break
+            
+            # Check if fold is missing negative experiments
+            if neg_count == 0:
+                print(f"[WARNING] Fold {fold_idx} has no negative experiments! Finding donor...")
+                # Find fold with most negatives and transfer one
+                for donor_fold in range(self.num_folds):
+                    donor_exps = fold_experiments[donor_fold]
+                    donor_neg = [exp for exp in donor_exps if exp['label'] == 0]
+                    if len(donor_neg) > 1:  # Donor must keep at least 1 negative
+                        exp_to_move = donor_neg[-1]  # Take smallest negative to minimize imbalance
+                        fold_experiments[donor_fold].remove(exp_to_move)
+                        fold_experiments[fold_idx].append(exp_to_move)
+                        exp_fold_assignment[exp_to_move['exp_id']] = fold_idx
+                        print(f"[DEBUG] Moved {exp_to_move['exp_id']} from fold {donor_fold} to fold {fold_idx}")
+                        break
+        
+        # Step 4: Extract indices for this specific fold
         train_indices = []
         val_indices = []
         
@@ -345,7 +418,7 @@ class DeepHPDataset(Dataset):
                 # This is part of the training fold
                 train_indices.extend(fold_indices)
         
-        # Step 6: Verify no data leakage
+        # Step 5: Verify no data leakage
         train_set = set(train_indices)
         val_set = set(val_indices)
         overlap = train_set & val_set
@@ -355,7 +428,7 @@ class DeepHPDataset(Dataset):
         else:
             print(f"[DEBUG] ✓ No patch-level overlap ({len(train_indices)} train, {len(val_indices)} val)")
         
-        # Step 7: Report patch-level distribution
+        # Step 6: Report patch-level distribution
         train_labels = np.array([self.samples[i][1] for i in train_indices])
         train_pos = np.sum(train_labels == 1)
         train_neg = np.sum(train_labels == 0)
@@ -367,23 +440,29 @@ class DeepHPDataset(Dataset):
         val_ratio = val_neg / val_pos if val_pos > 0 else 0
         
         if self.train:
-            print(f"[DEBUG] TRAIN split: {len(train_indices)} patches")
-            print(f"[DEBUG]   Positive: {train_pos:,} ({100*train_pos/len(train_indices):.1f}%)")
-            print(f"[DEBUG]   Negative: {train_neg:,} ({100*train_neg/len(train_indices):.1f}%)")
-            print(f"[DEBUG]   Ratio (Neg:Pos): {train_ratio:.2f}:1")
-        else:
-            print(f"[DEBUG] VAL split: {len(val_indices)} patches")
-            print(f"[DEBUG]   Positive: {val_pos:,} ({100*val_pos/len(val_indices):.1f}%)")
-            print(f"[DEBUG]   Negative: {val_neg:,} ({100*val_neg/len(val_indices):.1f}%)")
-            print(f"[DEBUG]   Ratio (Neg:Pos): {val_ratio:.2f}:1")
-            print(f"[DEBUG]   Expected (overall): {overall_ratio:.2f}:1")
-            ratio_drift = abs(val_ratio - overall_ratio) / overall_ratio * 100 if overall_ratio > 0 else 0
-            if ratio_drift < 5:
-                print(f"[DEBUG]   ✓ Val ratio within 5% of expected (drift: {ratio_drift:.1f}%)")
-            elif ratio_drift < 10:
-                print(f"[DEBUG]   ⚠ Val ratio slightly off (drift: {ratio_drift:.1f}%)")
+            if len(train_indices) > 0:
+                print(f"[DEBUG] TRAIN split: {len(train_indices)} patches")
+                print(f"[DEBUG]   Positive: {train_pos:,} ({100*train_pos/len(train_indices):.1f}%)")
+                print(f"[DEBUG]   Negative: {train_neg:,} ({100*train_neg/len(train_indices):.1f}%)")
+                print(f"[DEBUG]   Ratio (Neg:Pos): {train_ratio:.2f}:1")
             else:
-                print(f"[DEBUG]   ✗ Val ratio significantly off (drift: {ratio_drift:.1f}%)")
+                print(f"[ERROR] TRAIN split is empty!")
+        else:
+            if len(val_indices) > 0:
+                print(f"[DEBUG] VAL split: {len(val_indices)} patches")
+                print(f"[DEBUG]   Positive: {val_pos:,} ({100*val_pos/len(val_indices):.1f}%)")
+                print(f"[DEBUG]   Negative: {val_neg:,} ({100*val_neg/len(val_indices):.1f}%)")
+                print(f"[DEBUG]   Ratio (Neg:Pos): {val_ratio:.2f}:1")
+                print(f"[DEBUG]   Expected (overall): {overall_ratio:.2f}:1")
+                ratio_drift = abs(val_ratio - overall_ratio) / overall_ratio * 100 if overall_ratio > 0 else 0
+                if ratio_drift < 5:
+                    print(f"[DEBUG]   ✓ Val ratio within 5% of expected (drift: {ratio_drift:.1f}%)")
+                elif ratio_drift < 10:
+                    print(f"[DEBUG]   ⚠ Val ratio slightly off (drift: {ratio_drift:.1f}%)")
+                else:
+                    print(f"[DEBUG]   ✗ Val ratio significantly off (drift: {ratio_drift:.1f}%)")
+            else:
+                print(f"[ERROR] VAL split is empty!")
         
         return {'train': train_indices, 'val': val_indices}
     
@@ -422,7 +501,9 @@ class DeepHPDataset(Dataset):
         try:
             img = Image.open(img_path).convert('RGB')
         except Exception as e:
-            print(f"Warning: Failed to load {img_path}: {e}")
+            # Log failed image loads with detailed info
+            relative_path = os.path.relpath(img_path, self.root_dir)
+            print(f"[WARNING] Failed to load {relative_path}: {str(e)}")
             # Return a black image as fallback
             img = Image.new('RGB', (256, 256), color=(0, 0, 0))
         

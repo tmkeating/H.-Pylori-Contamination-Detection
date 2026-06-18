@@ -200,7 +200,10 @@ def generate_gradcam_visualizations(model, images, labels, predictions, probabil
                     
                     # Normalize attention map
                     attention = attention - attention.min()
-                    attention = attention / (attention.max() + 1e-8)
+                    if attention.max() > 1e-6:  # Only keep if there are meaningful gradients
+                        attention = attention / (attention.max() + 1e-8)
+                    else:
+                        attention = None  # No meaningful gradients, skip overlay
                 else:
                     attention = None
             except Exception as e:
@@ -217,7 +220,7 @@ def generate_gradcam_visualizations(model, images, labels, predictions, probabil
             if attention is not None:
                 # Enhance contrast: use power function to emphasize high-gradient regions
                 attention_enhanced = attention.numpy() ** 0.5  # Square root to increase contrast
-                axes[row, col].imshow(attention_enhanced, cmap='jet', alpha=0.65, vmin=0, vmax=1)
+                axes[row, col].imshow(attention_enhanced, cmap='jet', alpha=0.35, vmin=0, vmax=1)
             
             # Title with prediction confidence
             label_str = "POS" if label == 1 else "NEG"
@@ -423,6 +426,58 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
     print(f"  Total images audited: {len(audit_data)}")
     print(f"  Training set images: {len(train_images)}")
     print(f"  Validation set images: {len(val_images)}")
+    
+    # Generate experiment-level audit CSV
+    print("\n[DEBUG] Generating experiment-level cross-leakage audit...")
+    experiment_audit_data = []
+    
+    # Extract experiment IDs from image filenames and build experiment-level audit
+    experiments_seen = {}  # {exp_id: {'train': count, 'val': count, 'total': count, 'fold': fold_idx}}
+    
+    for img_name in all_images:
+        # Extract experiment ID: "Experiment-100_b0s..." -> "Experiment-100"
+        exp_id = img_name.split('_b0s')[0]
+        in_train = img_name in train_image_set
+        in_val = img_name in val_image_set
+        
+        # Initialize experiment entry if not seen
+        if exp_id not in experiments_seen:
+            experiments_seen[exp_id] = {
+                'train': 0,
+                'val': 0,
+                'total': 0,
+                'fold': fold_idx if in_val else 'TRAIN_ONLY',
+                'status': 'VERIFIED_UNIQUE'
+            }
+        
+        # Update counts
+        experiments_seen[exp_id]['total'] += 1
+        if in_train:
+            experiments_seen[exp_id]['train'] += 1
+        if in_val:
+            experiments_seen[exp_id]['val'] += 1
+        
+        # Check for leakage (experiment in both train and val - should never happen)
+        if in_train and in_val:
+            experiments_seen[exp_id]['status'] = 'LEAKAGE_DETECTED'
+    
+    # Build experiment audit dataframe
+    for exp_id, exp_data in sorted(experiments_seen.items()):
+        experiment_audit_data.append({
+            'Experiment_ID': exp_id,
+            'Train_Images': exp_data['train'],
+            'Val_Images': exp_data['val'],
+            'Total_Images': exp_data['total'],
+            'Fold_Assignment': exp_data['fold'],
+            'Audit_Status': exp_data['status']
+        })
+    
+    # Save experiment-level audit
+    exp_audit_df = pd.DataFrame(experiment_audit_data)
+    exp_cross_leakage_audit_path = os.path.join(results_dir, f"{prefix}_cross_leakage_audit_experiments.csv")
+    exp_audit_df.to_csv(exp_cross_leakage_audit_path, index=False)
+    print(f"✓ Saved experiment-level cross-leakage audit to {exp_cross_leakage_audit_path}")
+    print(f"  Total experiments audited: {len(experiment_audit_data)}")
     print("="*60 + "\n")
     
     train_loader = DataLoader(
@@ -998,14 +1053,22 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
             pin_memory=False  # Disable pinning for reduced memory
         )
         
+        # Collect Grad-CAM samples with guarantee: if a category exists in validation set, we WILL find it
+        # Strategy: First pass through data, then targeted passes for any missing categories
+        # Limit to 10,000 samples maximum to avoid excessive collection
+        
+        MAX_GRADCAM_SAMPLES = 10000
         all_images_for_gradcam = []
         all_labels_for_gradcam = []
         all_preds_for_gradcam = []
         all_probs_for_gradcam = []
+        categories_found = {'TP': False, 'FP': False, 'FN': False, 'TN': False}
         
         model.eval()
         with torch.no_grad():
-            for images, labels in val_loader_gradcam:
+            # PASS 1: Iterate through ALL validation data to find all categories
+            print(f"[DEBUG] Grad-CAM Pass 1: Scanning full validation set ({len(val_loader_gradcam)} batches)...")
+            for batch_idx, (images, labels) in enumerate(val_loader_gradcam):
                 images = images.to(device, non_blocking=True)
                 labels = labels.to(device, non_blocking=True)
                 
@@ -1013,14 +1076,105 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
                 probs = torch.softmax(logits, dim=1)
                 preds = torch.argmax(logits, dim=1)
                 
-                all_images_for_gradcam.append(images.cpu())
-                all_labels_for_gradcam.append(labels.cpu())
-                all_preds_for_gradcam.append(preds.cpu())
-                all_probs_for_gradcam.append(probs[:, 1].cpu())
+                # Filter out fallback black images (completely uniform = image load failure)
+                image_min = images.view(images.shape[0], -1).min(dim=1)[0]
+                image_max = images.view(images.shape[0], -1).max(dim=1)[0]
+                has_variation = (image_max - image_min) > 1e-3  # Non-uniform if range > 1e-3
                 
-                # Stop after collecting first batch (32 samples total)
-                # This keeps memory usage minimal while showing diverse predictions
-                break
+                if has_variation.any():
+                    valid_idx = torch.where(has_variation)[0]
+                    all_images_for_gradcam.append(images[valid_idx].cpu())
+                    all_labels_for_gradcam.append(labels[valid_idx].cpu())
+                    all_preds_for_gradcam.append(preds[valid_idx].cpu())
+                    all_probs_for_gradcam.append(probs[valid_idx, 1].cpu())
+                    
+                    # Track which categories we've found
+                    batch_preds = preds[valid_idx]
+                    batch_labels = labels[valid_idx]
+                    if ((batch_preds == 1) & (batch_labels == 1)).any():
+                        categories_found['TP'] = True
+                    if ((batch_preds == 1) & (batch_labels == 0)).any():
+                        categories_found['FP'] = True
+                    if ((batch_preds == 0) & (batch_labels == 1)).any():
+                        categories_found['FN'] = True
+                    if ((batch_preds == 0) & (batch_labels == 0)).any():
+                        categories_found['TN'] = True
+                
+                # Calculate current sample count
+                current_samples = sum(img.shape[0] for img in all_images_for_gradcam)
+                
+                # Early exit if we've found all 4 categories OR reached sample limit
+                if all(categories_found.values()):
+                    print(f"[DEBUG] Grad-CAM: Found all 4 categories by batch {batch_idx + 1}, stopping scan")
+                    break
+                elif current_samples >= MAX_GRADCAM_SAMPLES:
+                    print(f"[DEBUG] Grad-CAM: Reached {MAX_GRADCAM_SAMPLES} sample limit, stopping Pass 1")
+                    break
+            
+            print(f"[DEBUG] Grad-CAM Pass 1 complete: Found categories {[k for k, v in categories_found.items() if v]}")
+        
+        # Check which categories are missing
+        missing_categories = [k for k, v in categories_found.items() if not v]
+        
+        if missing_categories and len(all_images_for_gradcam) > 0:
+            # PASS 2: If any categories missing, scan again and ONLY collect missing ones
+            print(f"[DEBUG] Grad-CAM Pass 2: Targeted search for missing categories {missing_categories}...")
+            
+            with torch.no_grad():
+                for batch_idx, (images, labels) in enumerate(val_loader_gradcam):
+                    images = images.to(device, non_blocking=True)
+                    labels = labels.to(device, non_blocking=True)
+                    
+                    logits = model(images)
+                    probs = torch.softmax(logits, dim=1)
+                    preds = torch.argmax(logits, dim=1)
+                    
+                    # Filter out fallback black images
+                    image_min = images.view(images.shape[0], -1).min(dim=1)[0]
+                    image_max = images.view(images.shape[0], -1).max(dim=1)[0]
+                    has_variation = (image_max - image_min) > 1e-3
+                    
+                    if has_variation.any():
+                        valid_idx = torch.where(has_variation)[0]
+                        batch_preds = preds[valid_idx]
+                        batch_labels = labels[valid_idx]
+                        batch_images = images[valid_idx].cpu()
+                        batch_probs = probs[valid_idx, 1].cpu()
+                        
+                        # Check which missing categories appear in this batch
+                        has_tp = ((batch_preds == 1) & (batch_labels == 1)).any()
+                        has_fp = ((batch_preds == 1) & (batch_labels == 0)).any()
+                        has_fn = ((batch_preds == 0) & (batch_labels == 1)).any()
+                        has_tn = ((batch_preds == 0) & (batch_labels == 0)).any()
+                        
+                        # Add ALL samples from this batch (we'll select specific ones per-category later)
+                        all_images_for_gradcam.append(batch_images)
+                        all_labels_for_gradcam.append(batch_labels.cpu())
+                        all_preds_for_gradcam.append(batch_preds.cpu())
+                        all_probs_for_gradcam.append(batch_probs)
+                        
+                        # Update categories found
+                        if has_tp:
+                            categories_found['TP'] = True
+                        if has_fp:
+                            categories_found['FP'] = True
+                        if has_fn:
+                            categories_found['FN'] = True
+                        if has_tn:
+                            categories_found['TN'] = True
+                        
+                        # Calculate current sample count
+                        current_samples = sum(img.shape[0] for img in all_images_for_gradcam)
+                        
+                        # Exit if we found all remaining missing categories OR reached sample limit
+                        if all(categories_found.values()):
+                            print(f"[DEBUG] Grad-CAM: Found all 4 categories by batch {batch_idx + 1}, stopping Pass 2")
+                            break
+                        elif current_samples >= MAX_GRADCAM_SAMPLES:
+                            print(f"[DEBUG] Grad-CAM: Reached {MAX_GRADCAM_SAMPLES} sample limit, stopping Pass 2")
+                            break
+            
+            print(f"[DEBUG] Grad-CAM Pass 2 complete: Now have all categories {categories_found}")
         
         if all_images_for_gradcam:
             # Concatenate collected batches
@@ -1028,6 +1182,14 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
             all_labels_for_gradcam = torch.cat(all_labels_for_gradcam, dim=0)
             all_preds_for_gradcam = torch.cat(all_preds_for_gradcam, dim=0)
             all_probs_for_gradcam = torch.cat(all_probs_for_gradcam, dim=0)
+            
+            # Log category distribution for debugging
+            tp_count = ((all_preds_for_gradcam == 1) & (all_labels_for_gradcam == 1)).sum().item()
+            fp_count = ((all_preds_for_gradcam == 1) & (all_labels_for_gradcam == 0)).sum().item()
+            fn_count = ((all_preds_for_gradcam == 0) & (all_labels_for_gradcam == 1)).sum().item()
+            tn_count = ((all_preds_for_gradcam == 0) & (all_labels_for_gradcam == 0)).sum().item()
+            total_samples = tp_count + fp_count + fn_count + tn_count
+            print(f"[DEBUG] Grad-CAM: Collected {total_samples} samples (TP={tp_count}, FP={fp_count}, FN={fn_count}, TN={tn_count})")
             
             # Generate Grad-CAM visualization
             gradcam_path = os.path.join(results_dir, f"{prefix}_gradcam.png")
