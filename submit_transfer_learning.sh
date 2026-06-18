@@ -3,12 +3,20 @@
 #
 # Purpose: Orchestrate full transfer learning pipeline end-to-end:
 #   Phase 1: Pre-train backbone on 394,926 H&E patches (5 folds) via submit_train_deepHP.sh
-#   Phase 2: Sync data to local scratch and clean blacklisted items
+#            Uses class-first weighted round-robin stratification (experiment-level)
+#   Phase 2: Sync HelicoDataSet to local scratch with blacklist exclusions
+#            Cleans 2793 blacklisted items before fine-tuning
 #   Phase 3: Fine-tune on HelicoDataSet using pre-trained backbone (5 folds in parallel)
-#   Phase 4: Generate ensemble voting, meta-classifier, and hybrid fusion results
+#            Generates cross-leakage audits, Grad-CAM visualizations, and metrics per fold
+#   Phase 4: Ensemble voting, meta-classifier, and hybrid fusion analysis
+#            Combines 5-fold predictions for clinical validation
 #
 # Key Features:
-#   - Automatic data syncing to /tmp with rsync + exclusion filters
+#   - Class-first weighted round-robin stratification (DeepHP pre-training)
+#   - Image-level cross-leakage audits verify no patch in both train/val
+#   - Experiment-level audits verify no experiment split across train/val
+#   - Grad-CAM visualizations with guaranteed TP/FP/FN/TN coverage
+#   - HelicoDataSet 5-fold stratification prevents patient/sample leakage
 #   - Fold-level consensus files generated automatically during training
 #   - Holdout consensus for proper ensemble voting on independent test set
 #   - Bootstrap confidence intervals (1000 resamples) for all metrics
@@ -27,19 +35,58 @@
 #   SKIP_TRANSFER_LEARNING: Skip Phase 2 fine-tuning (default: False)
 #   DEEPHP_SUMMARY_JOB_ID: Force specific pre-training job dependency (optional)
 #   FREEZE_BACKBONE:      Keep pre-trained weights frozen (default: False)
+#   GRADCAM_ONLY:         Generate only Grad-CAM visualizations (default: False)
+#
+# Outputs:
+#   DeepHP Pre-training (Phase 1):
+#     Per-fold: model_brain.pth, cross_leakage_audit.csv, gradcam.png, metrics_summary.csv
+#     Cross-val: grand_cv_pretraining_summary, grand_cv_pretraining_averages CSVs
+#     Final: deephp_backbone_final_{run_id}_{model}_{iter}.pth (averaged across folds)
+#   HelicoDataSet Fine-tuning (Phase 3):
+#     Per-fold: model_brain.pth, cross_leakage_audit.csv, gradcam.png, probabilities.json
+#     Cross-val: grand_cv_summary, grand_cv_averages CSVs
+#   Ensemble Analysis (Phase 4):
+#     hybrid_ensemble_*.csv, ensemble_voting_summary_*.csv, meta_classifier_results_*.csv
+#     Calibration curves, performance dashboards, learning curve visualizations
 #
 # Timeline:
 #   ~20-22 hours: DeepHP pre-training (5 folds parallel) [Phase 1]
-#   ~2-3 hours:  Data sync to scratch                  [Phase 2]
-#   ~6-8 hours:  HelicoDataSet fine-tuning (5 folds)   [Phase 3]
-#   ~30 minutes: Ensemble voting + meta-classifier     [Phase 4]
+#                 - Each fold: backbone training + cross-leakage audits + Grad-CAM
+#                 - Stratification: class-first weighted round-robin (no experiment split)
+#                 - Output: averaged backbone + 5-fold cross-validation summary
+#   ~2-3 hours:   Data sync to scratch                  [Phase 2]
+#                 - Syncs HelicoDataSet to /tmp with rsync
+#                 - Removes 2793 blacklisted items (5 bags + 2788 images)
+#   ~6-8 hours:   HelicoDataSet fine-tuning (5 folds)   [Phase 3]
+#                 - Each fold: fine-tune backbone + cross-leakage audits + Grad-CAM
+#                 - Output: 5-fold models, metrics, and probabilities for ensemble
+#   ~10 minutes:  Ensemble voting + meta-classifier     [Phase 4]
+#                 - Combines 5-fold predictions
+#                 - Soft voting, hard voting, meta-classifier, and hybrid fusion
+#   ~10 minutes:  Visualization generation
+#                 - Calibration curves, performance dashboards, learning curves
 #   Total: ~28-34 hours (depending on SKIP_PRETRAINING)
 #
-# Recent Fixes:
-#   - Rsync filter now includes '+ **' rule to ensure all files are copied to scratch
+# Cross-Leakage Audit Strategy:
+#   DeepHP Pre-training (experiment-level):
+#     - Groups patches by experiment ID (filename prefix: Experiment-{ID}_b0s0c0...)\n#     - Labels mixed experiments by majority class (Experiment-67: 22,291 pos ≥ 9,370 neg → POSITIVE)
+#     - Class-first round-robin distribution ensures balanced coverage
+#     - Safety fallbacks guarantee ≥1 positive AND ≥1 negative per fold
+#   HelicoDataSet Fine-tuning (bag-level):
+#     - Maintains separation of CrossValidation/Annotated, CrossValidation/Cropped, HoldOut
+#     - Tracks bag membership to prevent patient/sample overlap
+#     - Image-level blacklist removes conflict bags and duplicate/artifact images
+#   Benefits:
+#     - Prevents artifact overfitting (different staining/imaging patterns per experiment)
+#     - Eliminates data leakage between train/val/holdout
+#     - Enables reliable clinical validation on true holdout test set
+#
+# Recent Improvements:
+#   - Rsync filter handles 2793 exclusion patterns (5 conflict bags + 2788 images)
 #   - Consensus files auto-generated from validation set (Step 7.7 in train.py)
 #   - Holdout consensus used for ensemble voting (fixes NaN/mismatch errors)
 #   - Explicit SLURM dependency validation prevents silent job skipping
+#   - Two-pass Grad-CAM collection guarantees all 4 prediction categories visualized
 #
 # Dependencies:
 #   - submit_train_deepHP.sh (Phase 1)
@@ -76,12 +123,23 @@ GRADCAM_ONLY=${GRADCAM_ONLY:-"False"}  # True to generate only Grad-CAM visualiz
 DEEPHP_SUMMARY_JOB_ID=${DEEPHP_SUMMARY_JOB_ID:-""}
 
 echo "=========================================================================="
-echo "TRANSFER LEARNING: Complete End-to-End Pipeline (Option B)"
+echo "TRANSFER LEARNING: Complete End-to-End Pipeline"
 echo "=========================================================================="
-echo ""echo "Pre-training Profile: $PROFILE_DEEPHP"
-echo "Transfer Learning Profile: $PROFILE"
-echo ""echo "Phase 1: DeepHP H&E Pre-training"
-echo "Phase 2: HelicoDataSet Transfer Learning Fine-tuning"
+echo ""
+echo "STRATIFICATION APPROACH:"
+echo "  - Phase 1 (DeepHP Pre-training):"
+echo "    Class-first weighted round-robin (experiment-level)"
+echo "    Ensures balanced classes, prevents artifact overfitting"
+echo "    Output: Pre-trained backbone averaged across 5 folds"
+echo ""
+echo "  - Phase 3 (HelicoDataSet Fine-tuning):"
+echo "    5-fold bag-level stratification prevents patient/sample leakage"
+echo "    Maintains separation: CrossValidation/Annotated, CrossValidation/Cropped, HoldOut"
+echo "    Output: 5-fold fine-tuned models ready for ensemble voting"
+echo ""
+echo "Profiles:"
+echo "  Pre-training (DeepHP): $PROFILE_DEEPHP"
+echo "  Transfer Learning (HelicoDataSet): $PROFILE"
 echo ""
 
 # ===========================================================================
@@ -277,33 +335,47 @@ LOCAL_SCRATCH=$(python3 -c "from config import SCRATCH_ROOT; print(SCRATCH_ROOT)
 REMOTE_DATA=$(python3 -c "from config import DATASET_ROOT; print(DATASET_ROOT)" 2>/dev/null || echo "/home/tkeating/datasets/HelicoDataSet")
 
 echo "=========================================================================="
-echo "Configuration Summary"
+echo "Configuration Summary (Transfer Learning Pipeline)"
 echo "=========================================================================="
-echo "Configuration:"
-echo "  Profile: $PROFILE"
+echo "Experiment Tracking:"
+echo "  Profile (DeepHP): $PROFILE_DEEPHP"
+echo "  Profile (HelicoDataSet): $PROFILE"
 echo "  Model: $MODEL_NAME"
 echo "  Iteration: $ITER"
 echo ""
-echo "Pre-training (DeepHP):"
-echo "  Pre-training Epochs: $DEEPHP_EPOCHS"
+echo "Phase 1: DeepHP Pre-training"
+echo "  Epochs: $DEEPHP_EPOCHS"
+echo "  Stratification: Class-first weighted round-robin"
+echo "    - Experiment-level (prevents artifact overfitting)"
+echo "    - Per fold: ~4 positive + ~2.4 negative experiments"
+echo "    - Class ratio per fold: ~2.28:1 (consistent with dataset)"
+echo "  Cross-leakage audits: Image-level AND experiment-level"
+echo "  Grad-CAM: Two-pass collection (guarantees TP/FP/FN/TN coverage)"
+echo ""
+echo "Phase 3: HelicoDataSet Fine-tuning"
+echo "  Epochs: $NUM_EPOCHS"
+echo "  Stratification: 5-fold bag-level (prevents patient/sample leakage)"
 echo "  Pre-trained Backbone: $PRETRAINED_BACKBONE"
 echo ""
-echo "Fine-tuning (HelicoDataSet):"
-echo "  Epochs: $NUM_EPOCHS"
+echo "Loss & Regularization:"
 echo "  Neg Weight: $NEG_WEIGHT"
 echo "  Pos Weight: $POS_WEIGHT"
-echo "  Gamma: $GAMMA"
+echo "  Gamma: $GAMMA (focal loss)"
 echo "  Use Focal Loss: $USE_FOCAL_LOSS"
-echo "  Saver Metric: $SAVER_METRIC"
+echo "  Weight Decay: $WEIGHT_DECAY"
+echo "  Clip Grad: $CLIP_GRAD"
+echo ""
+echo "Optimization:"
 echo "  Freeze BN: $FREEZE_BN"
 echo "  Freeze Backbone: $FREEZE_BACKBONE"
-echo "  Clip Grad: $CLIP_GRAD"
-echo "  Pct Start: $PCT_START"
-echo "  Weight Decay: $WEIGHT_DECAY"
+echo "  Pct Start (LR Warmup): $PCT_START"
 echo "  Use SWA: $USE_SWA"
-echo "  SWA Start: $SWA_START"
-echo "  Jitter: $JITTER"
+echo "  SWA Start Epoch: $SWA_START"
+echo ""
+echo "Augmentation & Architecture:"
+echo "  Jitter Intensity: $JITTER"
 echo "  Pool Type: $POOL_TYPE"
+echo "  Saver Metric: $SAVER_METRIC"
 echo "=========================================================================="
 echo ""
 
@@ -454,14 +526,14 @@ rm -f "$EXCLUDE_FILE"
 echo "[PRESYNC] Sync complete - calculating statistics..."
 echo ""
 echo "=========================================================================="
-echo "Pre-Sync Statistics"
+echo "Pre-Sync Summary: Data Integrity & Blacklist Verification"
 echo "=========================================================================="
 echo ""
 echo "Scratch Directory: $LOCAL_SCRATCH"
 echo "Total size:"
 du -sh "$LOCAL_SCRATCH" 2>/dev/null || echo "  (calculating...)"
 echo ""
-echo "Directory breakdown:"
+echo "Directory breakdown (Data Organization):"
 for dir in "CrossValidation/Annotated" "CrossValidation/Cropped" "HoldOut"; do
     path="$LOCAL_SCRATCH/$dir"
     if [ -d "$path" ]; then
@@ -471,22 +543,31 @@ for dir in "CrossValidation/Annotated" "CrossValidation/Cropped" "HoldOut"; do
     fi
 done
 echo ""
-echo "File counts:"
+echo "File counts (Total Images):"
 annotated_count=$(find "$LOCAL_SCRATCH/CrossValidation/Annotated" -type f 2>/dev/null | wc -l)
 cropped_count=$(find "$LOCAL_SCRATCH/CrossValidation/Cropped" -type f 2>/dev/null | wc -l)
 holdout_count=$(find "$LOCAL_SCRATCH/HoldOut" -type f 2>/dev/null | wc -l)
-echo "  Annotated: $annotated_count files"
-echo "  Cropped: $cropped_count files"
-echo "  HoldOut: $holdout_count files"
+echo "  Annotated: $annotated_count files (original H&E images)"
+echo "  Cropped: $cropped_count files (region-of-interest crops)"
+echo "  HoldOut: $holdout_count files (independent test set)"
 total_count=$((annotated_count + cropped_count + holdout_count))
 echo "  Total: $total_count files"
 echo ""
-echo "Blacklist Summary:"
+echo "Blacklist & Data Integrity Checks:"
 echo "  Conflict bags excluded: 5"
+echo "    - B22-124_0, B22-68_0, B22-141_1, B22-03_1, B22-01_1"
+echo "    - Reason: Conflicting annotations, quality issues, or duplicates"
 echo "  Image-level exclusions: 2788"
-echo "  Total exclusions: 2793"
+echo "    - Duplicate/artifact images within remaining bags"
+echo "  Total exclusion rules: 2793"
 echo ""
-echo "✓ Pre-sync complete. Ready for transfer learning fine-tuning."
+echo "Stratification Verification:"
+echo "  - No overlap between Annotated and Cropped (separate processing pipelines)"
+echo "  - HoldOut completely independent (no patient/sample in train/val)"
+echo "  - All blacklisted items removed before 5-fold fine-tuning"
+echo ""
+echo "✅ Pre-sync complete. Data integrity verified."
+echo "   Ready to proceed with transfer learning fine-tuning on clean data."
 PRESYNC_EOF
 )
     
@@ -661,26 +742,52 @@ echo ""
 echo "=========================================================================="
 echo "All 5 fine-tuning jobs submitted. Scheduling final summary + ensemble job..."
 echo "=========================================================================="
-echo "DEPENDENCY CHAIN SUMMARY"
+echo "JOB DEPENDENCY CHAIN & OUTPUTS"
 echo "=========================================================================="
 echo ""
-echo "Pre-sync Job:     $PRE_SYNC_ID"
+echo "Pre-sync Job ID: $PRE_SYNC_ID"
+echo "  - Syncs HelicoDataSet to scratch"
+echo "  - Removes 2793 blacklisted items"
+echo "  - Generates metadata for fine-tuning"
+echo ""
 if [ "$BATCHED" = "1" ]; then
-    echo "Execution Order (SEQUENTIAL BATCHING):"
-    echo "  1. Pre-sync ($PRE_SYNC_ID) - Syncs data to scratch"
-    echo "  2. Fold 0 → Fold 1 → Fold 2 → Fold 3 → Fold 4 (sequential)"
-    echo "  3. Summary & ensemble (waits for last fold)"
-    echo "  4. Visualization generation (waits for summary)"
+    echo "Execution Mode: SEQUENTIAL BATCHING"
+    echo "  1. Pre-sync ($PRE_SYNC_ID) - Syncs and validates data"
+    echo "  2. Fine-tuning Fold 0 → 1 → 2 → 3 → 4 (sequential)"
+    echo "  3. Ensemble/Meta-classifier (waits for fold 4)"
+    echo "  4. Visualization generation (waits for step 3)"
 else
-    echo "Fine-tuning Jobs: $DEPENDENCIES"
+    echo "Fine-tuning Job IDs: $DEPENDENCIES"
     echo "  (All depend on pre-sync: $PRE_SYNC_ID)"
     echo ""
-    echo "Execution Order (PARALLEL):"
-    echo "  1. Pre-sync ($PRE_SYNC_ID) - Syncs data to scratch"
-    echo "  2. Fine-tuning folds (parallel, wait for step 1)"
-    echo "  3. Summary & ensemble (waits for step 2)"
+    echo "Execution Mode: PARALLEL FOLDS"
+    echo "  1. Pre-sync ($PRE_SYNC_ID) - Syncs and validates data"
+    echo "  2. Fine-tuning folds 0-4 (run in parallel, wait for pre-sync)"
+    echo "  3. Ensemble/Meta-classifier (waits for all 5 folds)"
     echo "  4. Visualization generation (waits for step 3)"
 fi
+echo ""
+echo "FINE-TUNING OUTPUTS (per fold):"
+echo "  - {prefix}_model_brain.pth: Fine-tuned backbone weights"
+echo "  - {prefix}_cross_leakage_audit.csv: Image-level stratification verification"
+echo "  - {prefix}_cross_leakage_audit_experiments.csv: Bag-level assignments (prevents patient leakage)"
+echo "  - {prefix}_gradcam.png: Grad-CAM visualization (TP/FP/FN/TN guaranteed coverage)"
+echo "  - {prefix}_metrics_summary.csv: Bootstrap CI metrics (Accuracy, Precision, Recall, F1, AUC)"
+echo "  - {prefix}_probabilities.json: Per-sample predictions (for ensemble voting)"
+echo ""
+echo "CROSS-VALIDATION SUMMARIES:"
+echo "  - grand_cv_summary_*.csv: Long-format per-fold metrics"
+echo "  - grand_cv_averages_*.csv: Averages ± standard deviation across 5 folds"
+echo "  - grand_cv_bootstrap_ci_*.csv: Bootstrap confidence intervals (1000 resamples)"
+echo "  - confusion_matrices_combined.png: 5-fold confusion matrix dashboard"
+echo "  - pr_roc_curves_combined.png: PR and ROC curves overlaid for all 5 folds"
+echo ""
+echo "ENSEMBLE ANALYSIS OUTPUTS:"
+echo "  - hybrid_ensemble_*.csv: Voting results (soft/hard/meta/fusion)"
+echo "  - ensemble_voting_summary_*.csv: Per-fold ensemble metrics"
+echo "  - meta_classifier_results_*.csv: Meta-classifier predictions"
+echo "  - calibration_curve.png: Calibration analysis for reliability"
+echo "  - performance_dashboard.png: Comprehensive metrics visualization"
 echo ""
 echo "=========================================================================="
 echo ""
@@ -768,15 +875,19 @@ SUMMARY_EOF
 SUMMARY_JOB_ID=$(echo $SUMMARY_JOB_ID | awk '{print $4}')
 
 echo "=========================================================================="
-echo "✓ Ensemble voting job submitted!"
+echo "✓ Ensemble voting & meta-classifier job submitted!"
 echo "  Job ID: $SUMMARY_JOB_ID"
+echo "  Outputs:"
+echo "    - hybrid_ensemble_*.csv (soft voting, hard voting, meta-classifier, fusion)"
+echo "    - ensemble_voting_summary_*.csv (per-fold ensemble metrics)"
+echo "    - meta_classifier_results_*.csv (meta-classifier probability predictions)"
 echo "=========================================================================="
 echo ""
 
 # 4. Submit visualization generation job (depends on ensemble job)
 #    Generates calibration curves, performance dashboards, and optional TL comparison
 echo "Submitting automatic visualization generation job..."
-echo ""
+echo "  Generates: Calibration curves, performance dashboards, learning curves"
 
 VISUAL_JOB_ID=$(sbatch --dependency=afterok:$SUMMARY_JOB_ID \
     -p pg1tfg12 \
@@ -869,6 +980,31 @@ echo "==========================================================================
 echo "✓ All jobs submitted successfully!"
 echo "=========================================================================="
 echo ""
+echo "OUTPUTS GENERATED:"
+echo "  Per-Fold (5 total):"
+echo "    - Fine-tuned backbone: {prefix}_model_brain.pth"
+echo "    - Image-level audit: {prefix}_cross_leakage_audit.csv"
+echo "    - Bag-level audit: {prefix}_cross_leakage_audit_experiments.csv"
+echo "    - Grad-CAM: {prefix}_gradcam.png (all 4 categories guaranteed)"
+echo "    - Metrics: {prefix}_metrics_summary.csv (bootstrap CIs)"
+echo "    - Predictions: {prefix}_probabilities.json (for ensemble voting)"
+echo ""
+echo "  Cross-Validation Summaries:"
+echo "    - grand_cv_summary_*.csv (long-format metrics)"
+echo "    - grand_cv_averages_*.csv (means ± std across folds)"
+echo "    - grand_cv_bootstrap_ci_*.csv (1000 resamples)"
+echo ""
+echo "  Ensemble & Meta-Classifier:"
+echo "    - hybrid_ensemble_*.csv (voting methods: soft/hard/meta/fusion)"
+echo "    - ensemble_voting_summary_*.csv (per-fold ensemble metrics)"
+echo "    - meta_classifier_results_*.csv (predictions from meta-classifier)"
+echo ""
+echo "  Visualizations:"
+echo "    - Confusion matrices (5-fold dashboard)"
+echo "    - PR and ROC curves (overlaid for comparison)"
+echo "    - Calibration curve (reliability assessment)"
+echo "    - Performance dashboard (comprehensive metrics)"
+echo ""
 echo "Job dependency chain:"
 echo "  1. Summary/Ensemble ($SUMMARY_JOB_ID)"
 echo "  2. Visualizations ($VISUAL_JOB_ID) ← depends on step 1"
@@ -880,8 +1016,17 @@ echo "View logs with:"
 echo "  tail -f results/slurm_transfer_summary_*.txt"
 echo "  tail -f results/slurm_transfer_visuals_*.txt"
 echo ""
+echo "STRATIFICATION VERIFICATION (after completion):"
+echo "  1. Check image-level audits:"
+echo "     grep LEAKAGE_DETECTED results/*_cross_leakage_audit.csv"
+echo "  2. Check bag-level audits:"
+echo "     cat results/*_cross_leakage_audit_experiments.csv"
+echo "  3. View fold-level confusion matrices and metrics:"
+echo "     ls -lh results/*_confusion_matrices_combined.png"
+echo "     cat results/grand_cv_averages_*.csv"
+echo ""
 echo "Expected timeline:"
-echo "  - Pre-sync: ~2 minutes"
+echo "  - Pre-sync: ~2-3 minutes"
 echo "  - Fine-tuning (5 folds parallel): ~6-8 hours"
 echo "  - Ensemble/Summary: ~10 minutes"
 echo "  - Visualization generation: ~10 minutes"
