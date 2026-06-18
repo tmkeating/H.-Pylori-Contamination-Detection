@@ -852,7 +852,7 @@ def plot_gradcam_pair(patch_img, heatmap, patient_id, rank, patch_idx,
     # Right: Heatmap overlay
     plt.subplot(1, 2, 2)
     plt.imshow(orig_img)
-    plt.imshow(heatmap, cmap='jet', alpha=0.5)
+    plt.imshow(heatmap, cmap='jet', alpha=0.6)
     prefix = "FN_" if is_false_negative else ""
     plt.title(f"{prefix}Grad-CAM (Prob: {prob:.4f})")
     plt.axis('off')
