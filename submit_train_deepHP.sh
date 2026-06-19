@@ -139,31 +139,6 @@ echo ""
 # Generate or validate RUN_ID for parallel job safety
 if [ -z "$RUN_ID" ]; then
     # Auto-generate next available RUN_ID based on existing results
-    python3 << 'RUN_ID_GEN_EOF'
-import os
-import re
-
-results_dir = "results"
-if not os.path.exists(results_dir):
-    print("01")
-else:
-    files = os.listdir(results_dir)
-    max_run = 0
-    
-    # Look for existing run IDs in filename patterns (e.g., "302_25.1_106069_...")
-    for f in files:
-        match = re.match(r"^(\d+)_[\d.]+_(\d+)_", f)
-        if match:
-            try:
-                run_id = int(match.group(1))
-                max_run = max(max_run, run_id)
-            except:
-                pass
-    
-    # Use next available number
-    next_run = max_run + 1
-    print(f"{next_run:02d}")
-RUN_ID_GEN_EOF
     RUN_ID=$(python3 << 'RUN_ID_GEN_EOF'
 import os
 import re
@@ -175,14 +150,26 @@ else:
     files = os.listdir(results_dir)
     max_run = 0
     
+    # First priority: check for summary_job_id.txt files (generated immediately after job submission)
     for f in files:
-        match = re.match(r"^(\d+)_[\d.]+_(\d+)_", f)
+        match = re.match(r"^(\d+)_[\d.]+_summary_job_id\.txt$", f)
         if match:
             try:
                 run_id = int(match.group(1))
                 max_run = max(max_run, run_id)
             except:
                 pass
+    
+    # Fallback: if no summary files found, check other output files
+    if max_run == 0:
+        for f in files:
+            match = re.match(r"^(\d+)_[\d.]+_(\d+)_", f)
+            if match:
+                try:
+                    run_id = int(match.group(1))
+                    max_run = max(max_run, run_id)
+                except:
+                    pass
     
     print(f"{max_run + 1:02d}")
 RUN_ID_GEN_EOF

@@ -56,6 +56,94 @@ function set_profile_SEARCHERDEEPHP() {
     export POOL_TYPE="attention"
 }
 
+function set_profile_SEARCHERDEEPHP1() {
+    export NEG_WEIGHT=1.0
+    export POS_WEIGHT=3.0
+    # Maintained 3.0 to focus gradients on 'Hard' sparse bacterial targets
+    export GAMMA=3.0
+    export USE_FOCAL_LOSS="False"
+    # Higher WD to prevent 100% Training Accuracy (Overfitting)
+    export WEIGHT_DECAY=0.05
+    # Reduced epochs with early stopping potential
+    export NUM_EPOCHS=20
+    export DEEPHP_EPOCHS=20
+    export SAVER_METRIC="f1"
+    export FREEZE_BN="False"
+    export FREEZE_BACKBONE="False"
+    export CLIP_GRAD=1.0
+    export PCT_START=0.1
+    export USE_SWA="True"
+    export SWA_START=12
+    export JITTER=0.25
+    export POOL_TYPE="attention"
+}
+
+function set_profile_SEARCHERDEEPHP2() {
+    export NEG_WEIGHT=1.0
+    export POS_WEIGHT=2.0
+    # Maintained 3.0 to focus gradients on 'Hard' sparse bacterial targets
+    export GAMMA=3.0
+    export USE_FOCAL_LOSS="False"
+    # Higher WD to prevent 100% Training Accuracy (Overfitting)
+    export WEIGHT_DECAY=0.05
+    # Reduced epochs with early stopping potential
+    export NUM_EPOCHS=20
+    export DEEPHP_EPOCHS=20
+    export SAVER_METRIC="f1"
+    export FREEZE_BN="False"
+    export FREEZE_BACKBONE="False"
+    export CLIP_GRAD=1.0
+    export PCT_START=0.1
+    export USE_SWA="True"
+    export SWA_START=12
+    export JITTER=0.25
+    export POOL_TYPE="attention"
+}
+
+function set_profile_SEARCHERDEEPHP3() {
+    export NEG_WEIGHT=1.0
+    export POS_WEIGHT=2.5
+    # Maintained 3.0 to focus gradients on 'Hard' sparse bacterial targets
+    export GAMMA=4.0
+    export USE_FOCAL_LOSS="False"
+    # Higher WD to prevent 100% Training Accuracy (Overfitting)
+    export WEIGHT_DECAY=0.05
+    # Reduced epochs with early stopping potential
+    export NUM_EPOCHS=20
+    export DEEPHP_EPOCHS=20
+    export SAVER_METRIC="f1"
+    export FREEZE_BN="False"
+    export FREEZE_BACKBONE="False"
+    export CLIP_GRAD=1.0
+    export PCT_START=0.1
+    export USE_SWA="True"
+    export SWA_START=12
+    export JITTER=0.25
+    export POOL_TYPE="attention"
+}
+
+function set_profile_SEARCHERDEEPHP4() {
+    export NEG_WEIGHT=1.0
+    export POS_WEIGHT=3.0
+    # Maintained 3.0 to focus gradients on 'Hard' sparse bacterial targets
+    export GAMMA=2.0
+    export USE_FOCAL_LOSS="False"
+    # Higher WD to prevent 100% Training Accuracy (Overfitting)
+    export WEIGHT_DECAY=0.05
+    # Reduced epochs with early stopping potential
+    export NUM_EPOCHS=20
+    export DEEPHP_EPOCHS=20
+    export SAVER_METRIC="f1"
+    export FREEZE_BN="False"
+    export FREEZE_BACKBONE="False"
+    export CLIP_GRAD=1.0
+    export PCT_START=0.1
+    export USE_SWA="True"
+    export SWA_START=12
+    export JITTER=0.25
+    export POOL_TYPE="attention"
+}
+
 # Profile: AUDITOR (Clinical Grade - 100% Precision)
 function set_profile_AUDITOR() {
     export NEG_WEIGHT=1.0

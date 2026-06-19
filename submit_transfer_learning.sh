@@ -190,14 +190,26 @@ else:
     files = os.listdir(results_dir)
     max_run = 0
     
+    # First priority: check for summary_job_id.txt files (generated immediately after job submission)
     for f in files:
-        match = re.match(r"^(\d+)_[\d.]+_(\d+)_", f)
+        match = re.match(r"^(\d+)_[\d.]+_summary_job_id\.txt$", f)
         if match:
             try:
                 run_id = int(match.group(1))
                 max_run = max(max_run, run_id)
             except:
                 pass
+    
+    # Fallback: if no summary files found, check other output files
+    if max_run == 0:
+        for f in files:
+            match = re.match(r"^(\d+)_[\d.]+_(\d+)_", f)
+            if match:
+                try:
+                    run_id = int(match.group(1))
+                    max_run = max(max_run, run_id)
+                except:
+                    pass
     
     print(f"{max_run + 1:02d}")
 RUN_ID_GEN_EOF

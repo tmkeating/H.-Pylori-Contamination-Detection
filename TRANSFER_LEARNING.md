@@ -20,27 +20,40 @@ This guide implements transfer learning using the **DeepHP dataset** (394,926 H&
 | **Backbone Initialization** | ConvNeXt-Tiny learns general histology features before task-specific MIL |
 | **Overfitting Prevention** | Pre-training reduces overfitting risk on small 114-patient IHC dataset |
 | **Faster Convergence** | Backbone doesn't need to learn from scratch; MIL head adapts quickly |
+| **Pool-Mixed Stratification** | Prevents data leakage via fold-specific artifact learning (verified: realistic metrics on epoch 1) |
+| **Diverse Experiment Sampling** | All folds see same 14 experiments (8 train + 6 val pools) preventing fold-specific patterns |
 
 ---
 
-## Phase 1: DeepHP Backbone Pre-training
+## Phase 1: DeepHP Backbone Pre-training (Pool-Mixed Stratification)
+
+The pre-training uses a sophisticated **pool-mixed stratification with size-balanced greedy assignment** to prevent data leakage and ensure robust feature learning:
+
+**Strategy** (Three-Level Approach):
+- **LEVEL 1 - Experiment Pool Assignment**: All 33 experiments grouped into 2 global pools (train ~198K patches, val ~196K patches) using greedy size-balanced assignment
+- **LEVEL 2 - Pool Distribution**: Each pool mixed and stratified by class, then split into 5 equal parts
+- **LEVEL 3 - Fold Distribution**: All folds train on same experiment diversity (prevents fold-specific artifact learning)
+
+**Result**: Each fold trains on ~39.7K patches (10.2K pos, 29.5K neg) from 8 pos + 6 neg train pool experiments; validates on ~39.2K patches from 13 pos + 6 neg val pool experiments. Epoch 1 metrics realistic (~50% accuracy) and consistent across all folds (no leakage).
 
 ### Step 1A: Submit Pre-training Jobs (All 5 Folds - Orchestrated)
 
 ```bash
-# Recommended: Use the orchestrator (auto-submits all folds + averaging + summary)
-chmod +x train_deepHP.sh
-./train_deepHP.sh
+# Recommended: Use the orchestrator (auto-submits all folds + averaging + summary + cross-leakage audit)
+chmod +x submit_train_deepHP.sh
+./submit_train_deepHP.sh
 
 # Or with custom profile and parameters
-PROFILE=SEARCHER MODEL_NAME=convnext_tiny ITER=31.0 ./train_deepHP.sh
+PROFILE=SEARCHER MODEL_NAME=convnext_tiny ITER=32.2 ./submit_train_deepHP.sh
 ```
 
 **What the orchestrator does:**
-1. ✅ Submits pre-sync job to verify environment
-2. ✅ Submits all 5 fold jobs in parallel (dependent on pre-sync)
-3. ✅ Submits final averaging job (depends on all 5 folds)
-4. ✅ Provides next steps instructions
+1. ✅ Submits pre-sync job to prepare environment and sync DeepHP dataset
+2. ✅ Submits all 5 fold jobs in parallel with pool-mixed stratification (dependent on pre-sync)
+3. ✅ Submits final averaging job (depends on all 5 folds, generates averaged backbone)
+4. ✅ Generates cross-validation summary CSVs (per-fold metrics + global averages)
+5. ✅ Generates global experiment distribution audit (verifies pool-mixing integrity)
+6. ✅ Provides next steps instructions for fine-tuning on HelicoDataSet
 
 **Alternative: Manual execution** (if you prefer fine-grained control)
 
@@ -70,8 +83,11 @@ tail -f results/slurm_deephp_f0_*.txt
 # Check for errors
 tail -f results/slurm_deephp_error_f0_*.txt
 
-# List completed fold checkpoints
-ls -lah results/deephp_backbone_pretrained_convnext_tiny_f*.pth
+# List completed fold checkpoints (unified naming: {run_id}_{iter}_{slurm_id}_f{fold}_convnext_tiny_model_brain.pth)
+ls -lah results/*_f[0-4]_convnext_tiny_model_brain.pth
+
+# Check for cross-validation audit files after all folds complete
+ls -lah results/*_cross_leakage_audit*.csv
 ```
 
 ### Expected Outputs (After All 5 Folds + Averaging Complete)
@@ -89,30 +105,37 @@ The orchestrator automatically generates:
 
 **Evaluation metrics per fold**:
 ```
-✓ results/deephp_backbone_pretrained_convnext_tiny_f*_evaluation.csv  (Patch-level metrics)
-✓ results/deephp_backbone_pretrained_convnext_tiny_f*_confusion_matrix.png
-✓ results/deephp_backbone_pretrained_convnext_tiny_f*_roc_curve.png
-✓ results/deephp_backbone_pretrained_convnext_tiny_f*_pr_curve.png
-✓ results/deephp_backbone_pretrained_convnext_tiny_f*_learning_curves.png
+✓ results/{run_id}_{iter}_{slurm_id}_f*_evaluation_report.csv  (Patch-level metrics)
+✓ results/{run_id}_{iter}_{slurm_id}_f*_confusion_matrix.png
+✓ results/{run_id}_{iter}_{slurm_id}_f*_cross_leakage_audit.csv (Image-level verification)
+```
+
+**Cross-validation audit (after all folds complete)**:
+```
+✓ results/{run_id}_{iter}_cross_leakage_audit_experiments_distribution.csv (Global experiment distribution)
+  → Shows which pool each experiment belongs to and patch distribution across all 5 folds
+  → Verifies no experiment split between train and val pools (pool-mixing integrity check)
 ```
 
 **Averaged backbone** (automatically created):
 ```
-✓ results/deephp_backbone_final_convnext_tiny.pth  (~350 MB)
-  (Ready for HelicoDataSet fine-tuning)
+✓ results/deephp_backbone_final_{run_id}_convnext_tiny_{iter}.pth  (~350 MB)
+  (Averaged from 5-fold pool-mixed pre-training, ready for HelicoDataSet fine-tuning)
 ```
 
 ---
 
 ## Phase 2: Automatic Backbone Averaging (Done by Orchestrator)
 
-The `train_deepHP.sh` orchestrator automatically averages backbone weights after all 5 folds complete. This creates a unified pre-trained backbone from all folds.
+The `submit_train_deepHP.sh` orchestrator automatically averages backbone weights after all 5 folds complete. This creates a unified pre-trained backbone from all 5-fold pool-mixed CV, which provides robust feature learning from diverse experiment sources.
 
 ### Expected Output
 
 ```
-✓ results/deephp_backbone_final_convnext_tiny.pth  (~350 MB)
-  (Averaged backbone from 5 folds, ready for transfer learning)
+✓ results/deephp_backbone_final_{run_id}_convnext_tiny_{iter}.pth  (~350 MB)
+  (Averaged from 5 folds trained on pool-mixed stratification, ready for transfer learning)
+  
+Example: results/deephp_backbone_final_32_convnext_tiny_32.2.pth
 ```
 
 ---
@@ -122,10 +145,12 @@ The `train_deepHP.sh` orchestrator automatically averages backbone weights after
 ### Step 3A: Submit Fine-tuning Jobs (5 Folds)
 
 ```bash
-cd /hhome/tkeating/model/H.-Pylori-Contamination-Detection
+cd /home/tkeating/model/H.-Pylori-Contamination-Detection
 
-# Path to pre-trained backbone
-PRETRAINED_BACKBONE="results/deephp_backbone_final_convnext_tiny.pth"
+# Path to pre-trained backbone (check results/ for actual run_id and iter)
+# Pattern: results/deephp_backbone_final_{run_id}_convnext_tiny_{iter}.pth
+# Example: results/deephp_backbone_final_32_convnext_tiny_32.2.pth
+PRETRAINED_BACKBONE="results/deephp_backbone_final_32_convnext_tiny_32.2.pth"
 
 # Option A: Sequential (safer for validation)
 for i in {0..4}; do
@@ -133,27 +158,14 @@ for i in {0..4}; do
     --fold $i \
     --num_folds 5 \
     --model_name convnext_tiny \
-    --iter 31.0 \
+    --iter 32.3 \
     --pretrained_backbone_path "$PRETRAINED_BACKBONE" \
     --freeze_backbone False \
     --num_epochs 15
 done
 
-# Option B: Parallel SLURM (fast - ~8 hours total)
-for i in {0..4}; do
-  sbatch -J heli_ft_f$i \
-    -e results/ft_slurm_%j_error.txt \
-    -o results/ft_slurm_%j_output.txt \
-    sh -c "python3 train.py \
-      --fold $i \
-      --num_folds 5 \
-      --model_name convnext_tiny \
-      --iter 31.0 \
-      --pretrained_backbone_path '$PRETRAINED_BACKBONE' \
-      --freeze_backbone False \
-      --num_epochs 15" &
-done
-wait
+# Option B: Parallel SLURM (fast - ~8 hours total) - OR use the orchestrator
+./submit_transfer_learning.sh
 ```
 
 ### Step 3B: Monitor Fine-tuning Progress

@@ -2,19 +2,19 @@
 
 This project implements a **High-Resolution Multi-Stage MIL Pipeline** for the automated detection of *H. pylori* contamination in histology tissue samples. It features a **Searcher-Rescue** architecture designed to identify sparse bacterium clusters in high-resolution whole-slide imaging, combined with an **intelligent Hybrid Ensemble** that achieves 92.11% accuracy with perfect precision.
 
-**Transfer Learning with DeepHP H&E Pre-training** (Recommended for improved accuracy)
+**Transfer Learning with DeepHP H&E Pre-training** (Available for backbone initialization)
 
-The pipeline now supports backbone pre-training on the **DeepHP dataset** (394,926 H&E-stained histology patches, 111K positive / 283K negative). This dramatically improves feature learning before fine-tuning on the patient-level IHC data from HelicoDataSet.
+The pipeline supports backbone pre-training on the **DeepHP dataset** (394,926 H&E-stained histology patches, 111K positive / 283K negative) before fine-tuning on the patient-level IHC data from HelicoDataSet.
 
 ### Benefits of Transfer Learning
-- ✅ **+3-5% accuracy improvement** (from 92.11% towards 95%+) due to backbone initialization
+- ✅ **Backbone initialization** from large-scale histology patches instead of random weights
 - ✅ **Faster convergence** on small patient-level dataset (114 patients)
-- ✅ **Better generalization** from 400K H&E patches to IHC domain
-- ✅ **Reduced overfitting** risk with limited IHC training data
+- ✅ **Cross-domain feature transfer** from H&E patches to IHC domain
+- ✅ **Reduced overfitting risk** with limited IHC training data
 
 ### Files for Transfer Learning
-- **New**: `train_deepHP_patches.py` - Patch-level training on DeepHP H&E patches
-- **New**: `dataset_deepHP.py` - DeepHP dataset loader with stratified k-fold CV  
+- **New**: `train_deepHP_patches.py` - Patch-level training on DeepHP H&E patches with pool-mixed stratification
+- **New**: `dataset_deepHP.py` - DeepHP dataset loader with pool-mixed fold splitting (prevents fold-specific artifact learning)  
 - **New**: `load_pretrained_backbone.py` - Utilities for loading and averaging backbone weights
 - **Modified**: `train.py` - Added `--pretrained_backbone_path` argument for loading backbone
 - **DeepHP Data**: `/home/tkeating/datasets/8117177/` (Positive/ and Negative/ folders)
@@ -100,6 +100,10 @@ After integrity checks pass, sync the vetted datasets to local node storage for 
 **DeepHP Sync** (automatic in `train_deepHP_patches.py`):
 - Syncs to `/home/tkeating/.scratch/h_pylori_data/` using `suggested_deephp_blacklist.json` if available
 - 394,926 clean patches (verified 0 duplicates)
+- **Pool-Mixed Stratification**: Uses three-level approach with size-balanced greedy assignment:
+  - LEVEL 1: All 33 experiments split into 2 global pools (train ~198K patches, val ~196K patches)
+  - LEVEL 2: Each pool mixed and stratified by class, then split into 5 equal parts
+  - LEVEL 3: All folds train on same experiment diversity (prevents fold-specific artifact learning)
 - **Critical Data Integrity**: The Macenko normalization reference patch is automatically excluded from all 5 folds **before** k-fold assignment (not after), mathematically guaranteeing zero leakage between training and validation sets
 
 ### 2. Training (5-Fold Cross-Validation) - RECOMMENDED METHOD
@@ -111,18 +115,22 @@ PROFILE=SEARCHER MODEL_NAME=convnext_tiny ITER=30.0 ./submit_transfer_learning.s
 ```
 
 This script automatically orchestrates:
-1. **DeepHP Backbone Pre-training** (5-fold stratified CV on 394,926 H&E patches)
+1. **DeepHP Backbone Pre-training** (5-fold pool-mixed stratification on 394,926 H&E patches)
+   - Uses pool-mixed stratification with size-balanced experiment assignment
+   - Each fold trains on ~39.7K patches from 8 pos + 6 neg experiments (same 14 across all folds)
+   - Each fold validates on ~39.2K patches from 13 pos + 6 neg experiments (disjoint pool)
+   - Generates per-fold cross-leakage audits and global experiment distribution audit
    - Includes automatic Macenko reference image check (creates if missing)
    - Applies Macenko stain normalization during DeepHP pre-training
    - Runs on login node before SLURM job submission (fast, non-intensive)
-2. **Backbone Averaging** (creates unified pre-trained backbone)
+2. **Backbone Averaging** (creates unified pre-trained backbone from 5-fold CV)
 3. **HelicoDataSet Fine-tuning** (5-fold stratified CV on 114 patients with pre-trained backbone)
    - No stain normalization (IHC stains don't use Macenko)
    - Automatic venv verification before each phase
 
 *Outputs: `results/*_model_brain.pth` (trained models), `results/*_patient_consensus.csv` (per-fold predictions), `results/*_evaluation_report.csv` (fold metrics)*
 
-**Alternative: Training Without Transfer Learning** (faster but lower accuracy)
+**Alternative: Training Without Transfer Learning** (random initialization)
 If you want to skip backbone pre-training, run:
 ```bash
 PROFILE=SEARCHER MODEL_NAME=convnext_tiny ITER=30.0 ./submit_all_folds.sh
@@ -133,7 +141,7 @@ This script automatically orchestrates:
 2. **5-Fold Training** (trains models on all folds in parallel, initialized randomly)
 3. **Summary & Ensemble Fusion** (automatically runs after all folds complete)
 
-*Note: This approach trains faster but typically achieves ~3-5% lower accuracy than the transfer learning pipeline.*
+*Note: This approach trains models from random initialization without pre-trained backbone weights.*
 
 ### 3. Ensemble Results (Automatic)
 Both training pipelines (`submit_transfer_learning.sh` - RECOMMENDED and `submit_all_folds.sh` - ALTERNATIVE) automatically generate ensemble voting, meta-classifier, and hybrid ensemble results after all training folds complete. **No manual step required.**
@@ -226,6 +234,7 @@ ConvNeXt-Small's additional parameters did not translate to improved performance
 
 
 ## 🛠️ Key Pipeline Features
+- **Pool-Mixed Stratification (DeepHP Pre-training)**: Uses three-level stratification with size-balanced greedy experiment assignment to prevent fold-specific artifact learning. All folds see the same experiment diversity (14 experiments across train/val pools), while each fold gets a unique 1/5 slice of patches. Generates per-fold cross-leakage audits and global experiment distribution audits for integrity verification.
 - **Deterministic Validation Sets (Reproducible Cross-Validation)**: All folds use stratified k-fold splitting with fixed random seeds (`seed = 42 + fold_index`), ensuring validation sets are identical across training runs. This enables reliable model comparison and debugging without randomness in fold assignment. For example, Fold 0 always contains the same 20% of data as validation, while Folds 1-4 use their own consistent partitions. Training and validation indices are strictly disjoint with no overlap.
 - **Macenko Stain Normalization**: Applied exclusively during DeepHP H&E pre-training to normalize color variations across different staining protocols and tissue scanners, improving backbone generalization. Reference image is automatically created/verified on login node before training starts.
 - **Proactive Environment Verification**: All scripts verify virtual environment dependencies before SLURM job submission, preventing runtime failures with early, actionable error messages.
@@ -243,6 +252,6 @@ ConvNeXt-Small's additional parameters did not translate to improved performance
 ---
 
 ## Hardware & Optimization
-- **Compute**: Optimized for **NVIDIA A40/A100 (48GB/80GB)**.
+- **Compute**: Optimized for **NVIDIA L40S/A40/A100 (48GB/80GB)**.
 - **Precision**: `torch.set_float32_matmul_precision('high')`.
 - **Data Locality**: Automated node-local `/tmp` storage sync via `run_h_pylori.sh`.
