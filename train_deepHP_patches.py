@@ -278,8 +278,8 @@ def generate_gradcam_visualizations(model, images, labels, predictions, probabil
             # Overlay attention if available
             if attention is not None:
                 # Enhance contrast: use power function to emphasize high-gradient regions
-                attention_enhanced = attention.numpy() ** 0.5  # Square root to increase contrast
-                axes[row, col].imshow(attention_enhanced, cmap='jet', alpha=0.35, vmin=0, vmax=1)
+                attention_enhanced = attention.numpy() ** 0.4  # Lower exponent = higher contrast
+                axes[row, col].imshow(attention_enhanced, cmap='jet', alpha=0.5, vmin=0, vmax=1)
             
             # Title with prediction confidence
             label_str = "POS" if label == 1 else "NEG"
@@ -732,15 +732,19 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
             with torch.amp.autocast(device_type='cuda' if torch.cuda.is_available() else 'cpu'):
                 # Forward pass for patch-level classification (not MIL)
                 # Use regular forward() which expects [batch, C, H, W] and returns [batch, num_classes]
-                logits = model(images)  # [batch_size, num_classes]
+                if use_dann:
+                    # Get both logits and features for DANN adversary
+                    logits, features = model(images, return_features=True)  # logits: [batch, 2], features: [batch, 768]
+                else:
+                    logits = model(images)  # [batch_size, num_classes]
+                    
                 loss = criterion(logits, labels)
                 
                 # Domain Adversarial Neural Networks (DANN) loss
-                # Note: Simplified version - adversary predicts from logits
-                # For full DANN, you would extract features from intermediate layers
+                # Adversary predicts experiment ID from backbone features (not logits)
                 if use_dann:
-                    # Predict experiment ID from logits (proxy for features)
-                    exp_logits = adversary_head(grad_rev_layer(logits.detach()))
+                    # Predict experiment ID from features using gradient reversal
+                    exp_logits = adversary_head(grad_rev_layer(features.detach()))  # features: [batch, 768]
                     adv_loss = adversary_criterion(exp_logits, exp_indices)
                     
                     # Combine losses
@@ -1253,7 +1257,7 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
             print(f"[DEBUG] Grad-CAM: Loading {len(gradcam_indices)} selected samples from dataset...")
             all_images_for_gradcam = []
             for idx in gradcam_indices:
-                img, label = val_dataset[idx]
+                img, label, exp_idx = val_dataset[idx]  # Unpack 3-tuple: (image, label, experiment_index)
                 all_images_for_gradcam.append(img)
             
             if all_images_for_gradcam:

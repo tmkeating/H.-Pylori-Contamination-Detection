@@ -1,4 +1,4 @@
-# H. Pylori Contamination Detection (Iteration 30.0: Hybrid Ensemble Fusion)
+# H. Pylori Contamination Detection (Iteration 34.0: Hybrid Ensemble Fusion)
 
 This project implements a **High-Resolution Multi-Stage MIL Pipeline** for the automated detection of *H. pylori* contamination in histology tissue samples. It features a **Searcher-Rescue** architecture designed to identify sparse bacterium clusters in high-resolution whole-slide imaging, combined with an **intelligent Hybrid Ensemble** that achieves 92.11% accuracy with perfect precision.
 
@@ -117,7 +117,7 @@ After integrity checks pass, sync the vetted datasets to local node storage for 
 **Launch the full transfer learning pipeline** (preferred for best accuracy):
 
 ```bash
-PROFILE=SEARCHER MODEL_NAME=convnext_tiny ITER=30.0 ./submit_transfer_learning.sh
+PROFILE=SEARCHER MODEL_NAME=convnext_tiny ITER=34.0 ./submit_transfer_learning.sh
 ```
 
 This script automatically orchestrates:
@@ -146,7 +146,7 @@ This script automatically orchestrates:
 **Alternative: Training Without Transfer Learning** (random initialization)
 If you want to skip backbone pre-training, run:
 ```bash
-PROFILE=SEARCHER MODEL_NAME=convnext_tiny ITER=30.0 ./submit_all_folds.sh
+PROFILE=SEARCHER MODEL_NAME=convnext_tiny ITER=34.0 ./submit_all_folds.sh
 ```
 
 This script automatically orchestrates:
