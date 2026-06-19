@@ -20,21 +20,34 @@ This guide implements transfer learning using the **DeepHP dataset** (394,926 H&
 | **Backbone Initialization** | ConvNeXt-Tiny learns general histology features before task-specific MIL |
 | **Overfitting Prevention** | Pre-training reduces overfitting risk on small 114-patient IHC dataset |
 | **Faster Convergence** | Backbone doesn't need to learn from scratch; MIL head adapts quickly |
-| **Pool-Mixed Stratification** | Prevents data leakage via fold-specific artifact learning (verified: realistic metrics on epoch 1) |
-| **Diverse Experiment Sampling** | All folds see same 14 experiments (8 train + 6 val pools) preventing fold-specific patterns |
+| **CONFIG 87771 Stratification** | Hardcoded experiment-level assignments prevent data leakage (verified: realistic metrics on epoch 1) |
+| **Experiment Integrity** | Each experiment assigned to exactly ONE fold, all 33 experiments stratified across 5 folds |
 
 ---
 
-## Phase 1: DeepHP Backbone Pre-training (Pool-Mixed Stratification)
+## Phase 1: DeepHP Backbone Pre-training (CONFIG 87771 Stratification)
 
-The pre-training uses a sophisticated **pool-mixed stratification with size-balanced greedy assignment** to prevent data leakage and ensure robust feature learning:
+The pre-training uses **CONFIG 87771 hardcoded experiment-level stratification** optimized from 500,000+ greedy configuration searches to prevent data leakage and ensure robust feature learning:
 
-**Strategy** (Three-Level Approach):
-- **LEVEL 1 - Experiment Pool Assignment**: All 33 experiments grouped into 2 global pools (train ~198K patches, val ~196K patches) using greedy size-balanced assignment
-- **LEVEL 2 - Pool Distribution**: Each pool mixed and stratified by class, then split into 5 equal parts
-- **LEVEL 3 - Fold Distribution**: All folds train on same experiment diversity (prevents fold-specific artifact learning)
+**Strategy** (Experiment-Level 5-Fold Cross-Validation):
+- **Fold 0 Validation**: 7 experiments (4 pos, 3 neg) → 87,532 patches, ratio 2.33:1
+- **Fold 1 Validation**: 10 experiments (3 pos, 7 neg) → 89,516 patches, ratio 2.06:1
+- **Fold 2 Validation**: 5 experiments (4 pos, 1 neg) → 20,347 patches, ratio 2.31:1
+- **Fold 3 Validation**: 4 experiments (4 pos, 0 neg) → 99,120 patches, ratio 2.81:1
+- **Fold 4 Validation**: 7 experiments (6 pos, 1 neg) → 98,410 patches, ratio 2.29:1
+- **All Folds Training**: Each fold trains on ALL experiments except its validation experiments (~307K patches), ensuring diverse feature learning
 
-**Result**: Each fold trains on ~39.7K patches (10.2K pos, 29.5K neg) from 8 pos + 6 neg train pool experiments; validates on ~39.2K patches from 13 pos + 6 neg val pool experiments. Epoch 1 metrics realistic (~50% accuracy) and consistent across all folds (no leakage).
+**Domain Adversarial Neural Networks (DANN - Optional Advanced Feature)**:
+When enabled with `--use_dann` flag, the pre-training uses DANN to prevent learning of experiment-specific staining artifacts:
+- **Adversary Head**: Predicts experiment ID (0-32) from learned features
+- **Gradient Reversal**: Negates gradients during backprop to "confuse" adversary
+- **Result**: Forces backbone to learn experiment-invariant representations that generalize across different H&E staining protocols and scanners
+- **Parameters**: 
+  - `--dann_lambda 1.0` (gradient scaling factor for reversal layer)
+  - `--dann_weight 0.5` (weight of adversary loss in total loss)
+- **Trade-off**: Slightly longer training (~10-15% slower) for more robust features (recommended for challenging transfer tasks)
+
+**Result**: Each fold achieves realistic epoch 1 metrics (~50% accuracy) with balanced ratios (2.06:1 to 2.81:1, target 2.28:1, total distance 0.6441). No fold-specific artifact learning because each fold validates on different experiments.
 
 ### Step 1A: Submit Pre-training Jobs (All 5 Folds - Orchestrated)
 
@@ -45,14 +58,17 @@ chmod +x submit_train_deepHP.sh
 
 # Or with custom profile and parameters
 PROFILE=SEARCHER MODEL_NAME=convnext_tiny ITER=32.2 ./submit_train_deepHP.sh
+
+# With Domain Adversarial Neural Networks (DANN) - for experiment-invariant features
+USE_DANN=1 DANN_LAMBDA=1.0 DANN_WEIGHT=0.5 ./submit_train_deepHP.sh
 ```
 
 **What the orchestrator does:**
 1. ✅ Submits pre-sync job to prepare environment and sync DeepHP dataset
-2. ✅ Submits all 5 fold jobs in parallel with pool-mixed stratification (dependent on pre-sync)
+2. ✅ Submits all 5 fold jobs in parallel with CONFIG 87771 stratification (dependent on pre-sync)
 3. ✅ Submits final averaging job (depends on all 5 folds, generates averaged backbone)
 4. ✅ Generates cross-validation summary CSVs (per-fold metrics + global averages)
-5. ✅ Generates global experiment distribution audit (verifies pool-mixing integrity)
+5. ✅ Generates per-fold experiment audits (verifies CONFIG 87771 stratification integrity)
 6. ✅ Provides next steps instructions for fine-tuning on HelicoDataSet
 
 **Alternative: Manual execution** (if you prefer fine-grained control)
@@ -63,11 +79,23 @@ for i in {0..4}; do
   python3 train_deepHP_patches.py --fold $i --num_folds 5 --num_epochs 20
 done
 
+# Option A with DANN enabled
+for i in {0..4}; do
+  python3 train_deepHP_patches.py --fold $i --num_folds 5 --num_epochs 20 --use_dann --dann_lambda 1.0 --dann_weight 0.5
+done
+
 # Option B: Parallel SLURM (without orchestrator)
 for i in {0..4}; do
   sbatch -p a40 -J deephp_f$i -t 24:00:00 \
     --export=ALL,FOLD=$i \
     sh -c "python3 train_deepHP_patches.py --fold $i --num_folds 5"
+done
+
+# Option B with DANN enabled
+for i in {0..4}; do
+  sbatch -p a40 -J deephp_f$i -t 24:00:00 \
+    --export=ALL,FOLD=$i \
+    sh -c "python3 train_deepHP_patches.py --fold $i --num_folds 5 --use_dann --dann_lambda 1.0 --dann_weight 0.5"
 done
 ```
 
@@ -108,32 +136,26 @@ The orchestrator automatically generates:
 ✓ results/{run_id}_{iter}_{slurm_id}_f*_evaluation_report.csv  (Patch-level metrics)
 ✓ results/{run_id}_{iter}_{slurm_id}_f*_confusion_matrix.png
 ✓ results/{run_id}_{iter}_{slurm_id}_f*_cross_leakage_audit.csv (Image-level verification)
-```
-
-**Cross-validation audit (after all folds complete)**:
-```
-✓ results/{run_id}_{iter}_cross_leakage_audit_experiments_distribution.csv (Global experiment distribution)
-  → Shows which pool each experiment belongs to and patch distribution across all 5 folds
-  → Verifies no experiment split between train and val pools (pool-mixing integrity check)
+✓ results/{run_id}_{iter}_{slurm_id}_f*_experiment_fold_audit.csv (Experiment composition per fold)
 ```
 
 **Averaged backbone** (automatically created):
 ```
 ✓ results/deephp_backbone_final_{run_id}_convnext_tiny_{iter}.pth  (~350 MB)
-  (Averaged from 5-fold pool-mixed pre-training, ready for HelicoDataSet fine-tuning)
+  (Averaged from 5-fold CONFIG 87771 pre-training, ready for HelicoDataSet fine-tuning)
 ```
 
 ---
 
 ## Phase 2: Automatic Backbone Averaging (Done by Orchestrator)
 
-The `submit_train_deepHP.sh` orchestrator automatically averages backbone weights after all 5 folds complete. This creates a unified pre-trained backbone from all 5-fold pool-mixed CV, which provides robust feature learning from diverse experiment sources.
+The `submit_train_deepHP.sh` orchestrator automatically averages backbone weights after all 5 folds complete. This creates a unified pre-trained backbone from all 5-fold CONFIG 87771 CV, which provides robust feature learning from diverse experiment sources.
 
 ### Expected Output
 
 ```
 ✓ results/deephp_backbone_final_{run_id}_convnext_tiny_{iter}.pth  (~350 MB)
-  (Averaged from 5 folds trained on pool-mixed stratification, ready for transfer learning)
+  (Averaged from 5 folds trained on CONFIG 87771 stratification, ready for transfer learning)
   
 Example: results/deephp_backbone_final_32_convnext_tiny_32.2.pth
 ```

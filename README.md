@@ -13,8 +13,9 @@ The pipeline supports backbone pre-training on the **DeepHP dataset** (394,926 H
 - ✅ **Reduced overfitting risk** with limited IHC training data
 
 ### Files for Transfer Learning
-- **New**: `train_deepHP_patches.py` - Patch-level training on DeepHP H&E patches with pool-mixed stratification
-- **New**: `dataset_deepHP.py` - DeepHP dataset loader with pool-mixed fold splitting (prevents fold-specific artifact learning)  
+- **New**: `train_deepHP_patches.py` - Patch-level training on DeepHP H&E patches with CONFIG 87771 experiment-level stratification
+- **New**: `dataset_deepHP.py` - DeepHP dataset loader with CONFIG 87771 experiment-level fold splitting (prevents fold-specific artifact learning)
+- **New**: `domain_adversarial.py` - Domain Adversarial Neural Networks (DANN) components for experiment-invariant feature learning
 - **New**: `load_pretrained_backbone.py` - Utilities for loading and averaging backbone weights
 - **Modified**: `train.py` - Added `--pretrained_backbone_path` argument for loading backbone
 - **DeepHP Data**: `/home/tkeating/datasets/8117177/` (Positive/ and Negative/ folders)
@@ -100,10 +101,15 @@ After integrity checks pass, sync the vetted datasets to local node storage for 
 **DeepHP Sync** (automatic in `train_deepHP_patches.py`):
 - Syncs to `/home/tkeating/.scratch/h_pylori_data/` using `suggested_deephp_blacklist.json` if available
 - 394,926 clean patches (verified 0 duplicates)
-- **Pool-Mixed Stratification**: Uses three-level approach with size-balanced greedy assignment:
-  - LEVEL 1: All 33 experiments split into 2 global pools (train ~198K patches, val ~196K patches)
-  - LEVEL 2: Each pool mixed and stratified by class, then split into 5 equal parts
-  - LEVEL 3: All folds train on same experiment diversity (prevents fold-specific artifact learning)
+- **CONFIG 87771 Stratification**: Hardcoded experiment-level 5-fold cross-validation:
+  - Each of 33 experiments assigned to exactly ONE fold (zero data leakage)
+  - Fold 0 val: 7 experiments (4 pos, 3 neg) → 87,532 patches, ratio 2.33:1
+  - Fold 1 val: 10 experiments (3 pos, 7 neg) → 89,516 patches, ratio 2.06:1
+  - Fold 2 val: 5 experiments (4 pos, 1 neg) → 20,347 patches, ratio 2.31:1
+  - Fold 3 val: 4 experiments (4 pos, 0 neg) → 99,120 patches, ratio 2.81:1
+  - Fold 4 val: 7 experiments (6 pos, 1 neg) → 98,410 patches, ratio 2.29:1
+  - Each fold trains on ALL experiments except its validation experiments (~307K patches)
+  - Mathematically optimized from 500,000+ greedy configuration searches
 - **Critical Data Integrity**: The Macenko normalization reference patch is automatically excluded from all 5 folds **before** k-fold assignment (not after), mathematically guaranteeing zero leakage between training and validation sets
 
 ### 2. Training (5-Fold Cross-Validation) - RECOMMENDED METHOD
@@ -115,11 +121,18 @@ PROFILE=SEARCHER MODEL_NAME=convnext_tiny ITER=30.0 ./submit_transfer_learning.s
 ```
 
 This script automatically orchestrates:
-1. **DeepHP Backbone Pre-training** (5-fold pool-mixed stratification on 394,926 H&E patches)
-   - Uses pool-mixed stratification with size-balanced experiment assignment
-   - Each fold trains on ~39.7K patches from 8 pos + 6 neg experiments (same 14 across all folds)
-   - Each fold validates on ~39.2K patches from 13 pos + 6 neg experiments (disjoint pool)
-   - Generates per-fold cross-leakage audits and global experiment distribution audit
+1. **DeepHP Backbone Pre-training** (5-fold CONFIG 87771 stratification on 394,926 H&E patches)
+   - Uses CONFIG 87771 experiment-level hardcoded stratification
+   - Each fold validates on unique experiments (prevents fold-specific artifact learning)
+   - Each fold trains on ~307K patches from all other experiments
+   - Fold validation sets: 87,532 / 89,516 / 20,347 / 99,120 / 98,410 patches respectively
+   - Fold ratios: 2.33:1 / 2.06:1 / 2.31:1 / 2.81:1 / 2.29:1 (target 2.28:1, total distance 0.6441)
+   - **Domain Adversarial Neural Networks (DANN)**: Optionally enabled with `--use_dann` flag
+     - Prevents learning of experiment-specific staining artifacts
+     - Adversary head predicts experiment ID from features → forces experiment-invariant representations
+     - Gradient reversal layer negates gradients during backprop → confuses adversary
+     - Parameters: `--dann_lambda 1.0` (gradient scaling), `--dann_weight 0.5` (loss weighting)
+   - Generates per-fold cross-leakage audits and experiment distribution audit
    - Includes automatic Macenko reference image check (creates if missing)
    - Applies Macenko stain normalization during DeepHP pre-training
    - Runs on login node before SLURM job submission (fast, non-intensive)
@@ -234,7 +247,8 @@ ConvNeXt-Small's additional parameters did not translate to improved performance
 
 
 ## 🛠️ Key Pipeline Features
-- **Pool-Mixed Stratification (DeepHP Pre-training)**: Uses three-level stratification with size-balanced greedy experiment assignment to prevent fold-specific artifact learning. All folds see the same experiment diversity (14 experiments across train/val pools), while each fold gets a unique 1/5 slice of patches. Generates per-fold cross-leakage audits and global experiment distribution audits for integrity verification.
+- **CONFIG 87771 Stratification (DeepHP Pre-training)**: Hardcoded experiment-level 5-fold cross-validation optimized from 500,000+ greedy configuration searches. Each of 33 experiments assigned to exactly ONE fold, preventing data leakage and fold-specific artifact learning. Folds validate on different experiments (87.5K / 89.5K / 20.3K / 99.1K / 98.4K patches) with balanced ratios (2.06:1 to 2.81:1, target 2.28:1, total distance 0.6441). All folds train on ~307K patches from all other experiments.
+- **Domain Adversarial Neural Networks (DANN - Optional)**: Advanced technique for DeepHP pre-training that prevents models from learning experiment-specific staining artifacts. Adversary head predicts experiment ID from features while gradient reversal layer forces the backbone to ignore experiment signals. Result: experiment-invariant representations that generalize across different H&E staining protocols and scanners. Enable with `--use_dann` flag (default: disabled for faster training).
 - **Deterministic Validation Sets (Reproducible Cross-Validation)**: All folds use stratified k-fold splitting with fixed random seeds (`seed = 42 + fold_index`), ensuring validation sets are identical across training runs. This enables reliable model comparison and debugging without randomness in fold assignment. For example, Fold 0 always contains the same 20% of data as validation, while Folds 1-4 use their own consistent partitions. Training and validation indices are strictly disjoint with no overlap.
 - **Macenko Stain Normalization**: Applied exclusively during DeepHP H&E pre-training to normalize color variations across different staining protocols and tissue scanners, improving backbone generalization. Reference image is automatically created/verified on login node before training starts.
 - **Proactive Environment Verification**: All scripts verify virtual environment dependencies before SLURM job submission, preventing runtime failures with early, actionable error messages.

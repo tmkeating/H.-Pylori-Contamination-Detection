@@ -32,6 +32,9 @@ function set_profile_SEARCHER() {
     export SWA_START=12
     export JITTER=0.25
     export POOL_TYPE="attention"
+    export USE_DANN="False"
+    export DANN_LAMBDA=1.0
+    export DANN_WEIGHT=0.5
 }
 
 function set_profile_SEARCHERDEEPHP() {
@@ -54,6 +57,9 @@ function set_profile_SEARCHERDEEPHP() {
     export SWA_START=12
     export JITTER=0.25
     export POOL_TYPE="attention"
+    export USE_DANN="True"
+    export DANN_LAMBDA=1.0
+    export DANN_WEIGHT=0.5
 }
 
 function set_profile_SEARCHERDEEPHP1() {
@@ -76,6 +82,9 @@ function set_profile_SEARCHERDEEPHP1() {
     export SWA_START=12
     export JITTER=0.25
     export POOL_TYPE="attention"
+    export USE_DANN="True"
+    export DANN_LAMBDA=1.0
+    export DANN_WEIGHT=0.5
 }
 
 function set_profile_SEARCHERDEEPHP2() {
@@ -98,6 +107,9 @@ function set_profile_SEARCHERDEEPHP2() {
     export SWA_START=12
     export JITTER=0.25
     export POOL_TYPE="attention"
+    export USE_DANN="True"
+    export DANN_LAMBDA=1.0
+    export DANN_WEIGHT=0.5
 }
 
 function set_profile_SEARCHERDEEPHP3() {
@@ -120,6 +132,9 @@ function set_profile_SEARCHERDEEPHP3() {
     export SWA_START=12
     export JITTER=0.25
     export POOL_TYPE="attention"
+    export USE_DANN="True"
+    export DANN_LAMBDA=1.0
+    export DANN_WEIGHT=0.5
 }
 
 function set_profile_SEARCHERDEEPHP4() {
@@ -142,6 +157,9 @@ function set_profile_SEARCHERDEEPHP4() {
     export SWA_START=12
     export JITTER=0.25
     export POOL_TYPE="attention"
+    export USE_DANN="True"
+    export DANN_LAMBDA=1.0
+    export DANN_WEIGHT=0.5
 }
 
 # Profile: AUDITOR (Clinical Grade - 100% Precision)
@@ -161,6 +179,9 @@ function set_profile_AUDITOR() {
     export SWA_START=15
     export JITTER=0.15
     export POOL_TYPE="attention"
+    export USE_DANN="False"
+    export DANN_LAMBDA=1.0
+    export DANN_WEIGHT=0.5
 }
 
 # Profile: EXTREME (Diagnostic Safety Mode)
@@ -172,6 +193,9 @@ function set_profile_EXTREME() {
     export DEEPHP_EPOCHS=25
     export SAVER_METRIC="recall"
     export POOL_TYPE="max"
+    export USE_DANN="False"
+    export DANN_LAMBDA=1.0
+    export DANN_WEIGHT=0.5
 }
 
 function set_profile_TEST() {
@@ -183,4 +207,7 @@ function set_profile_TEST() {
     export DEEPHP_EPOCHS=1
     export SAVER_METRIC="f1"
     export POOL_TYPE="attention"
+    export USE_DANN="False"
+    export DANN_LAMBDA=1.0
+    export DANN_WEIGHT=0.5
 }

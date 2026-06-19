@@ -3,7 +3,7 @@
 #
 # Purpose: Orchestrate full transfer learning pipeline end-to-end:
 #   Phase 1: Pre-train backbone on 394,926 H&E patches (5 folds) via submit_train_deepHP.sh
-#            Uses class-first weighted round-robin stratification (experiment-level)
+#            Uses CONFIG 87771 hardcoded experiment-level stratification
 #   Phase 2: Sync HelicoDataSet to local scratch with blacklist exclusions
 #            Cleans 2793 blacklisted items before fine-tuning
 #   Phase 3: Fine-tune on HelicoDataSet using pre-trained backbone (5 folds in parallel)
@@ -12,7 +12,7 @@
 #            Combines 5-fold predictions for clinical validation
 #
 # Key Features:
-#   - Class-first weighted round-robin stratification (DeepHP pre-training)
+#   - CONFIG 87771 experiment-level stratification (DeepHP pre-training)
 #   - Image-level cross-leakage audits verify no patch in both train/val
 #   - Experiment-level audits verify no experiment split across train/val
 #   - Grad-CAM visualizations with guaranteed TP/FP/FN/TN coverage
@@ -36,6 +36,9 @@
 #   DEEPHP_SUMMARY_JOB_ID: Force specific pre-training job dependency (optional)
 #   FREEZE_BACKBONE:      Keep pre-trained weights frozen (default: False)
 #   GRADCAM_ONLY:         Generate only Grad-CAM visualizations (default: False)
+#   USE_DANN:             Enable Domain Adversarial training (default: False)
+#   DANN_LAMBDA:          Gradient reversal scaling factor (default: 1.0)
+#   DANN_WEIGHT:          Weight for adversary loss (default: 0.5)
 #
 # Outputs:
 #   DeepHP Pre-training (Phase 1):
@@ -52,7 +55,7 @@
 # Timeline:
 #   ~20-22 hours: DeepHP pre-training (5 folds parallel) [Phase 1]
 #                 - Each fold: backbone training + cross-leakage audits + Grad-CAM
-#                 - Stratification: class-first weighted round-robin (no experiment split)
+#                 - Stratification: CONFIG 87771 hardcoded experiment assignments (5 folds from 33 exps)
 #                 - Output: averaged backbone + 5-fold cross-validation summary
 #   ~2-3 hours:   Data sync to scratch                  [Phase 2]
 #                 - Syncs HelicoDataSet to /tmp with rsync
@@ -69,9 +72,12 @@
 #
 # Cross-Leakage Audit Strategy:
 #   DeepHP Pre-training (experiment-level):
-#     - Groups patches by experiment ID (filename prefix: Experiment-{ID}_b0s0c0...)\n#     - Labels mixed experiments by majority class (Experiment-67: 22,291 pos ≥ 9,370 neg → POSITIVE)
-#     - Class-first round-robin distribution ensures balanced coverage
-#     - Safety fallbacks guarantee ≥1 positive AND ≥1 negative per fold
+#     - CONFIG 87771: Each of 33 experiments assigned to exactly ONE fold (zero leakage)
+#     - Fold 0 val: 7 experiments (4 pos, 3 neg) → 87,532 patches (2.33:1 ratio)
+#     - Fold 1 val: 10 experiments (3 pos, 7 neg) → 89,516 patches (2.06:1 ratio)
+#     - Fold 2 val: 5 experiments (4 pos, 1 neg) → 20,347 patches (2.31:1 ratio)
+#     - Fold 3 val: 4 experiments (4 pos, 0 neg) → 99,120 patches (2.81:1 ratio)
+#     - Fold 4 val: 7 experiments (6 pos, 1 neg) → 98,410 patches (2.29:1 ratio)
 #   HelicoDataSet Fine-tuning (bag-level):
 #     - Maintains separation of CrossValidation/Annotated, CrossValidation/Cropped, HoldOut
 #     - Tracks bag membership to prevent patient/sample overlap
@@ -121,6 +127,9 @@ SKIP_PRETRAINING=${SKIP_PRETRAINING:-"False"}
 SKIP_TRANSFER_LEARNING=${SKIP_TRANSFER_LEARNING:-"False"}
 GRADCAM_ONLY=${GRADCAM_ONLY:-"False"}  # True to generate only Grad-CAM visualizations (skip other plots)
 DEEPHP_SUMMARY_JOB_ID=${DEEPHP_SUMMARY_JOB_ID:-""}
+USE_DANN=${USE_DANN:-"False"}
+DANN_LAMBDA=${DANN_LAMBDA:-1.0}
+DANN_WEIGHT=${DANN_WEIGHT:-0.5}
 
 echo "=========================================================================="
 echo "TRANSFER LEARNING: Complete End-to-End Pipeline"
@@ -128,8 +137,8 @@ echo "==========================================================================
 echo ""
 echo "STRATIFICATION APPROACH:"
 echo "  - Phase 1 (DeepHP Pre-training):"
-echo "    Class-first weighted round-robin (experiment-level)"
-echo "    Ensures balanced classes, prevents artifact overfitting"
+echo "    CONFIG 87771 experiment-level (hardcoded 5-fold assignments)"
+echo "    Each experiment assigned to exactly ONE fold (prevents leakage)"
 echo "    Output: Pre-trained backbone averaged across 5 folds"
 echo ""
 echo "  - Phase 3 (HelicoDataSet Fine-tuning):"
@@ -220,7 +229,7 @@ RUN_ID_GEN_EOF
         echo ""
         
         # Export ITER and use PROFILE_DEEPHP for pre-training, PROFILE for transfer learning
-        export MODEL_NAME PROFILE=$PROFILE_DEEPHP ITER RUN_ID
+        export MODEL_NAME PROFILE=$PROFILE_DEEPHP ITER RUN_ID USE_DANN DANN_LAMBDA DANN_WEIGHT
         PRETRAINING_OUTPUT=$(./submit_train_deepHP.sh 2>&1)
         echo "$PRETRAINING_OUTPUT"
         # Restore PROFILE for transfer learning phase
@@ -357,10 +366,10 @@ echo "  Iteration: $ITER"
 echo ""
 echo "Phase 1: DeepHP Pre-training"
 echo "  Epochs: $DEEPHP_EPOCHS"
-echo "  Stratification: Class-first weighted round-robin"
-echo "    - Experiment-level (prevents artifact overfitting)"
-echo "    - Per fold: ~4 positive + ~2.4 negative experiments"
-echo "    - Class ratio per fold: ~2.28:1 (consistent with dataset)"
+echo "  Stratification: CONFIG 87771 (experiment-level hardcoded assignments)"
+echo "    - Each experiment assigned to exactly ONE fold"
+echo "    - All folds train on ~307K patches from all other experiments"
+echo "    - Fold ratios range 2.06:1 to 2.81:1 (target 2.28:1, distance 0.6441)"
 echo "  Cross-leakage audits: Image-level AND experiment-level"
 echo "  Grad-CAM: Two-pass collection (guarantees TP/FP/FN/TN coverage)"
 echo ""
