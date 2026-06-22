@@ -177,7 +177,7 @@ python3 apply_calibrated_thresholds_deepHP.py --run 32
 ### Stage 3: Weighted Ensemble Voting (DeepHP Backbone)
 
 ```bash
-python3 weighted_ensemble_deepHP.py --run 32 --strategy f1
+python3 ensemble_voting_deepHP.py --run 32 --strategy f1
 
 # Creates averaged backbone for transfer learning
 ```
@@ -489,7 +489,7 @@ This stage automatically:
 2. ✅ Waits for all 5 folds to complete
 3. ✅ Calibrates per-fold thresholds using `calibrate_per_fold_thresholds_deepHP.py`
 4. ✅ Applies thresholds using `apply_calibrated_thresholds_deepHP.py`
-5. ✅ Generates weighted ensemble using `weighted_ensemble_deepHP.py` (~3-5 min)
+5. ✅ Generates weighted ensemble using `ensemble_voting_deepHP.py` (~3-5 min)
 6. ✅ Averages backbone weights from 5-fold CV (~2 min)
 7. ✅ Outputs: `deephp_backbone_final_{run_id}_convnext_tiny_{iter}.pth` ready for transfer learning
 
@@ -508,7 +508,7 @@ This stage automatically:
 5. ✅ Provides performance comparison instructions
 
 **Separation of Concerns:**
-- **`weighted_ensemble_deepHP.py`** (Phase 2A): Generates backbone from H&E patches
+- **`ensemble_voting_deepHP.py`** (Phase 2A): Generates backbone from H&E patches
 - **`ensemble_voting.py`** (Phase 4): Generates final patient predictions from IHC patches
 
 ### Option 2: All-in-One Execution
@@ -525,7 +525,7 @@ Run the complete end-to-end pipeline:
 ```
 
 **Full Workflow:**
-1. DeepHP pre-training (5 folds) → `weighted_ensemble_deepHP.py` → averaged backbone
+1. DeepHP pre-training (5 folds) → `ensemble_voting_deepHP.py` → averaged backbone
 2. HelicoDataSet fine-tuning (5 folds) → `ensemble_voting.py` → final predictions
 
 ---
@@ -535,7 +535,7 @@ Run the complete end-to-end pipeline:
 | Phase | Task | Time | GPU |
 |-------|------|------|-----|
 | 1 | DeepHP pre-training (5 folds parallel) | 18-22 hrs | 5× L40S |
-| 2A | DeepHP post-processing: calibration + weighted_ensemble_deepHP | 3-5 min | CPU |
+| 2A | DeepHP post-processing: calibration + ensemble_voting_deepHP | 3-5 min | CPU |weighted
 | 2B | Backbone averaging | 2 min | CPU |
 | 3 | HelicoDataSet fine-tuning (5 folds parallel) | 6-8 hrs | 5× L40S |
 | 4 | HelicoDataSet post-processing: ensemble_voting (weighted ensemble) | 5-10 min | CPU |

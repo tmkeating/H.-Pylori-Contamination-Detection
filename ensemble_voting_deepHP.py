@@ -14,7 +14,7 @@ Weighting Strategies:
 5. Uniform: Equal weight (baseline)
 
 Usage:
-    python3 weighted_ensemble.py --run 01_34.2 --strategy f1
+    python3 ensemble_voting_deepHP.py --run 01_34.2 --strategy f1
     
 Expects input files: {run_id}_f0_predictions_corrected.json, {run_id}_f1_predictions_corrected.json, etc.
 Output files: {run_id}_ensemble_metrics_{strategy}.csv, {run_id}_ensemble_weights_{strategy}.json

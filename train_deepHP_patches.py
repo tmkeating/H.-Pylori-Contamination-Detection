@@ -257,12 +257,27 @@ def generate_gradcam_visualizations(model, images, labels, predictions, probabil
                     gradients = torch.abs(img_input.grad.data)  # Use .data to avoid tracking
                     attention = torch.mean(gradients, dim=1, keepdim=True)[0, 0].cpu().detach()
                     
-                    # Normalize attention map
-                    attention = attention - attention.min()
-                    if attention.max() > 1e-6:  # Only keep if there are meaningful gradients
-                        attention = attention / (attention.max() + 1e-8)
+                    # Debug: Check gradient statistics
+                    grad_min, grad_max = attention.min().item(), attention.max().item()
+                    grad_mean = attention.mean().item()
+                    grad_std = attention.std().item()
+                    if col == 0 and row == 0:  # Print only once per Grad-CAM generation
+                        print(f"[DEBUG Grad-CAM] Gradient stats: min={grad_min:.6f}, max={grad_max:.6f}, mean={grad_mean:.6f}, std={grad_std:.6f}")
+                    
+                    # Normalize attention map using percentile-based normalization for robustness
+                    # This ensures attention is always visible, even for small gradient magnitudes
+                    attention = attention.numpy()
+                    p_min = np.percentile(attention, 5)  # 5th percentile as baseline
+                    p_max = np.percentile(attention, 95)  # 95th percentile as peak
+                    
+                    # Robust normalization: shift and scale based on percentiles
+                    attention = np.clip((attention - p_min) / (p_max - p_min + 1e-8), 0, 1)
+                    
+                    # Always keep attention if it has any variation
+                    if np.std(attention) < 1e-8:  # Completely flat gradient
+                        attention = None
                     else:
-                        attention = None  # No meaningful gradients, skip overlay
+                        attention = torch.from_numpy(attention).float()
                 else:
                     attention = None
             except Exception as e:
@@ -277,9 +292,17 @@ def generate_gradcam_visualizations(model, images, labels, predictions, probabil
             
             # Overlay attention if available
             if attention is not None:
-                # Enhance contrast: use power function to emphasize high-gradient regions
-                attention_enhanced = attention.numpy() ** 0.4  # Lower exponent = higher contrast
-                axes[row, col].imshow(attention_enhanced, cmap='jet', alpha=0.5, vmin=0, vmax=1)
+                # Convert to numpy if still tensor
+                if isinstance(attention, torch.Tensor):
+                    attention = attention.numpy()
+                
+                # Apply power transformation to enhance high-gradient regions
+                # Power < 1 stretches values, making mid-range values more visible
+                attention_enhanced = np.power(attention, 0.2)  # Very aggressive enhancement
+                
+                # Display with 'YlOrRd' colormap (yellow->orange->red, more visible than hot)
+                # Use higher alpha (0.85) for better visibility of overlay on colorful tissue
+                axes[row, col].imshow(attention_enhanced, cmap='YlOrRd', alpha=0.85, vmin=0, vmax=1)
             
             # Title with prediction confidence
             label_str = "POS" if label == 1 else "NEG"

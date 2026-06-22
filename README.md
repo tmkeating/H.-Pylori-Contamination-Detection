@@ -185,7 +185,7 @@ The automated post-processing job orchestrates four sequential stages:
 - Outputs: Per-fold predictions with threshold-optimized binary labels
 
 #### 3.3 Backbone Weighted Ensemble (DeepHP Pre-training)
-**Stage 3: `weighted_ensemble_deepHP.py`** (after DeepHP pre-training only)
+**Stage 3: `ensemble_voting_deepHP.py`** (after DeepHP pre-training only)
 - Fuses predictions from all 5 DeepHP folds using weighted voting
 - Each fold receives weight based on its validation performance (F1 score)
 - Generates averaged backbone ready for transfer learning to HelicoDataSet
@@ -225,7 +225,7 @@ For **DeepHP Pre-training** post-processing:
 ```bash
 python3 calibrate_per_fold_thresholds_deepHP.py --run 32
 python3 apply_calibrated_thresholds_deepHP.py --run 32
-python3 weighted_ensemble_deepHP.py --run 32 --strategy f1
+python3 ensemble_voting_deepHP.py --run 32 --strategy f1
 ```
 
 For **HelicoDataSet Fine-tuning** post-processing:

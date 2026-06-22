@@ -632,7 +632,7 @@ if [ -z "$DEPENDENCY_STRING" ]; then
 fi
 
 SUMMARY_JOB_OUT=$(sbatch --dependency=$DEPENDENCY_STRING \
-    --export=VENV_ROOT,RUN_ID,ITER,MODEL_NAME \
+    --export=ALL \
     -p pg1tfg12 \
     --time=0-00:30 \
     --mem=16G \
@@ -1110,11 +1110,13 @@ echo ""
 
 # Submit post-processing job after summary completes
 POST_PROCESS_JOB=$(sbatch --dependency=afterok:$SUMMARY_JOB_ID \
-    --export=VENV_ROOT,ITER,RUN_ID \
+    --export=ALL \
     -p pg1tfg12 --time=0-00:30 --mem=16G --cpus-per-task=2 \
     --job-name=deephp_postprocess --output=results/slurm_postprocess_%j.txt \
     <<'POSTPROCESS_EOF'
 #!/bin/bash
+# Get virtual environment path from config
+VENV_ROOT=$(python3 -c "from config import VENV_ROOT; print(VENV_ROOT)")
 source $VENV_ROOT/bin/activate
 cd /home/tkeating/model/H.-Pylori-Contamination-Detection
 
@@ -1123,11 +1125,11 @@ echo "======================="
 
 # Step 1: Calibrate thresholds
 echo "Step 1: Calibrating per-fold thresholds..."
-python3 calibrate_per_fold_thresholds.py --run ${RUN_ID}_${ITER} || exit 1
+python3 calibrate_per_fold_thresholds_deepHP.py --run ${RUN_ID}_${ITER} || exit 1
 
 # Step 2: Apply thresholds
 echo "Step 2: Applying calibrated thresholds..."
-python3 apply_calibrated_thresholds.py --run ${RUN_ID}_${ITER} --model convnext_tiny || exit 1
+python3 apply_calibrated_thresholds_deepHP.py --run ${RUN_ID}_${ITER} --model convnext_tiny || exit 1
 
 # Step 3: Load backbone with thresholds
 echo "Step 3: Loading backbone models with thresholds..."
@@ -1135,7 +1137,7 @@ python3 deephp_backbone_with_threshold.py --run ${RUN_ID}_${ITER} --model convne
 
 # Step 4: Weighted ensemble voting
 echo "Step 4: Computing weighted ensemble..."
-python3 weighted_ensemble.py --run ${RUN_ID}_${ITER} --strategy f1 || exit 1
+python3 ensemble_voting_deepHP.py --run ${RUN_ID}_${ITER} --strategy f1 || exit 1
 
 echo "Post-processing complete!"
 POSTPROCESS_EOF
