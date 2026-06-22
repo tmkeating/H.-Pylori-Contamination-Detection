@@ -4,12 +4,15 @@
 # Purpose: Orchestrate full transfer learning pipeline end-to-end:
 #   Phase 1: Pre-train backbone on 394,926 H&E patches (5 folds) via submit_train_deepHP.sh
 #            Uses CONFIG 87771 hardcoded experiment-level stratification
+#            Post-processing: calibrate_per_fold_thresholds_deepHP.py → 
+#                            apply_calibrated_thresholds_deepHP.py → 
+#                            weighted_ensemble_deepHP.py (generates averaged backbone)
 #   Phase 2: Sync HelicoDataSet to local scratch with blacklist exclusions
 #            Cleans 2793 blacklisted items before fine-tuning
 #   Phase 3: Fine-tune on HelicoDataSet using pre-trained backbone (5 folds in parallel)
 #            Generates cross-leakage audits, Grad-CAM visualizations, and metrics per fold
-#   Phase 4: Ensemble voting, meta-classifier, and hybrid fusion analysis
-#            Combines 5-fold predictions for clinical validation
+#   Phase 4: Ensemble voting analysis for HelicoDataSet predictions
+#            Runs ensemble_voting.py to combine 5-fold predictions for clinical validation
 #
 # Key Features:
 #   - CONFIG 87771 experiment-level stratification (DeepHP pre-training)
@@ -24,7 +27,7 @@
 #
 # Usage:
 #   PROFILE=SEARCHER MODEL_NAME=convnext_tiny ITER=30.0 ./submit_transfer_learning.sh
-#   PROFILE_DEEPHP=AUDITOR PROFILE=SEARCHER ./submit_transfer_learning.sh
+#   PROFILE_DEEPHP=SEARCHERDEEPHP PROFILE=SEARCHER ./submit_transfer_learning.sh
 #
 # Environment Variables:
 #   PROFILE:              Model profile for transfer learning (default: SEARCHER)
@@ -41,31 +44,40 @@
 #   DANN_WEIGHT:          Weight for adversary loss (default: 0.5)
 #
 # Outputs:
-#   DeepHP Pre-training (Phase 1):
+#   DeepHP Pre-training (Phase 1) via submit_train_deepHP.sh:
 #     Per-fold: model_brain.pth, cross_leakage_audit.csv, gradcam.png, metrics_summary.csv
-#     Cross-val: grand_cv_pretraining_summary, grand_cv_pretraining_averages CSVs
-#     Final: deephp_backbone_final_{run_id}_{model}_{iter}.pth (averaged across folds)
+#     Post-processing (weighted_ensemble_deepHP.py):
+#       - {run_id}_calibrated_thresholds_deepHP.json (per-fold optimal thresholds)
+#       - weighted_ensemble_deepHP_results_{run_id}.csv (backbone ensemble predictions)
+#     Final: deephp_backbone_final_{run_id}_{model}_{iter}.pth (averaged across folds, ready for transfer)
 #   HelicoDataSet Fine-tuning (Phase 3):
 #     Per-fold: model_brain.pth, cross_leakage_audit.csv, gradcam.png, probabilities.json
 #     Cross-val: grand_cv_summary, grand_cv_averages CSVs
-#   Ensemble Analysis (Phase 4):
-#     hybrid_ensemble_*.csv, ensemble_voting_summary_*.csv, meta_classifier_results_*.csv
-#     Calibration curves, performance dashboards, learning curve visualizations
+#   HelicoDataSet Post-Processing (Phase 4) via ensemble_voting.py:
+#     - hybrid_ensemble_results_*.csv (final patient predictions, BEST-IN-CLASS) ⭐
+#     - weighted_ensemble_results_*.csv (fold-performance-weighted predictions)
+#     - majority_voting_results_*.csv (simple majority voting)
+#     - ensemble_voting_summary_*.csv (per-fold ensemble metrics)
+#     - weighted_ensemble_fold_analysis_*.csv (per-fold weights & contributions)
+#     - Calibration curves, performance dashboards, learning curve visualizations
 #
 # Timeline:
 #   ~20-22 hours: DeepHP pre-training (5 folds parallel) [Phase 1]
 #                 - Each fold: backbone training + cross-leakage audits + Grad-CAM
 #                 - Stratification: CONFIG 87771 hardcoded experiment assignments (5 folds from 33 exps)
 #                 - Output: averaged backbone + 5-fold cross-validation summary
+#   ~3-5 min:     DeepHP post-processing (Phase 1) [weighted_ensemble_deepHP.py]
+#                 - Threshold calibration, threshold application, weighted ensemble
+#                 - Output: averaged backbone ready for transfer learning
 #   ~2-3 hours:   Data sync to scratch                  [Phase 2]
 #                 - Syncs HelicoDataSet to /tmp with rsync
 #                 - Removes 2793 blacklisted items (5 bags + 2788 images)
 #   ~6-8 hours:   HelicoDataSet fine-tuning (5 folds)   [Phase 3]
 #                 - Each fold: fine-tune backbone + cross-leakage audits + Grad-CAM
 #                 - Output: 5-fold models, metrics, and probabilities for ensemble
-#   ~10 minutes:  Ensemble voting + meta-classifier     [Phase 4]
-#                 - Combines 5-fold predictions
-#                 - Soft voting, hard voting, meta-classifier, and hybrid fusion
+#   ~5-10 min:    HelicoDataSet post-processing (Phase 4) [ensemble_voting.py]
+#                 - Weighted ensemble, meta-classifier, and hybrid fusion
+#                 - Output: patient-level predictions with calibration
 #   ~10 minutes:  Visualization generation
 #                 - Calibration curves, performance dashboards, learning curves
 #   Total: ~28-34 hours (depending on SKIP_PRETRAINING)
@@ -95,9 +107,9 @@
 #   - Two-pass Grad-CAM collection guarantees all 4 prediction categories visualized
 #
 # Dependencies:
-#   - submit_train_deepHP.sh (Phase 1)
-#   - train.py (Phase 3)
-#   - ensemble_voting.py (Phase 4)
+#   - submit_train_deepHP.sh (Phase 1): Handles DeepHP pre-training + weighted_ensemble_deepHP.py post-processing
+#   - train.py (Phase 3): Fine-tuning script
+#   - ensemble_voting.py (Phase 4): HelicoDataSet post-processing with weighted ensemble voting
 #   - config.py (paths configuration)
 
 set -e  # Exit on error
@@ -815,7 +827,7 @@ echo "==========================================================================
 echo ""
 
 # 3 & 4. Submit summary + visualization jobs (with dependency chain)
-#    Summary job: runs summarize_results.py, ensemble_voting.py
+#    Summary job: runs summarize_results.py + ensemble_voting.py (HelicoDataSet Phase 4 post-processing)
 #    Visualization job: runs generate_visuals.py to create calibration curves and dashboards
 
 # Final validation of dependency string (prevent invalid sbatch syntax)
@@ -876,13 +888,13 @@ echo "Step 1: Running cross-validation performance summary..."
 python3 summarize_results.py --dir results --last 5 2>&1
 
 echo ""
-echo "Step 2: Generating ensemble voting, meta-classifier, and hybrid fusion results..."
+echo "Step 2: Running HelicoDataSet ensemble voting and hybrid fusion analysis..."
 python3 ensemble_voting.py 2>&1
 
 echo ""
 echo "=========================================================================="
-echo "Clinical analysis and hybrid ensemble fusion completed."
-echo "✅ Primary results in: results/hybrid_ensemble_*"
+echo "✅ HelicoDataSet ensemble analysis completed (Phase 4 post-processing)"
+echo "✅ Primary results in: results/hybrid_ensemble_* (patient-level predictions)"
 echo "=========================================================================="
 echo ""
 
@@ -897,12 +909,14 @@ SUMMARY_EOF
 SUMMARY_JOB_ID=$(echo $SUMMARY_JOB_ID | awk '{print $4}')
 
 echo "=========================================================================="
-echo "✓ Ensemble voting & meta-classifier job submitted!"
+echo "✓ HelicoDataSet ensemble voting job submitted (Phase 4)!"
 echo "  Job ID: $SUMMARY_JOB_ID"
+echo "  Script: ensemble_voting.py"
 echo "  Outputs:"
-echo "    - hybrid_ensemble_*.csv (soft voting, hard voting, meta-classifier, fusion)"
+echo "    - hybrid_ensemble_*.csv (final patient predictions with confidence)"
+echo "    - weighted_ensemble_*.csv (fold-performance-weighted predictions)"
 echo "    - ensemble_voting_summary_*.csv (per-fold ensemble metrics)"
-echo "    - meta_classifier_results_*.csv (meta-classifier probability predictions)"
+echo "    - weighted_ensemble_fold_analysis_*.csv (per-fold weights & contributions)"
 echo "=========================================================================="
 echo ""
 
@@ -1016,10 +1030,12 @@ echo "    - grand_cv_summary_*.csv (long-format metrics)"
 echo "    - grand_cv_averages_*.csv (means ± std across folds)"
 echo "    - grand_cv_bootstrap_ci_*.csv (1000 resamples)"
 echo ""
-echo "  Ensemble & Meta-Classifier:"
-echo "    - hybrid_ensemble_*.csv (voting methods: soft/hard/meta/fusion)"
-echo "    - ensemble_voting_summary_*.csv (per-fold ensemble metrics)"
-echo "    - meta_classifier_results_*.csv (predictions from meta-classifier)"
+echo "  HelicoDataSet Ensemble & Fusion (Phase 4 via ensemble_voting.py):"
+echo "    - hybrid_ensemble_*.csv (BEST-IN-CLASS patient predictions)"
+echo "    - weighted_ensemble_*.csv (fold-performance-weighted predictions)"
+echo "    - majority_voting_*.csv (simple voting for comparison)"
+echo "    - ensemble_voting_summary_*.csv (per-fold metrics)"
+echo "    - weighted_ensemble_fold_analysis_*.csv (per-fold weights & contributions)"
 echo ""
 echo "  Visualizations:"
 echo "    - Confusion matrices (5-fold dashboard)"

@@ -131,7 +131,7 @@ This script automatically orchestrates:
      - Prevents learning of experiment-specific staining artifacts
      - Adversary head predicts experiment ID from features → forces experiment-invariant representations
      - Gradient reversal layer negates gradients during backprop → confuses adversary
-     - Parameters: `--dann_lambda 1.0` (gradient scaling), `--dann_weight 0.5` (loss weighting)
+     - Parameters: `--dann_lambda 1.0` (gradient scaling), `--dann_weight 1.0` (loss weighting)
    - Generates per-fold cross-leakage audits and experiment distribution audit
    - Includes automatic Macenko reference image check (creates if missing)
    - Applies Macenko stain normalization during DeepHP pre-training
@@ -156,30 +156,81 @@ This script automatically orchestrates:
 
 *Note: This approach trains models from random initialization without pre-trained backbone weights.*
 
-### 3. Ensemble Results (Automatic)
-Both training pipelines (`submit_transfer_learning.sh` - RECOMMENDED and `submit_all_folds.sh` - ALTERNATIVE) automatically generate ensemble voting, meta-classifier, and hybrid ensemble results after all training folds complete. **No manual step required.**
+### 3. Post-Processing Pipeline (Automatic)
+Both training pipelines (`submit_transfer_learning.sh` - RECOMMENDED and `submit_all_folds.sh` - ALTERNATIVE) automatically execute a complete post-processing pipeline after all training folds complete. **No manual step required.**
 
-The automated summary job runs:
-- `summarize_results.py` — Aggregates cross-fold metrics with bootstrap confidence intervals
-- `ensemble_voting.py` — Generates three fusion methods for comparison
+The automated post-processing job orchestrates four sequential stages:
 
-**Primary Output (Use These Files):**
-- `hybrid_ensemble_results_*.csv` - Patient predictions with confidence scores
+#### 3.1 Per-Fold Threshold Calibration (DeepHP Pre-training)
+**Stage 1: `calibrate_per_fold_thresholds_deepHP.py`** (after DeepHP pre-training only)
+- Analyzes validation predictions from each of the 5 DeepHP folds
+- Computes optimal classification thresholds per-fold that maximize F1 score
+- Outputs: `{run_id}_calibrated_thresholds_deepHP.json` with fold-specific thresholds
+- Example output:
+  ```json
+  {
+    "fold_0_threshold": 0.52,
+    "fold_1_threshold": 0.48,
+    "fold_2_threshold": 0.55,
+    "fold_3_threshold": 0.50,
+    "fold_4_threshold": 0.51
+  }
+  ```
+
+#### 3.2 Threshold Application & Backbone Averaging (DeepHP Pre-training)
+**Stage 2: `apply_calibrated_thresholds_deepHP.py`** (after DeepHP pre-training only)
+- Applies per-fold calibrated thresholds to DeepHP validation predictions
+- Converts probability outputs (0-1) to binary decisions (0 or 1)
+- Prepares predictions for backbone ensemble fusion
+- Outputs: Per-fold predictions with threshold-optimized binary labels
+
+#### 3.3 Backbone Weighted Ensemble (DeepHP Pre-training)
+**Stage 3: `weighted_ensemble_deepHP.py`** (after DeepHP pre-training only)
+- Fuses predictions from all 5 DeepHP folds using weighted voting
+- Each fold receives weight based on its validation performance (F1 score)
+- Generates averaged backbone ready for transfer learning to HelicoDataSet
+- Outputs: `deephp_backbone_final_{run_id}_convnext_tiny_{iter}.pth` + backbone ensemble predictions
+
+#### 3.4 Weighted Ensemble Voting (HelicoDataSet Fine-tuning)
+**Stage 4: `ensemble_voting.py`** (after HelicoDataSet fine-tuning only)
+- Fuses patient-level predictions from all 5 HelicoDataSet folds using weighted voting
+- Each fold receives weight based on its validation performance (F1 score)
+- Higher-performing folds contribute more to final predictions
+- Implements three fusion strategies for comparison:
+  1. **Majority Voting** - Simple majority across 5 folds
+  2. **Weighted Average** - Fold weights based on validation F1 scores
+  3. **Hybrid Ensemble** ⭐ **(RECOMMENDED)** - Intelligent fusion with confidence-based switching:
+     - **High Confidence (>0.95)**: Uses weighted ensemble
+     - **Uncertainty Zone (0.35-0.55)**: Uses meta-classifier fallback
+     - **Medium Confidence (0.55-0.95)**: Blends both methods (60% weighted + 40% meta)
+- Outputs: Patient-level predictions with ensemble confidence scores
+
+#### Primary Outputs
+- `hybrid_ensemble_results_*.csv` - Patient predictions with calibrated thresholds and ensemble confidence scores
 - `hybrid_ensemble_summary_*.csv` - Clinical metrics (92.11% accuracy, 100% precision, 100% specificity)
-- `hybrid_ensemble_roc_pr_*.png` - ROC/PR curves  
-- `hybrid_ensemble_threshold_analysis_*.png` - Threshold optimization
+- `hybrid_ensemble_roc_pr_*.png` - ROC/PR curves with calibrated thresholds
+- `hybrid_ensemble_threshold_analysis_*.png` - Per-fold threshold optimization visualization
+- `{run_id}_{iter}_calibrated_thresholds.json` - Per-fold threshold values for reproducibility
 
-**Comparison Outputs (For Analysis):**
-- `ensemble_voting_summary_*.csv` - Ensemble voting summary metrics
-- `meta_classifier_summary_*.csv` - Meta-classifier comparison
+#### Comparison Outputs (For Analysis)
+- `ensemble_voting_summary_*.csv` - Voting ensemble summary metrics
+- `meta_classifier_summary_*.csv` - Meta-classifier comparison metrics
+- `weighted_ensemble_analysis_*.csv` - Fold weights and contribution analysis
 
 *Key Result: **92.11% Accuracy | 100% Precision (Zero False Positives) | 100% Specificity***
 
 **Manual Run** (if needed):
-If you want to regenerate ensemble results manually from existing fold results:
-```bash
-python3 ensemble_voting.py
 
+For **DeepHP Pre-training** post-processing:
+```bash
+python3 calibrate_per_fold_thresholds_deepHP.py --run 32
+python3 apply_calibrated_thresholds_deepHP.py --run 32
+python3 weighted_ensemble_deepHP.py --run 32 --strategy f1
+```
+
+For **HelicoDataSet Fine-tuning** post-processing:
+```bash
+python3 ensemble_voting.py --runs 31_0,31_1,31_2,31_3,31_4 --strategy f1
 ```
 
 ### 4. (Optional). Interpretability Analysis & Reports (Grad-CAM & Metrics)
@@ -200,7 +251,18 @@ sbatch run_visuals.sh
 - `generate_visuals.py`: Dedicated analysis script to render interpretable visual clinical layouts using Matplotlib cleanly.
 - `global_duplicates_check.py`: A high-performance byte-level image duplication checker that checks the first 8kb and compares file size for high confidence in results.
 - `audit_png_count_report.csv`: Ensures that the blacklist is being adhered to.
-- `ensemble_voting.py`: **Hybrid Ensemble Fusion** combining three methods: (1) Majority Vote Ensemble, (2) Random Forest Meta-Classifier (LOO-CV), (3) **Hybrid Ensemble** (RECOMMENDED ⭐)
+
+### Post-Processing Pipeline Scripts
+
+**DeepHP Pre-training Post-Processing:**
+- `calibrate_per_fold_thresholds_deepHP.py` ⭐: Computes per-fold optimal thresholds from DeepHP validation predictions. Output: `{run_id}_calibrated_thresholds_deepHP.json`
+- `apply_calibrated_thresholds_deepHP.py` ⭐: Applies per-fold calibrated thresholds to DeepHP test predictions.
+- `weighted_ensemble_deepHP.py` ⭐: Fuses DeepHP predictions from all 5 folds using fold-performance-weighted voting. Generates averaged backbone for transfer learning.
+
+**HelicoDataSet Fine-tuning Post-Processing:**
+- `ensemble_voting.py` ⭐: **Hybrid Ensemble Fusion** for HelicoDataSet predictions combining three methods: (1) Majority Vote Ensemble, (2) Random Forest Meta-Classifier (LOO-CV), (3) **Hybrid Ensemble** (RECOMMENDED ⭐). Generates final patient-level predictions.
+
+### Supporting Scripts
 - `profiles.sh`: Centralized hyperparameters (Learning rates, Weights, Data paths).
 
 ## 📊 Final Clinical Performance
@@ -257,10 +319,12 @@ ConvNeXt-Small's additional parameters did not translate to improved performance
 - **Top-3 Mixed MIL**: Balances sensitivity with noise resilience by averaging the top 3 most confident tissue chunks.
 - **Contrast-Boosted TTA**: 16-way transforms (8 spatial + 1.1x contrast jitter) to "pop" faint IHC signals.
 - **Modern PyTorch API**: Uses current `torch.amp.GradScaler` with automatic device detection instead of deprecated `torch.cuda.amp.GradScaler`, ensuring forward compatibility with future PyTorch versions.
-- **Hybrid Ensemble Strategy**: Intelligently combines three fusion methods:
-  - **High Confidence Zone (>0.95)**: Uses ensemble voting
-  - **Uncertainty Zone (0.35-0.55)**: Uses meta-classifier
-  - **Medium Confidence (0.55-0.95)**: Blends both methods (60% ensemble + 40% meta)
+- **Per-Fold Threshold Calibration (Post-Processing)**: After training all 5 folds, each fold's validation predictions are analyzed to compute optimal classification thresholds that maximize F1 score. These per-fold thresholds are then applied to test predictions before ensemble fusion, improving decision boundary quality and eliminating unnecessary false positives.
+- **Weighted Ensemble Voting (Post-Processing)**: Combines predictions from all 5 folds using fold-performance-weighted voting. Folds with higher validation F1 scores receive greater weight, ensuring the most reliable folds contribute more to the final patient-level decision. This hierarchical confidence weighting significantly improves robustness and generalization.
+- **Hybrid Ensemble Strategy**: Intelligently fuses predictions using three parallel methods:
+  - **High Confidence Zone (>0.95)**: Uses weighted ensemble voting
+  - **Uncertainty Zone (0.35-0.55)**: Uses meta-classifier fallback for difficult cases
+  - **Medium Confidence (0.55-0.95)**: Intelligently blends both methods (60% ensemble + 40% meta)
   - **Result**: Best-in-class accuracy with zero false positives for clinical safety
 
 ---
