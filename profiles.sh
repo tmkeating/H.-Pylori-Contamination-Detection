@@ -46,7 +46,7 @@ function set_profile_SEARCHER() {
     export POOL_TYPE="attention"
     export USE_DANN="False"
     export DANN_LAMBDA=1.0
-    export DANN_WEIGHT=0.5
+    export DANN_WEIGHT=1.0
 }
 
 function set_profile_SEARCHERDEEPHP() {
@@ -59,7 +59,7 @@ function set_profile_SEARCHERDEEPHP() {
     export NUM_EPOCHS=20
     export DEEPHP_EPOCHS=20
     export BATCH_SIZE=64
-    export LEARNING_RATE=2e-5
+    export LEARNING_RATE=1e-5
     export SAVER_METRIC="f1"
     export FREEZE_BN="False"
     export FREEZE_BACKBONE="False"
@@ -73,19 +73,20 @@ function set_profile_SEARCHERDEEPHP() {
     export USE_DANN="True"
     export DANN_LAMBDA=1.0
     export DANN_WEIGHT=1.0
+    export USE_COMPILE="True"
 }
 
 function set_profile_SEARCHERDEEPHP1() {
     export NEG_WEIGHT=1.0
     export POS_WEIGHT="6.0,2.5,1.5,8.0,2.5"
-    export GAMMA=3.0
+    export GAMMA=4.0
     export USE_FOCAL_LOSS="False"
     # Higher WD to prevent 100% Training Accuracy (Overfitting)
     export WEIGHT_DECAY=0.05
     export NUM_EPOCHS=20
     export DEEPHP_EPOCHS=20
     export BATCH_SIZE=64
-    export LEARNING_RATE=2e-5
+    export LEARNING_RATE=1e-5
     export SAVER_METRIC="f1"
     export FREEZE_BN="False"
     export FREEZE_BACKBONE="False"
@@ -99,6 +100,7 @@ function set_profile_SEARCHERDEEPHP1() {
     export USE_DANN="True"
     export DANN_LAMBDA=1.0
     export DANN_WEIGHT=1.0
+    export USE_COMPILE="True"
 }
 
 function set_profile_TEST() {
@@ -116,7 +118,7 @@ function set_profile_TEST() {
     export POOL_TYPE="attention"
     export USE_DANN="False"
     export DANN_LAMBDA=1.0
-    export DANN_WEIGHT=0.5
+    export DANN_WEIGHT=1.0
 }
 
 function set_profile_TESTDEEPHP() {
@@ -127,7 +129,7 @@ function set_profile_TESTDEEPHP() {
     export NUM_EPOCHS=1
     export DEEPHP_EPOCHS=1
     export BATCH_SIZE=64
-    export LEARNING_RATE=2e-5
+    export LEARNING_RATE=1e-5
     export SAVER_METRIC="f1"
     export FREEZE_BN="False"
     export FREEZE_BACKBONE="False"

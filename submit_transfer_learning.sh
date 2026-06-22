@@ -587,7 +587,8 @@ echo "  - No overlap between Annotated and Cropped (separate processing pipeline
 echo "  - HoldOut completely independent (no patient/sample in train/val)"
 echo "  - All blacklisted items removed before 5-fold fine-tuning"
 echo ""
-echo "✅ Pre-sync complete. Data integrity verified."
+echo "learning_rate \$LEARNING_RATE \
+    --✅ Pre-sync complete. Data integrity verified."
 echo "   Ready to proceed with transfer learning fine-tuning on clean data."
 PRESYNC_EOF
 )
