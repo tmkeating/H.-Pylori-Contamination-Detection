@@ -115,6 +115,14 @@ echo "  Learning Rate: $LEARNING_RATE"
 echo "  Weight Decay: $WEIGHT_DECAY"
 echo "  Pos Weight: $POS_WEIGHT"
 echo "  Focal Loss: $USE_FOCAL_LOSS (gamma=$GAMMA)"
+echo "  Gamma: $GAMMA"
+echo "  Use SWA: $USE_SWA (SWA start epoch: $SWA_START)"
+echo "  Jitter Intensity: $JITTER"
+echo "  PCT Start (LR Warmup): $PCT_START"
+echo "  Clip Grad: $CLIP_GRAD"
+echo "  Saver Metric: $SAVER_METRIC"
+echo "  Freeze BN: $FREEZE_BN"
+echo "  Freeze Backbone: $FREEZE_BACKBONE"
 echo "  DANN: $USE_DANN (lambda=$DANN_LAMBDA, weight=$DANN_WEIGHT)"
 echo "=========================================================================="
 echo ""
@@ -611,6 +619,7 @@ if [ -z "$DEPENDENCY_STRING" ]; then
 fi
 
 SUMMARY_JOB_OUT=$(sbatch --dependency=$DEPENDENCY_STRING \
+    --export=VENV_ROOT,RUN_ID,ITER,MODEL_NAME \
     -p pg1tfg12 \
     --time=0-00:30 \
     --mem=16G \
@@ -666,10 +675,9 @@ fold_paths = [fold_checkpoints[i] for i in range(5)]
 # Extract run_id from first fold checkpoint filename
 # Pattern: {run_id}_{iter_name}_{slurm_id}_f{fold}_{model_name}_model_brain.pth
 # E.g., "302_31.0_113456_f0_convnext_tiny_model_brain.pth"
-run_id_match = re.search(r'^(\d+)_[\d.]+_\d+_f0_convnext_tiny', os.path.basename(fold_paths[0]))
-run_id = run_id_match.group(1) if run_id_match else "unknown"
 
-# Build output path using RUN_ID, MODEL_NAME and ITER from environment
+# Use RUN_ID and ITER from environment variables (determined at script start)
+run_id = os.environ.get('RUN_ID', 'unknown')
 model_name = os.environ.get('MODEL_NAME', 'convnext_tiny')
 iter_name = os.environ.get('ITER', '31.0')
 output_path = f"results/deephp_backbone_final_{run_id}_{model_name}_{iter_name}.pth"
@@ -1086,6 +1094,44 @@ echo ""
 echo "View logs with:"
 echo "  tail -f results/slurm_deephp_f0_*.txt"
 echo ""
+
+# Submit post-processing job after summary completes
+POST_PROCESS_JOB=$(sbatch --dependency=afterok:$SUMMARY_JOB_ID \
+    --export=VENV_ROOT,ITER,RUN_ID \
+    -p pg1tfg12 --time=0-00:30 --mem=16G --cpus-per-task=2 \
+    --job-name=deephp_postprocess --output=results/slurm_postprocess_%j.txt \
+    <<'POSTPROCESS_EOF'
+#!/bin/bash
+source $VENV_ROOT/bin/activate
+cd /home/tkeating/model/H.-Pylori-Contamination-Detection
+
+echo "Post-Processing Pipeline"
+echo "======================="
+
+# Step 1: Calibrate thresholds
+echo "Step 1: Calibrating per-fold thresholds..."
+python3 calibrate_per_fold_thresholds.py --run ${RUN_ID}_${ITER} || exit 1
+
+# Step 2: Apply thresholds
+echo "Step 2: Applying calibrated thresholds..."
+python3 apply_calibrated_thresholds.py --run ${RUN_ID}_${ITER} --model convnext_tiny || exit 1
+
+# Step 3: Load backbone with thresholds
+echo "Step 3: Loading backbone models with thresholds..."
+python3 deephp_backbone_with_threshold.py --run ${RUN_ID}_${ITER} --model convnext_tiny
+
+# Step 4: Weighted ensemble voting
+echo "Step 4: Computing weighted ensemble..."
+python3 weighted_ensemble.py --run ${RUN_ID}_${ITER} --strategy f1 || exit 1
+
+echo "Post-processing complete!"
+POSTPROCESS_EOF
+)
+
+POST_JOB_ID=$(echo $POST_PROCESS_JOB | awk '{print $4}')
+echo "Post-processing job ID: $POST_JOB_ID"
+echo ""
+
 echo "STRATIFICATION VERIFICATION (CONFIG 87771):"
 echo "  1. Per-fold image-level audits: Verify no patch appears in both train and val for that fold"
 echo "  2. Per-fold experiment audits: Show which experiments assigned to each fold"
