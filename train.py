@@ -436,7 +436,7 @@ def update_swa_bn(loader, swa_model, device):
             bags = bags.unsqueeze(0)
             wrapper(bags)
 
-def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=7.5, neg_weight=1.0, gamma=1.0, num_epochs=15, saver_metric="recall", freeze_bn=False, clip_grad=0.0, pct_start=0.1, weight_decay=0.01, use_swa=True, swa_start=15, jitter=0.15, pool_type="attention", iter_name="24.9", pretrained_backbone_path=None, freeze_backbone=False):
+def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=1.5, neg_weight=1.0, gamma=1.0, num_epochs=20, saver_metric="f1", freeze_bn=True, clip_grad=0.0, pct_start=0.1, weight_decay=0.05, learning_rate=2e-5, use_swa=True, swa_start=12, jitter=0.25, pool_type="attention", iter_name="24.9", pretrained_backbone_path=None, freeze_backbone=False):
     """
     Train a deep learning model for H. pylori contamination detection using k-fold cross-validation.
     This function implements a complete machine learning pipeline including:
@@ -850,8 +850,8 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
 
     # Optimizer Choice:
     # Iteration 21.2: Dynamic Weight Decay from Profile
-    print(f"Using AdamW Optimizer for {model_name} (LR=2e-5, WD={weight_decay})...")
-    optimizer = AdamW(model.parameters(), lr=2e-5, weight_decay=weight_decay)
+    print(f"Using AdamW Optimizer for {model_name} (LR={learning_rate}, WD={weight_decay})...")
+    optimizer = AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
 
     # --- Step 6.2: SWA Initialization (Iteration 13) ---
     from torch.optim.swa_utils import AveragedModel, SWALR
@@ -1840,6 +1840,7 @@ if __name__ == "__main__":
     parser.add_argument("--clip_grad", type=float, default=0.0, help="Gradient clipping norm (0.0 to disable)")
     parser.add_argument("--pct_start", type=float, default=0.1, help="Warmup pct for OneCycleLR")
     parser.add_argument("--weight_decay", type=float, default=0.01, help="Weight decay for optimizer")
+    parser.add_argument("--learning_rate", type=float, default=2e-5, help="Learning rate for optimizer")
     parser.add_argument("--use_swa", type=str, default="True", help="Whether to use SWA")
     parser.add_argument("--swa_start", type=int, default=15, help="Epoch to start SWA")
     parser.add_argument("--jitter", type=float, default=0.15, help="ColorJitter intensity (brightness/contrast)")
@@ -1866,6 +1867,7 @@ if __name__ == "__main__":
         clip_grad=args.clip_grad,
         pct_start=args.pct_start,
         weight_decay=args.weight_decay,
+        learning_rate=args.learning_rate,
         use_swa=args.use_swa == "True",
         swa_start=args.swa_start,
         jitter=args.jitter,

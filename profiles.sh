@@ -16,6 +16,10 @@
 
 # Set default values (can be overridden by individual profiles)
 export DROPOUT=${DROPOUT:-0.25}
+export LEARNING_RATE=${LEARNING_RATE:-2e-5}
+# Only for DeepHP training
+export BATCH_SIZE=${BATCH_SIZE:-32}
+export USE_COMPILE=${USE_COMPILE:-False}
 
 # Profile: SEARCHER (Iteration 24.9: Robust Generalization - Target 100% Recall)
 # Using Max-MIL + Stabilized Weighted Training + ReduceLROnPlateau
@@ -27,9 +31,9 @@ function set_profile_SEARCHER() {
     export USE_FOCAL_LOSS="False"
     # Higher WD to prevent 100% Training Accuracy (Overfitting)
     export WEIGHT_DECAY=0.05
-    # Reduced epochs with early stopping potential
     export NUM_EPOCHS=20
     export DEEPHP_EPOCHS=20
+    export LEARNING_RATE=2e-5
     export SAVER_METRIC="f1"
     export FREEZE_BN="True"
     export FREEZE_BACKBONE="False"
@@ -38,7 +42,7 @@ function set_profile_SEARCHER() {
     export USE_SWA="True"
     export SWA_START=12
     export JITTER=0.25
-    export DROPOUT=0.4
+    export DROPOUT=0.25
     export POOL_TYPE="attention"
     export USE_DANN="False"
     export DANN_LAMBDA=1.0
@@ -47,15 +51,15 @@ function set_profile_SEARCHER() {
 
 function set_profile_SEARCHERDEEPHP() {
     export NEG_WEIGHT=1.0
-    export POS_WEIGHT=2.5
-    # Maintained 3.0 to focus gradients on 'Hard' sparse bacterial targets
-    export GAMMA=3.0
+    export POS_WEIGHT="6.0,2.5,1.5,8.0,2.5"
+    export GAMMA=4.0
     export USE_FOCAL_LOSS="False"
     # Higher WD to prevent 100% Training Accuracy (Overfitting)
     export WEIGHT_DECAY=0.05
-    # Reduced epochs with early stopping potential
     export NUM_EPOCHS=20
     export DEEPHP_EPOCHS=20
+    export BATCH_SIZE=64
+    export LEARNING_RATE=2e-5
     export SAVER_METRIC="f1"
     export FREEZE_BN="False"
     export FREEZE_BACKBONE="False"
@@ -64,23 +68,24 @@ function set_profile_SEARCHERDEEPHP() {
     export USE_SWA="True"
     export SWA_START=12
     export JITTER=0.25
+    export DROPOUT=0.4
     export POOL_TYPE="attention"
     export USE_DANN="True"
     export DANN_LAMBDA=1.0
-    export DANN_WEIGHT=0.5
+    export DANN_WEIGHT=1.0
 }
 
 function set_profile_SEARCHERDEEPHP1() {
     export NEG_WEIGHT=1.0
-    export POS_WEIGHT=3.0
-    # Maintained 3.0 to focus gradients on 'Hard' sparse bacterial targets
+    export POS_WEIGHT="6.0,2.5,1.5,8.0,2.5"
     export GAMMA=3.0
     export USE_FOCAL_LOSS="False"
     # Higher WD to prevent 100% Training Accuracy (Overfitting)
     export WEIGHT_DECAY=0.05
-    # Reduced epochs with early stopping potential
     export NUM_EPOCHS=20
     export DEEPHP_EPOCHS=20
+    export BATCH_SIZE=64
+    export LEARNING_RATE=2e-5
     export SAVER_METRIC="f1"
     export FREEZE_BN="False"
     export FREEZE_BACKBONE="False"
@@ -89,10 +94,11 @@ function set_profile_SEARCHERDEEPHP1() {
     export USE_SWA="True"
     export SWA_START=12
     export JITTER=0.25
+    export DROPOUT=0.4
     export POOL_TYPE="attention"
     export USE_DANN="True"
     export DANN_LAMBDA=1.0
-    export DANN_WEIGHT=0.5
+    export DANN_WEIGHT=1.0
 }
 
 function set_profile_TEST() {
@@ -102,6 +108,8 @@ function set_profile_TEST() {
     export USE_FOCAL_LOSS="False"
     export NUM_EPOCHS=1
     export DEEPHP_EPOCHS=1
+    export BATCH_SIZE=64
+    export LEARNING_RATE=2e-5
     export SAVER_METRIC="f1"
     export FREEZE_BN="True"
     export FREEZE_BACKBONE="False"
@@ -113,16 +121,20 @@ function set_profile_TEST() {
 
 function set_profile_TESTDEEPHP() {
     export NEG_WEIGHT=1.0
-    export POS_WEIGHT=1.0 
-    export GAMMA=3.0
+    export POS_WEIGHT="6.0,2.5,1.5,8.0,2.5"
+    export GAMMA=4.0
     export USE_FOCAL_LOSS="False"
     export NUM_EPOCHS=1
     export DEEPHP_EPOCHS=1
+    export BATCH_SIZE=64
+    export LEARNING_RATE=2e-5
     export SAVER_METRIC="f1"
     export FREEZE_BN="False"
     export FREEZE_BACKBONE="False"
+    export DROPOUT=0.4
     export POOL_TYPE="attention"
     export USE_DANN="True"
     export DANN_LAMBDA=1.0
-    export DANN_WEIGHT=2.0
+    export DANN_WEIGHT=1.0
+    export USE_COMPILE="True"
 }

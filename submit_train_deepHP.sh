@@ -118,6 +118,7 @@ echo "  Focal Loss: $USE_FOCAL_LOSS (gamma=$GAMMA)"
 echo "  Gamma: $GAMMA"
 echo "  Use SWA: $USE_SWA (SWA start epoch: $SWA_START)"
 echo "  Jitter Intensity: $JITTER"
+echo "  Dropout: $DROPOUT"
 echo "  PCT Start (LR Warmup): $PCT_START"
 echo "  Clip Grad: $CLIP_GRAD"
 echo "  Saver Metric: $SAVER_METRIC"
@@ -190,7 +191,7 @@ echo ""
 # Export all configuration variables for presync job access
 export NUM_EPOCHS NEG_WEIGHT POS_WEIGHT GAMMA USE_FOCAL_LOSS SAVER_METRIC
 export FREEZE_BN FREEZE_BACKBONE CLIP_GRAD PCT_START WEIGHT_DECAY
-export USE_SWA SWA_START JITTER POOL_TYPE DEEPHP_EPOCHS BATCH_SIZE LEARNING_RATE
+export USE_SWA SWA_START JITTER DROPOUT POOL_TYPE DEEPHP_EPOCHS BATCH_SIZE USE_COMPILE LEARNING_RATE
 export VENV_ROOT PROFILE MODEL_NAME ITER PRETRAINED_BACKBONE RUN_ID
 
 # 1. Submit pre-sync job (prepares scratch directory for data)
@@ -231,6 +232,7 @@ echo "  Use Focal Loss: $USE_FOCAL_LOSS"
 echo "  Gamma: $GAMMA"
 echo "  Weight Decay: $WEIGHT_DECAY"
 echo "  Clip Grad: $CLIP_GRAD"
+echo "  Dropout: $DROPOUT"
 echo ""
 echo "Augmentation & Normalization:"
 echo "  Jitter Intensity: $JITTER"
@@ -504,6 +506,7 @@ FOLD=$FOLD
 MODEL_NAME=$MODEL_NAME
 DEEPHP_EPOCHS=$DEEPHP_EPOCHS
 BATCH_SIZE=$BATCH_SIZE
+USE_COMPILE=$USE_COMPILE
 LEARNING_RATE=$LEARNING_RATE
 WEIGHT_DECAY=$WEIGHT_DECAY
 POS_WEIGHT=$POS_WEIGHT
@@ -523,6 +526,14 @@ DEEPHP_SCRATCH=\$(python3 -c "from config import DEEPHP_SCRATCH_ROOT; print(DEEP
 # Use synced DeepHP dataset from scratch
 export DEEPHP_DATASET_ROOT="\$DEEPHP_SCRATCH"
 
+# Parse per-fold pos_weight if comma-separated, otherwise use single value
+FOLD_POS_WEIGHT=\$POS_WEIGHT
+if [[ \$POS_WEIGHT == *","* ]]; then
+    # Comma-separated per-fold weights - extract for this fold
+    IFS=',' read -ra WEIGHTS <<< "\$POS_WEIGHT"
+    FOLD_POS_WEIGHT=\${WEIGHTS[\$FOLD]}
+fi
+
 python3 -u train_deepHP_patches.py \
     --fold \$FOLD \
     --num_folds 5 \
@@ -532,12 +543,14 @@ python3 -u train_deepHP_patches.py \
     --learning_rate \$LEARNING_RATE \
     --weight_decay \$WEIGHT_DECAY \
     --neg_weight \$NEG_WEIGHT \
-    --pos_weight \$POS_WEIGHT \
+    --pos_weight \$FOLD_POS_WEIGHT \
     --use_focal_loss \$USE_FOCAL_LOSS \
     --gamma \$GAMMA \
     --use_swa \$USE_SWA \
     --swa_start \$SWA_START \
     --jitter \$JITTER \
+    --dropout \$DROPOUT \
+    --use_compile \$USE_COMPILE \
     --pct_start \$PCT_START \
     --clip_grad \$CLIP_GRAD \
     --saver_metric \$SAVER_METRIC \

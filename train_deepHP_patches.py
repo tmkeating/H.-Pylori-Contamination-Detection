@@ -616,7 +616,17 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
     
     # Build model (backbone only, no MIL head)
     print(f"Loading {model_name} backbone...")
-    model = get_model(model_name=model_name, num_classes=2, pretrained=True, pool_type="attention").to(device)
+    model = get_model(model_name=model_name, num_classes=2, pretrained=True, pool_type="attention", dropout=args.dropout).to(device)
+    
+    # Optionally compile model for speedup (10-30% faster inference)
+    use_compile = args.use_compile.lower() == 'true' if isinstance(args.use_compile, str) else args.use_compile
+    if use_compile:
+        try:
+            model = torch.compile(model, mode='reduce-overhead', dynamic=False)
+            print(f"✓ torch.compile enabled (mode='reduce-overhead')")
+        except Exception as e:
+            print(f"⚠ torch.compile failed ({e}), continuing without optimization")
+            use_compile = False
     
     # For DeepHP pre-training, we only care about the backbone classification head
     # The MIL components will be re-initialized when transferred to HelicoDataSet
@@ -1338,19 +1348,21 @@ if __name__ == "__main__":
     parser.add_argument("--num_epochs", type=int, default=20, help="Number of training epochs")
     parser.add_argument("--batch_size", type=int, default=128, help="Batch size")
     parser.add_argument("--learning_rate", type=float, default=2e-5, help="Learning rate")
-    parser.add_argument("--weight_decay", type=float, default=0.01, help="Weight decay")
+    parser.add_argument("--weight_decay", type=float, default=0.05, help="Weight decay")
     parser.add_argument("--use_focal_loss", type=bool, default=False, help="Use Focal Loss")
-    parser.add_argument("--pos_weight", type=float, default=2.5, help="Positive class weight (for DeepHP 1:2.5 imbalance)")
+    parser.add_argument("--pos_weight", type=float, default=1.5, help="Positive class weight (for DeepHP 1:2.5 imbalance)")
     parser.add_argument("--neg_weight", type=float, default=1.0, help="Negative class weight")
     parser.add_argument("--gamma", type=float, default=1.0, help="Focal Loss gamma")
     parser.add_argument("--iter", type=str, default="deephp", help="Iteration name for tracking (e.g., 'deephp' or '31.0')")
     parser.add_argument("--run_id", type=str, default="", help="Run ID for parallel job safety (auto-generated if not provided)")
     parser.add_argument("--use_swa", type=str, default="True", help="Whether to use SWA (Stochastic Weight Averaging)")
     parser.add_argument("--swa_start", type=int, default=12, help="Epoch to start SWA averaging")
-    parser.add_argument("--jitter", type=float, default=0.15, help="ColorJitter intensity (brightness/contrast augmentation)")
+    parser.add_argument("--jitter", type=float, default=0.25, help="ColorJitter intensity (brightness/contrast augmentation)")
     parser.add_argument("--pct_start", type=float, default=0.1, help="Warmup percentage for learning rate schedule")
     parser.add_argument("--clip_grad", type=float, default=0.0, help="Gradient clipping norm (0=disabled)")
-    parser.add_argument("--saver_metric", type=str, default="loss", help="Metric for model selection (loss/accuracy/precision/recall/f1)")
+    parser.add_argument("--dropout", type=float, default=0.25, help="Dropout rate for regularization")
+    parser.add_argument("--use_compile", type=str, default="False", help="Enable torch.compile for optimization (True/False)")
+    parser.add_argument("--saver_metric", type=str, default="f1", help="Metric for model selection (loss/accuracy/precision/recall/f1)")
     
     # Domain Adversarial Neural Networks (DANN) parameters
     parser.add_argument("--use_dann", type=str, default="False", help="Enable Domain Adversarial training to prevent learning experiment signatures")

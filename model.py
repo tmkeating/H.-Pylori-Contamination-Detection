@@ -298,7 +298,7 @@ class HPyNet(nn.Module):
     - ResNet50: Classic, fast, highly optimized for A40 (torch.compile).
     - ConvNeXt-Tiny: Modern, 7x7 kernels, better morphology extraction.
     """
-    def __init__(self, model_name="resnet50", num_classes=2, pretrained=True, pool_type="attention"):
+    def __init__(self, model_name="resnet50", num_classes=2, pretrained=True, pool_type="attention", dropout=0.25):
         super(HPyNet, self).__init__()
         self.model_name = model_name.lower()
         self.pool_type = pool_type.lower()
@@ -346,7 +346,7 @@ class HPyNet(nn.Module):
         self.patch_head = nn.Sequential(
             nn.Linear(self.feature_dim, 512),
             nn.ReLU(),
-            nn.Dropout(0.5), # Standard 0.5 for robust feature selection
+            nn.Dropout(dropout), # Configurable dropout for regularization
             nn.Linear(512, num_classes)
         )
         
@@ -418,8 +418,8 @@ class HPyNet(nn.Module):
         return logits, A
 
 # Factory function to build the model
-def get_model(model_name="resnet50", num_classes=2, pretrained=True, pool_type="attention"):
-    return HPyNet(model_name=model_name, num_classes=num_classes, pretrained=pretrained, pool_type=pool_type)
+def get_model(model_name="resnet50", num_classes=2, pretrained=True, pool_type="attention", dropout=0.25):
+    return HPyNet(model_name=model_name, num_classes=num_classes, pretrained=pretrained, pool_type=pool_type, dropout=dropout)
 
 if __name__ == "__main__":
     # If you run this file directly, it will just show you the structure of the brain
