@@ -124,7 +124,7 @@ from dataset_deepHP import DeepHPDataset, create_deephp_transforms_train, create
 from model import get_model
 from config import DATASET_ROOT, SCRATCH_ROOT, DEEPHP_DATASET_ROOT
 from normalization import MacenkoNormalizer
-from visualization_utils import plot_learning_curves, plot_confusion_matrix, plot_roc_curve, plot_pr_curve, plot_calibration_curve
+from visualization_utils import plot_learning_curves, plot_confusion_matrix, plot_roc_curve, plot_pr_curve, plot_calibration_curve, generate_gradcam
 from domain_adversarial import GradientReversalLayer, AdversaryHead, add_adversary_to_model
 
 # Function to get next run number (matching train.py pattern)
@@ -176,13 +176,10 @@ def generate_gradcam_visualizations(model, images, labels, predictions, probabil
     - Row 4: True Negatives (model correct, label negative)
     
     Each cell displays an image with overlaid gradient attention highlighting regions
-    that most influenced the model's prediction (via input gradients of predicted class).
+    that most influenced the model's prediction (via input gradients).
     
-    NOTE: This function receives pre-collected samples from two-pass Grad-CAM collection:
-    - PASS 1: Scans full validation set, collects up to 10,000 samples or until all 4 categories found
-    - PASS 2 (if needed): Targeted search for any missing categories
-    This guarantees all 4 categories are represented in the visualization, even if rare
-    (e.g., False Positives in some folds might only appear after 10,000+ samples).
+    Uses improved Grad-CAM logic from train.py with batch processing, Gaussian smoothing,
+    and robust percentile-based normalization.
     
     Args:
         model: Trained model in eval mode
@@ -241,46 +238,61 @@ def generate_gradcam_visualizations(model, images, labels, predictions, probabil
             pred = predictions[idx].item()
             prob = probabilities[idx].item()
             
-            # Compute gradient-based saliency for this single image
+            # Use improved Grad-CAM from visualization_utils
+            # Process single image batch for gradient computation
             img_input = images[idx:idx+1].clone().detach().requires_grad_(True)
             
             try:
                 with torch.enable_grad():
-                    output = model(img_input)
-                    # Use the predicted class score for gradient computation
-                    score = output[0, pred]
-                    score.backward()
+                    logits = model(img_input)
+                    
+                    # Flatten if needed
+                    if len(logits.shape) > 2:
+                        logits = torch.flatten(logits, 1)
+                    
+                    # Create a scalar loss: sum of all features (robust to class imbalance)
+                    loss = logits.sum()
                 
-                # Get input gradients
-                if img_input.grad is not None:
-                    # Compute magnitude of gradients across channels
-                    gradients = torch.abs(img_input.grad.data)  # Use .data to avoid tracking
-                    attention = torch.mean(gradients, dim=1, keepdim=True)[0, 0].cpu().detach()
+                # Backward to compute gradients at input
+                model.zero_grad()
+                loss.backward()
+                
+                # Get gradients
+                gradients = img_input.grad
+                if gradients is not None:
+                    # Compute absolute gradients, average across channels
+                    abs_grads = torch.abs(gradients)  # (1, C, H, W)
+                    saliency = torch.sum(abs_grads, dim=1, keepdim=True)  # (1, 1, H, W)
+                    hmap = saliency[0, 0].detach().cpu().numpy()  # (H, W)
                     
-                    # Debug: Check gradient statistics
-                    grad_min, grad_max = attention.min().item(), attention.max().item()
-                    grad_mean = attention.mean().item()
-                    grad_std = attention.std().item()
-                    if col == 0 and row == 0:  # Print only once per Grad-CAM generation
-                        print(f"[DEBUG Grad-CAM] Gradient stats: min={grad_min:.6f}, max={grad_max:.6f}, mean={grad_mean:.6f}, std={grad_std:.6f}")
+                    # Normalize [0, 1]
+                    hmap_min = hmap.min()
+                    hmap = hmap - hmap_min
+                    hmap_max = hmap.max()
+                    if hmap_max > 0:
+                        hmap = hmap / hmap_max
                     
-                    # Normalize attention map using percentile-based normalization for robustness
-                    # This ensures attention is always visible, even for small gradient magnitudes
-                    attention = attention.numpy()
-                    p_min = np.percentile(attention, 5)  # 5th percentile as baseline
-                    p_max = np.percentile(attention, 95)  # 95th percentile as peak
+                    # Apply Gaussian smoothing to reduce noise while preserving structure
+                    from scipy.ndimage import gaussian_filter
+                    hmap = gaussian_filter(hmap, sigma=1.5)
                     
-                    # Robust normalization: shift and scale based on percentiles
-                    attention = np.clip((attention - p_min) / (p_max - p_min + 1e-8), 0, 1)
+                    # Final normalization after smoothing
+                    hmap = np.clip(hmap, 0, 1)
+                    hmap_min = hmap.min()
+                    hmap = hmap - hmap_min
+                    hmap_max = hmap.max()
+                    if hmap_max > 0:
+                        hmap = hmap / hmap_max
                     
-                    # Always keep attention if it has any variation
-                    if np.std(attention) < 1e-8:  # Completely flat gradient
+                    # Check if gradient is meaningful
+                    if np.std(hmap) < 1e-8:  # Completely flat gradient
                         attention = None
                     else:
-                        attention = torch.from_numpy(attention).float()
+                        attention = hmap
                 else:
                     attention = None
             except Exception as e:
+                print(f"Error computing Grad-CAM for sample {idx}: {e}")
                 attention = None
             finally:
                 del img_input  # Free memory
@@ -292,16 +304,11 @@ def generate_gradcam_visualizations(model, images, labels, predictions, probabil
             
             # Overlay attention if available
             if attention is not None:
-                # Convert to numpy if still tensor
-                if isinstance(attention, torch.Tensor):
-                    attention = attention.numpy()
-                
                 # Apply power transformation to enhance high-gradient regions
-                # Power < 1 stretches values, making mid-range values more visible
-                attention_enhanced = np.power(attention, 0.2)  # Very aggressive enhancement
+                attention_enhanced = np.power(attention, 0.2)  # Aggressive enhancement
                 
                 # Display with 'YlOrRd' colormap (yellow->orange->red, more visible than hot)
-                # Use higher alpha (0.85) for better visibility of overlay on colorful tissue
+                # Use alpha 0.85 for better visibility of overlay on colorful tissue
                 axes[row, col].imshow(attention_enhanced, cmap='YlOrRd', alpha=0.85, vmin=0, vmax=1)
             
             # Title with prediction confidence
