@@ -180,6 +180,77 @@ def average_backbone_weights(fold_paths, output_path):
     print(f"{'='*80}\n")
 
 
+def weighted_average_backbone_weights(fold_paths, weights_dict, output_path):
+    """
+    Average backbone weights across folds using performance-based weights.
+    
+    Folds with better validation metrics (higher F1, accuracy, etc.) get
+    proportionally more influence on the final averaged backbone.
+    
+    Args:
+        fold_paths (list): List of paths to fold checkpoints (f0.pth, f1.pth, ...)
+        weights_dict (dict): Mapping fold_idx -> weight (e.g., {"0": 0.07, "1": 0.33, ...})
+                            Weights should sum to 1.0 (already normalized from ensemble voting)
+        output_path (str): Where to save the weighted averaged backbone
+    
+    Returns:
+        None (saves weighted averaged weights to output_path)
+    """
+    
+    print(f"\n{'='*80}")
+    print(f"Weighted Averaging Backbone Across {len(fold_paths)} Folds")
+    print(f"Using F1-Based Ensemble Weights")
+    print(f"{'='*80}\n")
+    
+    # Print weight distribution
+    print("Fold Weights (from ensemble voting):")
+    for fold_idx in range(len(fold_paths)):
+        weight = float(weights_dict.get(str(fold_idx), 0.0))
+        print(f"  Fold {fold_idx}: {weight:.4f}")
+    print()
+    
+    averaged_weights = None
+    total_weight = sum(float(weights_dict.get(str(i), 0.0)) for i in range(len(fold_paths)))
+    
+    if total_weight == 0:
+        print("ERROR: No valid weights provided")
+        return
+    
+    for fold_idx, fold_path in enumerate(fold_paths):
+        if not os.path.exists(fold_path):
+            print(f"Warning: Fold {fold_idx} checkpoint not found: {fold_path}")
+            continue
+        
+        weight = float(weights_dict.get(str(fold_idx), 0.0))
+        print(f"Loading fold {fold_idx + 1}/{len(fold_paths)}: {fold_path} (weight: {weight:.4f})")
+        
+        checkpoint = torch.load(fold_path, map_location='cpu')
+        fold_weights = {k: v.float() for k, v in checkpoint.items()}
+        
+        if averaged_weights is None:
+            # Initialize with weighted first fold
+            averaged_weights = {k: (v.clone() * weight) for k, v in fold_weights.items()}
+        else:
+            # Add weighted fold contributions
+            for key in averaged_weights.keys():
+                if key in fold_weights:
+                    averaged_weights[key] += fold_weights[key] * weight
+    
+    if averaged_weights is None:
+        print("ERROR: No valid checkpoints found to average")
+        return
+    
+    # Normalize by total weight (in case not all folds exist)
+    for key in averaged_weights.keys():
+        averaged_weights[key] = averaged_weights[key] / total_weight
+    
+    # Save weighted averaged weights
+    torch.save(averaged_weights, output_path)
+    print(f"\n✓ Saved weighted average backbone to: {output_path}")
+    print(f"  Weight normalization factor: {1.0/total_weight:.4f}")
+    print(f"{'='*80}\n")
+
+
 # Example usage
 if __name__ == "__main__":
     import os

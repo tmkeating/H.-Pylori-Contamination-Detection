@@ -444,8 +444,13 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
     print(f"{'='*80}")
     print(f"Model: {model_name} | Epochs: {num_epochs} | Batch Size: {batch_size}")
     print(f"Learning Rate: {learning_rate} | Weight Decay: {weight_decay}")
-    print(f"Focal Loss: {use_focal_loss} | Pos Weight: {pos_weight}")
+    print(f"Focal Loss: {use_focal_loss} | Pos Weight: {pos_weight} | Neg Weight: {neg_weight} | Gamma: {gamma}")
     print(f"DANN: {use_dann} | Lambda: {dann_lambda} | Weight: {dann_weight}")
+    print(f"Regularization: Dropout: {dropout} | Clip Grad: {clip_grad}")
+    print(f"Optimization: Use SWA: {use_swa} | SWA Start: {swa_start} | Pct Start (LR Warmup): {pct_start}")
+    print(f"Augmentation: Jitter: {jitter}")
+    print(f"Compilation: Use Compile: {use_compile}")
+    print(f"Model Selection: Saver Metric: {saver_metric}")
     print(f"{'='*80}\n")
     
     # Load dataset from config
@@ -1372,7 +1377,7 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=128, help="Batch size")
     parser.add_argument("--learning_rate", type=float, default=2e-5, help="Learning rate")
     parser.add_argument("--weight_decay", type=float, default=0.05, help="Weight decay")
-    parser.add_argument("--use_focal_loss", type=bool, default=False, help="Use Focal Loss")
+    parser.add_argument("--use_focal_loss", type=str, default="False", help="Use Focal Loss (True/False)")
     parser.add_argument("--pos_weight", type=float, default=1.5, help="Positive class weight (for DeepHP 1:2.5 imbalance)")
     parser.add_argument("--neg_weight", type=float, default=1.0, help="Negative class weight")
     parser.add_argument("--gamma", type=float, default=1.0, help="Focal Loss gamma")
@@ -1402,7 +1407,7 @@ if __name__ == "__main__":
         batch_size=args.batch_size,
         learning_rate=args.learning_rate,
         weight_decay=args.weight_decay,
-        use_focal_loss=args.use_focal_loss,
+        use_focal_loss=args.use_focal_loss.lower() == "true",
         pos_weight=args.pos_weight,
         neg_weight=args.neg_weight,
         gamma=args.gamma,

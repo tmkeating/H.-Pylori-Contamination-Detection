@@ -599,8 +599,7 @@ echo "  - No overlap between Annotated and Cropped (separate processing pipeline
 echo "  - HoldOut completely independent (no patient/sample in train/val)"
 echo "  - All blacklisted items removed before 5-fold fine-tuning"
 echo ""
-echo "learning_rate \$LEARNING_RATE \
-    --✅ Pre-sync complete. Data integrity verified."
+echo "✅ Pre-sync complete. Data integrity verified."
 echo "   Ready to proceed with transfer learning fine-tuning on clean data."
 PRESYNC_EOF
 )
@@ -708,19 +707,20 @@ TRAIN_CMD="python3 -u train.py \
     --pool_type \$POOL_TYPE \
     --iter \$ITER"
 
-# Only include backbone path if not skipping pre-training
-if [ "\$SKIP_PRETRAINING" != "True" ] && [ "\$SKIP_PRETRAINING" != "true" ]; then
-    # Find the latest matching backbone file (includes run_id in filename)
-    BACKBONE_FILE=\$(ls -t results/deephp_backbone_final_*_\${MODEL_NAME}_\${ITER}.pth 2>/dev/null | head -1)
-    if [ -n "\$BACKBONE_FILE" ]; then
-        TRAIN_CMD="\$TRAIN_CMD --pretrained_backbone_path \$BACKBONE_FILE"
-    else
-        echo "WARNING: No pre-trained backbone found for MODEL_NAME=\$MODEL_NAME, ITER=\$ITER"
-        echo "Expected pattern: results/deephp_backbone_final_*_\${MODEL_NAME}_\${ITER}.pth"
-    fi
+# Always include backbone path if it exists (whether from current pre-training or previous run)
+BACKBONE_FILE=\$(ls -t results/deephp_backbone_final_*_\${MODEL_NAME}_\${ITER}.pth 2>/dev/null | head -1)
+if [ -n "\$BACKBONE_FILE" ]; then
+    TRAIN_CMD="\$TRAIN_CMD --pretrained_backbone_path \$BACKBONE_FILE"
+    echo "[DEBUG] Using pre-trained backbone: \$BACKBONE_FILE"
+else
+    echo "WARNING: No pre-trained backbone found for MODEL_NAME=\$MODEL_NAME, ITER=\$ITER"
+    echo "Expected pattern: results/deephp_backbone_final_*_\${MODEL_NAME}_\${ITER}.pth"
+    echo "Will initialize from ImageNet pre-trained weights instead"
 fi
 
 TRAIN_CMD="\$TRAIN_CMD --freeze_backbone \$FREEZE_BACKBONE"
+
+TRAIN_CMD="\$TRAIN_CMD --use_focal_loss \$USE_FOCAL_LOSS"
 
 # Execute the constructed command
 eval \$TRAIN_CMD

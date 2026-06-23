@@ -436,7 +436,7 @@ def update_swa_bn(loader, swa_model, device):
             bags = bags.unsqueeze(0)
             wrapper(bags)
 
-def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=1.5, neg_weight=1.0, gamma=1.0, num_epochs=20, saver_metric="f1", freeze_bn=True, clip_grad=0.0, pct_start=0.1, weight_decay=0.05, learning_rate=2e-5, use_swa=True, swa_start=12, jitter=0.25, pool_type="attention", iter_name="24.9", pretrained_backbone_path=None, freeze_backbone=False):
+def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=1.5, neg_weight=1.0, gamma=1.0, num_epochs=20, saver_metric="f1", freeze_bn=True, clip_grad=0.0, pct_start=0.1, weight_decay=0.05, learning_rate=2e-5, use_swa=True, swa_start=12, jitter=0.25, pool_type="attention", iter_name="24.9", pretrained_backbone_path=None, freeze_backbone=False, use_focal_loss=True):
     """
     Train a deep learning model for H. pylori contamination detection using k-fold cross-validation.
     This function implements a complete machine learning pipeline including:
@@ -507,6 +507,22 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
     # Iteration 25.0: Added iteration name to prefix for better output organization
     prefix = f"{run_id}_{iter_name}_{slurm_id}_f{fold_idx}_{model_name}" 
     print(f"--- Starting Run ID: {run_id} (Fold: {fold_idx + 1}/{num_folds}, Model: {model_name}, SLURM Job: {slurm_id}, Iter: {iter_name}) ---")
+    
+    print(f"\n{'='*80}")
+    print(f"HelicoDataSet Fine-tuning: Fold {fold_idx + 1}/{num_folds}")
+    print(f"Run ID: {run_id} (Iter: {iter_name}, SLURM Job: {slurm_id})")
+    print(f"{'='*80}")
+    print(f"Model: {model_name} | Epochs: {num_epochs} | Pool Type: {pool_type}")
+    print(f"Learning Rate: {learning_rate} | Weight Decay: {weight_decay}")
+    print(f"Loss: Focal Loss={use_focal_loss} | Pos Weight: {pos_weight} | Neg Weight: {neg_weight} | Gamma: {gamma}")
+    print(f"Optimization: Use SWA: {use_swa} | SWA Start: {swa_start} | Pct Start (LR Warmup): {pct_start}")
+    print(f"Regularization: Freeze BN: {freeze_bn} | Clip Grad: {clip_grad}")
+    print(f"Augmentation: Jitter: {jitter}")
+    print(f"Backbone: Freeze Backbone: {freeze_backbone} | Pretrained: {pretrained_backbone_path is not None}")
+    if pretrained_backbone_path:
+        print(f"  Backbone Path: {pretrained_backbone_path}")
+    print(f"Model Selection: Saver Metric: {saver_metric}")
+    print(f"{'='*80}\n")
 
     # Define versioned file paths
     best_model_path = os.path.join(results_dir, f"{prefix}_model_brain.pth")
@@ -846,7 +862,10 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
     # Optimized to catch ALL potential infections or focus on balanced precision.
     loss_weights = torch.FloatTensor([neg_weight, pos_weight]).to(device) 
     # Iteration 25.0: Disabled label smoothing (0.0) as per user request.
-    criterion = FocalLoss(gamma=gamma, weight=loss_weights, smoothing=0.0)
+    if use_focal_loss:
+        criterion = FocalLoss(gamma=gamma, weight=loss_weights, smoothing=0.0)
+    else:
+        criterion = torch.nn.CrossEntropyLoss(weight=loss_weights)
 
     # Optimizer Choice:
     # Iteration 21.2: Dynamic Weight Decay from Profile
@@ -1851,6 +1870,7 @@ if __name__ == "__main__":
                         help="Path to pre-trained backbone weights from DeepHP (enables transfer learning)")
     parser.add_argument("--freeze_backbone", type=str, default="False", 
                         help="Freeze backbone during HelicoDataSet fine-tuning (True/False)")
+    parser.add_argument("--use_focal_loss", type=str, default="True", help="Use Focal Loss (True/False)")
     
     args = parser.parse_args()
     
@@ -1874,5 +1894,6 @@ if __name__ == "__main__":
         pool_type=args.pool_type,
         iter_name=args.iter,
         pretrained_backbone_path=args.pretrained_backbone_path,
-        freeze_backbone=args.freeze_backbone == "True"
+        freeze_backbone=args.freeze_backbone == "True",
+        use_focal_loss=args.use_focal_loss == "True"
     )

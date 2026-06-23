@@ -1139,6 +1139,57 @@ python3 deephp_backbone_with_threshold.py --run ${RUN_ID}_${ITER} --model convne
 echo "Step 4: Computing weighted ensemble..."
 python3 ensemble_voting_deepHP.py --run ${RUN_ID}_${ITER} --strategy f1 || exit 1
 
+# Step 5: Regenerate backbone using F1-weighted ensemble weights (improved over equal-weight average)
+echo "Step 5: Regenerating backbone with F1-weighted ensemble averaging..."
+python3 << 'WEIGHTED_BACKBONE_EOF'
+import json
+import glob
+from pathlib import Path
+from load_pretrained_backbone import weighted_average_backbone_weights
+
+# Use variables from environment
+run_id = "${RUN_ID}"
+iter_name = "${ITER}"
+model_name = "convnext_tiny"
+run_iter_combined = f"{run_id}_{iter_name}"
+
+weights_file = Path("results") / f"{run_iter_combined}_ensemble_weights_f1.json"
+
+if not weights_file.exists():
+    print(f"ERROR: Ensemble weights file not found: {weights_file}")
+    exit(1)
+
+with open(weights_file) as f:
+    ensemble_data = json.load(f)
+    fold_weights = ensemble_data.get("fold_weights", {})
+
+print(f"Loaded F1-based ensemble weights:")
+for fold_idx, weight in sorted(fold_weights.items()):
+    print(f"  Fold {fold_idx}: {float(weight):.4f}")
+
+# Find all fold checkpoints
+# Pattern: {run_id}_{iter}_{slurm_id}_f{fold}_{model}_model_brain.pth
+results_dir = Path("results")
+fold_paths = []
+for fold_idx in range(5):
+    fold_files = list(results_dir.glob(f"{run_iter_combined}_*_f{fold_idx}_{model_name}_model_brain.pth"))
+    if fold_files:
+        # Get the most recent one (in case multiple exist)
+        fold_path = sorted(fold_files, key=lambda x: x.stat().st_mtime, reverse=True)[0]
+        fold_paths.append(str(fold_path))
+    else:
+        print(f"WARNING: Fold {fold_idx} checkpoint not found")
+
+if len(fold_paths) < 5:
+    print(f"ERROR: Expected 5 folds, found {len(fold_paths)}")
+    exit(1)
+
+# Regenerate backbone with weighted averaging using correct naming convention
+output_path = f"results/deephp_backbone_final_{run_id}_{model_name}_{iter_name}.pth"
+weighted_average_backbone_weights(fold_paths, fold_weights, output_path)
+print(f"✓ Backbone regenerated with F1-weighted ensemble averaging!")
+WEIGHTED_BACKBONE_EOF
+
 echo "Post-processing complete!"
 POSTPROCESS_EOF
 )
