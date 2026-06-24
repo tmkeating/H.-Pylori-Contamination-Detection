@@ -460,7 +460,7 @@ PRE_SYNC_DEPENDENCY="afterok:$PRE_SYNC_JOB_ID"
 # - Validate on unique experiments assigned to this fold (~37K-116K patches)
 # - See diverse experiments across all folds (prevents fold-specific artifacts)
 # - Maintain balanced class ratio (~1:2.3) across folds
-# - Note: Folds 1 & 4 show anomalously high accuracy (>90% epoch 1), indicating potential cross-WSI patch contamination
+# - Note: Folds 1 & 4 show anomalously high accuracy (>75% epoch 1), indicating potential cross-WSI patch contamination
 #
 # Each fold generates:
 # - {prefix}_model_brain.pth: Trained backbone weights
