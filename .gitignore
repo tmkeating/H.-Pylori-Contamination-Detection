@@ -26,14 +26,9 @@ pip-delete-this-directory.txt
 pip-log.txt
 results/
 venv/
-# Whitelist finalResults for the checkpoint release
-!finalResults/
-!finalResults/**/
-!finalResults/*.csv
-!finalResults/**/*.csv
-!finalResults/**/*.txt
-!finalResults/**/*.sh
-!finalResults/**/*.png
-finalResults/**/*.pth
-finalResults/**/*.pth.tar
-finalResults/**/*.joblib
+# Whitelist only specific directories in finalResults/
+finalResults/
+!finalResults/convnext_tiny_skip_pretrain/
+!finalResults/convnext_tiny_pretrained/
+!finalResults/convnext_tiny_skip_pretrain/**
+!finalResults/convnext_tiny_pretrained/**
