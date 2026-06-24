@@ -25,6 +25,7 @@ pip-delete-this-directory.txt
 pip-log.txt
 results/
 venv/
+!data_integrity/**
 # Whitelist only specific directories in finalResults/
 finalResults/*
 !finalResults/convnext_tiny_skip_pretrain
