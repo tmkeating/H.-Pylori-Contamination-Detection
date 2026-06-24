@@ -10,8 +10,8 @@
 
 | Metric | Value |
 |--------|-------|
-| **Total Patches** | 394,925 |
-| **Positive (H. pylori)** | 120,374 (30.5%) |
+| **Total Patches** | 394,926 |
+| **Positive (H. pylori)** | 120,375 (30.5%) |
 | **Negative (background)** | 274,551 (69.5%) |
 | **Source WSIs** | 19 clinical slides |
 | **Derived Experiments** | 33 scanning experiments |
@@ -40,7 +40,7 @@
 - **33 experiments identified:** 28 Experiment-XXX, 3 Lm_*, 1 Snap-151
 - **Experiment-level stratification sound:** All experiments in exactly one fold
 - **22 magnifications available:** 1x-232x across multiple batches/series
-- **Complete inventory:** All 394,925 patches accounted for, no corruption
+- **Complete inventory:** All 394,926 patches accounted for, no corruption
 
 ### ⚠️ Critical Limitation: Cannot Map Experiments → WSIs
 
@@ -236,8 +236,8 @@ dataset alone; validation on an independent test set is required."
   - Citation needed for publications
 
 - **DeepHP Dataset Location:** `/home/tkeating/datasets/8117177/`
-  - Positive/: 111,005 patches
-  - Negative/: 283,921 patches
+  - Positive/: 120,375 patches (30.5%)
+  - Negative/: 274,551 patches (69.5%)
 
 - **Hospital Source:** Hospital Universitário João de Barros Barreto, Belém, Brazil
   - 19 original clinical whole-slide images

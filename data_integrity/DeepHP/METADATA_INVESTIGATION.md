@@ -32,8 +32,8 @@
 /home/tkeating/datasets/8117177/
 ├── HPPositive.tar.gz        (JPEG archive, no metadata)
 ├── HPNegative.tar.gz        (JPEG archive, no metadata)
-├── Positive/                (111,005 JPEG files, no metadata)
-└── Negative/                (283,921 JPEG files, no metadata)
+├── Positive/                (120,375 JPEG files, 30.5%, no metadata)
+└── Negative/                (274,551 JPEG files, 69.5%, no metadata)
 ```
 
 **Metadata files found:** 0
@@ -111,7 +111,7 @@ tar -tzf /home/tkeating/datasets/8117177/HPNegative.tar.gz | grep -E "\.(json|cs
 | Magnifications | Filenames | 1x to 232x magnification levels |
 | Batch/series info | Filenames | Multiple scanning sessions per experiment |
 | Positive/negative status | Directory path | Positive/ vs Negative/ folders |
-| Total patch count | File enumeration | 394,926 patches (111K+ neg) |
+| Total patch count | File enumeration | 394,926 patches (120,375 pos, 274,551 neg) |
 
 ### ❌ What IS NOT Available
 
