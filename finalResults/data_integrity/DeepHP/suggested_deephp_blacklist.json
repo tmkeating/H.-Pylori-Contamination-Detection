@@ -1,8 +1,0 @@
-{
-    "audit_status": {
-        "total_duplicate_patches": 0,
-        "duplicates_found": false,
-        "message": "No duplicate patches found - all patches are unique"
-    },
-    "deephp_image_blacklist": []
-}
