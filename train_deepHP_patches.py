@@ -28,14 +28,14 @@ SOLUTION - CONFIG 87771 (Optimized from 500,000 random greedy searches):
 CONFIG 87771 HARDCODED EXPERIMENT ASSIGNMENTS:
 Each of the 33 experiments assigned to exactly ONE fold (zero data leakage):
 
-- Fold 0 val: 7 experiments (4 pos, 3 neg) → 87,532 patches, ratio 1:2.33
-- Fold 1 val: 10 experiments (3 pos, 7 neg) → 89,516 patches, ratio 1:2.06
-- Fold 2 val: 5 experiments (4 pos, 1 neg) → 20,347 patches, ratio 1:2.31
-- Fold 3 val: 4 experiments (4 pos, 0 neg) → 99,120 patches, ratio 1:2.81
-- Fold 4 val: 7 experiments (6 pos, 1 neg) → 98,410 patches, ratio 1:2.29
+- Fold 0 val: 5 pos + 2 neg experiments → 85,854 patches (ratio 2.33:1)
+- Fold 1 val: 8 pos + 2 neg experiments → 37,093 patches (ratio 2.06:1)
+- Fold 2 val: 3 pos + 2 neg experiments → 78,085 patches (ratio 2.31:1)
+- Fold 3 val: 2 pos + 2 neg experiments → 78,189 patches (ratio 2.29:1)
+- Fold 4 val: 3 pos + 4 neg experiments → 115,704 patches (ratio 2.29:1)
 
 All 33 experiments assigned to exactly ONE fold (total: 394,925 patches)
-Training data for each fold: All experiments NOT assigned to this fold (~307K patches)
+Training data for each fold: All experiments NOT assigned to this fold (279K-358K patches)
 
 KEY PROPERTY:
 Each fold validates on UNIQUE experiments, trains on ALL OTHER experiments.
@@ -45,8 +45,8 @@ BENEFITS:
 ✓ Each fold validates on different experiments (prevents fold-specific artifact learning)
 ✓ Training data diverse across all folds (same experiments, different patches)
 ✓ Experiment integrity: No experiment split between train and val (prevents leakage)
-✓ Balanced ratios: All folds 1:2.06 to 1:2.81 (target 1:2.28)
-✓ Realistic metrics: ~50% epoch 1 accuracy across all folds (no 0%-99% variance)
+✓ Balanced ratios: All folds 2.06:1 to 2.33:1 (target 2.28:1)
+✓ Cross-fold consistency: Folds 0,2,3 realistic; Folds 1,4 anomalously high (>75% epoch 1, >99% accuracy after few eppochs, potential cross-WSI contamination)
 ✓ Mathematically optimized: Selected from 500,000+ configurations
 
 CROSS-LEAKAGE AUDIT:
@@ -340,19 +340,19 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
     Each fold validates on a unique set of experiments while training on all other experiments.
     
     CONFIG 87771 METRICS:
-    - Fold 0 val: 7 experiments (4 pos, 3 neg) → 87,532 patches, ratio 1:2.33
-    - Fold 1 val: 10 experiments (3 pos, 7 neg) → 89,516 patches, ratio 1:2.06
-    - Fold 2 val: 5 experiments (4 pos, 1 neg) → 20,347 patches, ratio 1:2.31
-    - Fold 3 val: 4 experiments (4 pos, 0 neg) → 99,120 patches, ratio 1:2.81
-    - Fold 4 val: 7 experiments (6 pos, 1 neg) → 98,410 patches, ratio 1:2.29
+    - Fold 0 val: 5 pos + 2 neg experiments → 85,854 patches (ratio 2.33:1)
+    - Fold 1 val: 8 pos + 2 neg experiments → 37,093 patches (ratio 2.06:1)
+    - Fold 2 val: 3 pos + 2 neg experiments → 78,085 patches (ratio 2.31:1)
+    - Fold 3 val: 2 pos + 2 neg experiments → 78,189 patches (ratio 2.29:1)
+    - Fold 4 val: 3 pos + 4 neg experiments → 115,704 patches (ratio 2.29:1)
     
-    Training data for each fold: All 33 experiments except those assigned to this fold (~307K patches)
-    Total Distance: 0.6441 (sum of distances from target ratio 1:2.28)
+    Training data for each fold: All 33 experiments except those assigned to this fold (279K-358K patches)
+    Total Distance: 0.6441 (sum of distances from target ratio 2.28:1)
     
     KEY ADVANTAGES:
     - Each fold validates on UNIQUE experiments → prevents fold-specific artifact learning
     - Experiment-level assignment ensures proper biological unit stratification
-    - All folds maintain similar ratios (1:2.06 to 1:2.81 around target 1:2.28)
+    - All folds maintain similar ratios (2.06:1 to 2.33:1 around target 2.28:1)
     - All folds train on same diverse set of experiments (breaks artifact learning)
     - Zero data leakage: no experiment split between folds, no image overlap
     
@@ -1345,19 +1345,19 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
     print(f"{'='*80}")
     
     config_stats = {
-        0: {"patches": 87532, "pos_exps": 4, "neg_exps": 3, "ratio": 2.33, "distance": 0.05},
-        1: {"patches": 89516, "pos_exps": 3, "neg_exps": 7, "ratio": 2.06, "distance": 0.22},
-        2: {"patches": 20347, "pos_exps": 4, "neg_exps": 1, "ratio": 2.31, "distance": 0.03},
-        3: {"patches": 99120, "pos_exps": 4, "neg_exps": 0, "ratio": 2.81, "distance": 0.53},
-        4: {"patches": 98410, "pos_exps": 6, "neg_exps": 1, "ratio": 2.29, "distance": 0.01}
+        0: {"patches": 85854, "pos_exps": 5, "neg_exps": 2, "ratio": 2.33, "distance": 0.05},
+        1: {"patches": 37093, "pos_exps": 8, "neg_exps": 2, "ratio": 2.06, "distance": 0.22},
+        2: {"patches": 78085, "pos_exps": 3, "neg_exps": 2, "ratio": 2.31, "distance": 0.03},
+        3: {"patches": 78189, "pos_exps": 2, "neg_exps": 2, "ratio": 2.29, "distance": 0.01},
+        4: {"patches": 115704, "pos_exps": 3, "neg_exps": 4, "ratio": 2.29, "distance": 0.01}
     }
     
     stats = config_stats.get(fold_idx, {})
     print(f"Expected Validation Set:")
     print(f"  Total patches: {stats.get('patches', 'N/A'):,}")
     print(f"  Experiments: {stats.get('pos_exps', 0)} positive + {stats.get('neg_exps', 0)} negative")
-    print(f"  Pos:Neg ratio: 1:{stats.get('ratio', 'N/A'):.2f}")
-    print(f"  Distance from target (1:2.28): {stats.get('distance', 'N/A'):.2f}")
+    print(f"  Neg:Pos ratio: {stats.get('ratio', 'N/A'):.2f}:1")
+    print(f"  Distance from target (2.28:1): {stats.get('distance', 'N/A'):.2f}")
     print(f"\nTotal Configuration Score:")
     print(f"  Overall distance: 0.6441 (sum of per-fold distances)")
     print(f"  Selected from: 500,000+ random greedy searches")

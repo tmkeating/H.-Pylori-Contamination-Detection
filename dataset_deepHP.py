@@ -706,19 +706,19 @@ class DeepHPDataset(Dataset):
                             else:
                                 train_neg_count += 1
                 
-                # Recalculate training ratio
+                # Recalculate training ratio using actual patch counts (not just experiment labels)
                 all_train_patches = sum(e['patch_count'] for fold_idx in range(self.num_folds) if fold_idx != val_fold_idx for e in fold_val_exps[fold_idx])
-                all_train_pos_patches = sum(e['patch_count'] for fold_idx in range(self.num_folds) if fold_idx != val_fold_idx for e in fold_val_exps[fold_idx] if e['label'] == 1)
-                all_train_neg_patches = all_train_patches - all_train_pos_patches
+                all_train_pos_patches = sum(e['pos_patches'] for fold_idx in range(self.num_folds) if fold_idx != val_fold_idx for e in fold_val_exps[fold_idx])
+                all_train_neg_patches = sum(e['neg_patches'] for fold_idx in range(self.num_folds) if fold_idx != val_fold_idx for e in fold_val_exps[fold_idx])
                 train_actual_ratio = all_train_neg_patches / max(all_train_pos_patches, 1)
                 
-                print(f"[DEBUG]   Fold {val_fold_idx}: {train_pos_count} pos + {train_neg_count} neg exps, {all_train_patches:,} patches (ratio {train_actual_ratio:.2f}:1)")
+                print(f"[DEBUG]   Fold {val_fold_idx}: {train_pos_count} pos + {train_neg_count} neg exps, {all_train_patches:,} patches (ratio 1:{train_actual_ratio:.2f})")
         
         if self.train:
             print(f"\n[DEBUG] Fold validation set composition (after balanced assignment):")
             for fold_idx in range(self.num_folds):
-                neg_pos_ratio = fold_neg_patches[fold_idx] / max(fold_pos_patches[fold_idx], 1)
-                print(f"[DEBUG]   Fold {fold_idx}: {fold_pos_counts[fold_idx]} pos + {fold_neg_counts[fold_idx]} neg exps, {fold_patch_counts[fold_idx]:,} patches (ratio {neg_pos_ratio:.2f}:1, target {overall_ratio:.2f}:1)")
+                pos_neg_ratio = fold_pos_patches[fold_idx] / max(fold_neg_patches[fold_idx], 1)
+                print(f"[DEBUG]   Fold {fold_idx}: {fold_pos_counts[fold_idx]} pos + {fold_neg_counts[fold_idx]} neg exps, {fold_patch_counts[fold_idx]:,} patches ({fold_pos_patches[fold_idx]:,} pos, {fold_neg_patches[fold_idx]:,} neg, ratio 1:{fold_neg_patches[fold_idx]/max(fold_pos_patches[fold_idx], 1):.2f}, target 1:{overall_ratio:.2f})")
         
         # Step 4: For THIS fold, construct train and val indices
         # Val indices: all patches from experiments assigned to this fold
@@ -762,16 +762,20 @@ class DeepHPDataset(Dataset):
             if overlap:
                 print(f"[ERROR] CRITICAL: {len(overlap)} patches in both train and val!")
             else:
-                print(f"[DEBUG] ✓ No patch-level overlap\n")
+                print(f"[DEBUG] ✓ No patch-level overlap")
         
         # Report class ratios
         if self.train:
             if train_labels.size > 0 and np.sum(train_labels == 1) > 0:
-                train_ratio = np.sum(train_labels == 0) / np.sum(train_labels == 1)
+                train_pos = np.sum(train_labels == 1)
+                train_neg = np.sum(train_labels == 0)
+                train_ratio = train_neg / train_pos
                 print(f"[DEBUG] Train ratio (Pos:Neg): 1:{train_ratio:.2f} (overall: 1:{overall_ratio:.2f})")
             
             if val_labels.size > 0 and np.sum(val_labels == 1) > 0:
-                val_ratio = np.sum(val_labels == 0) / np.sum(val_labels == 1)
+                val_pos = np.sum(val_labels == 1)
+                val_neg = np.sum(val_labels == 0)
+                val_ratio = val_neg / val_pos
                 print(f"[DEBUG] Val ratio (Pos:Neg):   1:{val_ratio:.2f} (overall: 1:{overall_ratio:.2f})")
         
         return {'train': train_indices, 'val': val_indices}
