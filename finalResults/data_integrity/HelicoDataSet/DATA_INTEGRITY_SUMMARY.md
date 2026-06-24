@@ -29,7 +29,7 @@
 
 | Layer | CrossValidation | HoldOut | Total | Purpose |
 |-------|-----------------|---------|-------|---------|
-| **Permanent Storage** | 112,696 | 107,108 | 219,804 | Master archive |
+| **Permanent Storage** | 112,696 | 107,108 | 219,609 | Master archive |
 | **After Blacklist (rsync)** | 111,499 | 104,827 | 216,326 | Excludes problematic files |
 | **Training (5-fold CV)** | 128,724 | — | 128,724 | Model training only |
 | **Evaluation (HoldOut)** | — | 87,602 | 87,602 | Test set only |
@@ -55,6 +55,20 @@
 | **Evaluation subset (HoldOut)** | 87,602 | Held-out test set |
 | **Unique patient IDs** | 268 | All present in PatientDiagnosis.csv |
 | **Blacklist excluded at sync** | 3,283 | Correctly prevented from syncing via rsync |
+
+### 1.5. Class Distribution: Positive vs Negative Patches
+
+| Dataset | Positive Patches | Negative Patches | Total | Ratio (Pos:Neg) |
+|---------|------------------|------------------|-------|-----------------|
+| **Training (CrossValidation)** | 62,800 | 65,924 | 128,724 | 1:1.05 |
+| **HoldOut (Evaluation)** | 40,642 | 46,960 | 87,602 | 1:1.16 |
+| **Combined** | 103,442 | 112,884 | 216,326 | 1:1.09 |
+
+**Key Observations:**
+- Training set is nearly **balanced** (1:1.05 ratio) - excellent for avoiding class imbalance bias
+- HoldOut set is **slightly skewed** toward negatives (1:1.16) - realistic for clinical deployment
+- Overall dataset maintains **good balance** (1:1.09) - supports robust model training
+- Both sets preserve diversity: positive and negative cases well-represented
 
 ### 2. Blacklist Breakdown (3,283 patches correctly excluded)
 
