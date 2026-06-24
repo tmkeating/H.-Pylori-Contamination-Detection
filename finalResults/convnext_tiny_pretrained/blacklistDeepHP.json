@@ -1,9 +1,0 @@
-{
-  "macenko_reference_patch": {
-    "folder": "Positive",
-    "filename": "Experiment-6712_b0s11c0x7495-2776y16848-2080m49_17922048x256512.jpeg",
-    "full_path": "/home/tkeating/.scratch/deephp_data/Positive/Experiment-6712_b0s11c0x7495-2776y16848-2080m49_17922048x256512.jpeg",
-    "reason": "Macenko H&E normalization reference - excluded from training/validation to prevent data leakage",
-    "score": 0.9551966921899046
-  }
-}

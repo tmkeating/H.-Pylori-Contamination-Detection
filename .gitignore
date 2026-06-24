@@ -27,8 +27,8 @@ pip-log.txt
 results/
 venv/
 # Whitelist only specific directories in finalResults/
-finalResults/
-!finalResults/convnext_tiny_skip_pretrain/
-!finalResults/convnext_tiny_pretrained/
+finalResults/*
+!finalResults/convnext_tiny_skip_pretrain
+!finalResults/convnext_tiny_pretrained
 !finalResults/convnext_tiny_skip_pretrain/**
 !finalResults/convnext_tiny_pretrained/**

@@ -37,11 +37,11 @@ STRATIFICATION STRATEGY - Experiment-Level 5-Fold Cross-Validation (CONFIG 87771
   
   HARDCODED EXPERIMENT ASSIGNMENTS (each experiment assigned to exactly ONE fold):
   
-  - Fold 0 val: 7 experiments (4 pos, 3 neg) → 87,532 patches
-  - Fold 1 val: 10 experiments (3 pos, 7 neg) → 89,516 patches
-  - Fold 2 val: 5 experiments (4 pos, 1 neg) → 20,347 patches
-  - Fold 3 val: 4 experiments (4 pos, 0 neg) → 99,120 patches
-  - Fold 4 val: 7 experiments (6 pos, 1 neg) → 98,410 patches
+  - Fold 0 val: 7 experiments (5 pos, 2 neg) → 85,854 patches
+  - Fold 1 val: 10 experiments (8 pos, 2 neg) → 37,093 patches
+  - Fold 2 val: 5 experiments (3 pos, 2 neg) → 78,085 patches
+  - Fold 3 val: 4 experiments (2 pos, 2 neg) → 78,189 patches
+  - Fold 4 val: 7 experiments (3 pos, 4 neg) → 115,704 patches
   
   TOTAL: All 33 experiments assigned to exactly ONE fold (zero overlap, zero leakage)
   COVERAGE: All 394,925 patches distributed across 5 folds with balanced class ratios
@@ -49,20 +49,20 @@ STRATIFICATION STRATEGY - Experiment-Level 5-Fold Cross-Validation (CONFIG 87771
   
   HOW IT WORKS:
   When training fold 0:
-    - Validation set: All patches from fold 0's assigned experiments (87,532 patches)
-    - Training set: All patches from folds 1-4's assigned experiments (307,393 patches)
+    - Validation set: All patches from fold 0's assigned experiments (85,854 patches)
+    - Training set: All patches from folds 1-4's assigned experiments (309,071 patches)
     - DIFFERENT experiments → can't exploit training data
     - Model must learn actual H. pylori features, not fold-specific patterns
   
   When validating fold 0:
-    - The 87,532 patches come from experiments the model never saw
+    - The 85,854 patches come from experiments the model never saw
     - If model learned experiment signatures, it would fail on new experiments
     - If model learned real H. pylori morphology, it generalizes
   
   BENEFITS OF THIS STRATEGY:
   ✓ EXPERIMENT INTEGRITY: No experiment split between train/val (prevents leakage)
   ✓ TRUE 5-FOLD CV: Each fold validates on different experiments (proper cross-validation)
-  ✓ BALANCED RATIOS: All folds maintain 1:2.06 to 1:2.81 positive:negative ratio (target 1:2.28)
+  ✓ BALANCED RATIOS: All folds maintain 1:2.06 to 1:2.33 positive:negative ratio (target 1:2.28)
   ✓ NO FOLD ARTIFACTS: Models can't learn fold identity - each fold has unique experiments
   ✓ REALISTIC EPOCH 1: Accuracy ~50% (not 0%-99% variance from leakage)
   ✓ OPTIMIZED: Selected from 500,000 mathematically evaluated configurations
@@ -180,18 +180,11 @@ class DeepHPDataset(Dataset):
     
     SOLUTION:
     CONFIG 87771 assignment (from 500,000 random greedy searches):
-    - Fold 0 val: 7 experiments (87,532 patches)
-    - Fold 1 val: 10 experiments (89,516 patches)  
-    - Fold 2 val: 5 experiments (20,347 patches)
-    - Fold 3 val: 4 experiments (99,120 patches)
-    - Fold 4 val: 7 experiments (98,410 patches)
-    - All 33 experiments assigned to exactly ONE fold (zero leakage)
-    - All folds trained on diverse experiments (prevents artifact learning)
-    
-    DOMAIN ADVERSARIAL NEURAL NETWORKS (DANN):
-    Tracks experiment IDs for each patch and returns them as 3-tuple: (image, label, experiment_index).
-    This enables DANN training that prevents models from learning experiment-specific staining
-    artifacts, forcing them to learn general H. pylori morphological features instead.
+        - Fold 0 val: 7 experiments (85,854 patches)
+        - Fold 1 val: 10 experiments (37,093 patches)  
+        - Fold 2 val: 5 experiments (78,085 patches)
+        - Fold 3 val: 4 experiments (78,189 patches)
+        - Fold 4 val: 7 experiments (115,704 patches)
     
     Usage in training loop:
         for images, labels, exp_indices in dataloader:
@@ -221,11 +214,11 @@ class DeepHPDataset(Dataset):
     
     CONFIG 87771 METRICS:
     - Configuration metric: 0.6441 (10% better than previous config 3385)
-    - Fold 0: 7 experiments, 87,532 patches, 1:2.33 ratio
-    - Fold 1: 10 experiments, 89,516 patches, 1:2.06 ratio
-    - Fold 2: 5 experiments, 20,347 patches, 1:2.31 ratio
-    - Fold 3: 4 experiments, 99,120 patches, 1:2.81 ratio
-    - Fold 4: 7 experiments, 98,410 patches, 1:2.29 ratio
+    - Fold 0: 7 experiments, 85,854 patches, 1:2.33 ratio
+    - Fold 1: 10 experiments, 37,093 patches, 1:2.06 ratio
+    - Fold 2: 5 experiments, 78,085 patches, 1:2.31 ratio
+    - Fold 3: 4 experiments, 78,189 patches, 1:2.29 ratio
+    - Fold 4: 7 experiments, 115,704 patches, 1:2.29 ratio
     - All folds ratios within ±0.25:1 of target 1:2.28 (balanced)
     
     HOW IT WORKS:
@@ -254,8 +247,8 @@ class DeepHPDataset(Dataset):
     CONFIG 87771 (mixed assignment with unique validation):
     - ALL folds train on experiments {1-8, 9-16, 17-24} (198.7K patches)
     - Each fold validates on DIFFERENT subset:
-      - Fold 0 val: experiments {specific to fold 0}
-      - Fold 1 val: experiments {different from fold 0}
+      - Fold 0 val: experiments {specific to fold 0} (85,854 patches)
+      - Fold 1 val: experiments {different from fold 0} (37,093 patches)
     - Benefit: All folds see same experiments → no fold-specific patterns
     - Result: Realistic metrics (~50% epoch 1, consistent across folds)
     
@@ -296,7 +289,7 @@ class DeepHPDataset(Dataset):
         ...     train=True
         ... )
         >>> len(train_dataset)
-        307393  # all patches except fold 0's
+        309071  # all patches except fold 0's
         
         >>> # Create validation dataset (experiments assigned to fold 0)
         >>> val_dataset = DeepHPDataset(
@@ -306,7 +299,7 @@ class DeepHPDataset(Dataset):
         ...     train=False
         ... )
         >>> len(val_dataset)
-        87532  # only fold 0's experiments
+        85854  # only fold 0's experiments
         
         >>> # Access individual samples (returns 3-tuple with experiment indices)
         >>> img, label, exp_idx = train_dataset[0]
@@ -507,19 +500,19 @@ class DeepHPDataset(Dataset):
         
         CONFIG 87771 METRICS:
         - Total Distance: 0.6441 (10% better than previous config 3385)
-        - Fold 0 ratio: 2.33:1 (87,532 patches: 28,627 pos, 58,905 neg) - 7 experiments
-        - Fold 1 ratio: 2.06:1 (89,516 patches: 32,847 pos, 67,669 neg) - 10 experiments
-        - Fold 2 ratio: 2.31:1 (20,347 patches: 6,258 pos, 14,089 neg) - 5 experiments
-        - Fold 3 ratio: 2.81:1 (99,120 patches: 26,126 pos, 73,394 neg) - 4 experiments (all pos)
-        - Fold 4 ratio: 2.29:1 (98,410 patches: 18,141 pos, 41,884 neg) - 7 experiments
+        - Fold 0: 1:2.33 (85,854 patches) - 7 experiments (5 pos, 2 neg)
+        - Fold 1: 1:2.06 (37,093 patches) - 10 experiments (8 pos, 2 neg)
+        - Fold 2: 1:2.31 (78,085 patches) - 5 experiments (3 pos, 2 neg)
+        - Fold 3: 1:2.29 (78,189 patches) - 4 experiments (2 pos, 2 neg)
+        - Fold 4: 1:2.29 (115,704 patches) - 7 experiments (3 pos, 4 neg)
         
         HARDCODED ASSIGNMENTS:
-        Each of the 33 experiments is assigned to exactly ONE fold:
-        - Fold 0: Experiment-679, Lm_449818_20x_13_03_2019, Experiment-677, Experiment-88, ...
-        - Fold 1: Experiment-678, Experiment-6712, Experiment-673, Experiment-101, ...
-        - Fold 2: Experiment-97, Experiment-674, Lm_456061_20x_25_04_2019, ...
-        - Fold 3: Experiment-6711, Experiment-108, Experiment-105, Lm_462218_20x_14_03_2019
-        - Fold 4: Experiment-67, Experiment-100, Experiment-102, ...
+        Each of the 33 experiments is assigned to exactly ONE fold (from greedy_fold_configs.json):
+        - Fold 0 (7 exp): Experiment-679, Lm_449818_20x_13_03_2019, Experiment-677, Experiment-88, Experiment-6716, Experiment-68, Experiment-671
+        - Fold 1 (10 exp): Experiment-678, Experiment-6712, Experiment-673, Experiment-101, Experiment-6710, Experiment-6717, Experiment-676, Experiment-672, Experiment-99, Experiment-6713
+        - Fold 2 (5 exp): Experiment-97, Experiment-674, Lm_456061_20x_25_04_2019, Experiment-675, Experiment-91
+        - Fold 3 (4 exp): Experiment-6711, Experiment-108, Experiment-105, Lm_462218_20x_14_03_2019
+        - Fold 4 (7 exp): Experiment-67, Experiment-100, Experiment-102, Experiment-93, Snap-151, Experiment-6715, Experiment-6714
         
         IMPLEMENTATION:
         1. Group all patches by experiment ID (extracted from filename)
@@ -802,18 +795,19 @@ class DeepHPDataset(Dataset):
         
         EXPECTED VALUES (CONFIG 87771):
         Training splits (gets experiments from folds 1-4):
-          - Total: ~307,393 patches (all experiments except this fold's)
-          - Ratio: ~1:2.28 (should match overall dataset ratio)
+          - Total: ~1,579,700 combined across all folds (394,925 unique patches × 4 fold appearances)
+          - Per-fold: 279,221–357,832 patches
+          - Ratio: ~1:2.27-2.31 (should match overall dataset ratio ~1:2.28)
         
         Validation splits (gets experiments assigned to this fold):
-          - Fold 0 val: 87,532 patches, ratio 1:2.33 (7 experiments: 4 pos, 3 neg)
-          - Fold 1 val: 89,516 patches, ratio 1:2.06 (10 experiments: 3 pos, 7 neg)
-          - Fold 2 val: 20,347 patches, ratio 1:2.31 (5 experiments: 4 pos, 1 neg)
-          - Fold 3 val: 99,120 patches, ratio 1:2.81 (4 experiments: 4 pos, 0 neg)
-          - Fold 4 val: 98,410 patches, ratio 1:2.29 (7 experiments: 6 pos, 1 neg)
+          - Fold 0 val: 85,854 patches, ratio 1:2.33 (7 experiments: 5 pos, 2 neg)
+          - Fold 1 val: 37,093 patches, ratio 1:2.06 (10 experiments: 8 pos, 2 neg)
+          - Fold 2 val: 78,085 patches, ratio 1:2.31 (5 experiments: 3 pos, 2 neg)
+          - Fold 3 val: 78,189 patches, ratio 1:2.29 (4 experiments: 2 pos, 2 neg)
+          - Fold 4 val: 115,704 patches, ratio 1:2.29 (7 experiments: 3 pos, 4 neg)
         
         KEY PROPERTY:
-        All folds should have similar ratios (1:2.06 to 1:2.81) showing balanced stratification.
+        All folds should have similar ratios (1:2.06 to 1:2.33) showing balanced stratification.
         If ratios vary wildly, indicates potential fold-specific artifact learning.
         
         USAGE:
@@ -901,10 +895,10 @@ class DeepHPDataset(Dataset):
         FOLD ASSIGNMENT LOGIC (CONFIG 87771):
             During training (train=True):
               - self.indices contains all patches from experiments NOT assigned to this fold
-              - Typical size: 307,393 patches across 29 experiments for fold 0
+              - Typical size: 309,071 patches across 26 experiments for fold 0
             During validation (train=False):
               - self.indices contains all patches from experiments assigned to this fold
-              - Typical size: 87,532 patches across 7 experiments for fold 0
+              - Typical size: 85,854 patches across 7 experiments for fold 0
         - Continues training on fallback rather than failing entire batch
         
         DANN Integration:
