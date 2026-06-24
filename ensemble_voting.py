@@ -746,6 +746,83 @@ def main():
         for idx in missed_indices:
             print(f"  - {pids[idx]} (Max Prob: {ensemble_max_prob[idx]:.4f}, Mean Prob: {ensemble_mean_prob[idx]:.4f})")
 
+    # Generate rescue inference comparison report if rescue data exists
+    rescue_comparisons = []  # Initialize before use
+    if rescue_map:
+        print("\n" + "="*80)
+        print("📊 RESCUE INFERENCE IMPACT ANALYSIS")
+        print("="*80)
+        
+        rescue_comparisons = []
+        for idx, pid in enumerate(pids):
+            ensemble_prob = ensemble_max_prob[idx]
+            ensemble_actual = labels[idx]
+            ensemble_pred_val = ensemble_pred[idx]
+            
+            # Find rescue probability for this patient (check all folds)
+            rescue_probs = []
+            for fold_idx in range(len(all_dfs)):
+                if (pid, fold_idx) in rescue_map:
+                    rescue_probs.append(rescue_map[(pid, fold_idx)])
+            
+            if rescue_probs:
+                rescue_prob = np.mean(rescue_probs)  # Average across folds
+                prob_change = rescue_prob - ensemble_prob
+                pct_change = (prob_change / ensemble_prob * 100) if ensemble_prob > 0 else 0
+                
+                # Clinical interpretation
+                status = ""
+                finding = ""
+                
+                # Determine status based on actual vs predicted and prob change
+                if ensemble_actual == 1:  # True positive or false negative
+                    if ensemble_pred_val == 1:
+                        status = "✓ TP Confirmed"
+                        finding = "True positive confirmed by rescue"
+                    else:
+                        if pct_change > 50:
+                            status = "✓ FN RECOVERED"
+                            finding = f"BACTERIA FOUND - Dense windowing recovered bacteria (Ensemble {ensemble_prob:.3f} → Rescue {rescue_prob:.3f})"
+                        elif pct_change > 20:
+                            status = "⚠ FN Partial"
+                            finding = f"Improved but detection still weak (Ensemble {ensemble_prob:.3f} → Rescue {rescue_prob:.3f})"
+                        else:
+                            status = "❌ FN Confirmed"
+                            finding = f"Bacteria not recovered by rescue (Ensemble {ensemble_prob:.3f} → Rescue {rescue_prob:.3f})"
+                else:  # True negative or false positive
+                    if ensemble_pred_val == 0:
+                        status = "✓ TN Confirmed"
+                        finding = "True negative confirmed by rescue"
+                    else:
+                        if prob_change < -0.3:  # Large drop
+                            status = "✓ Strong FP"
+                            finding = f"CONFIRMED ARTIFACT - Confidence collapsed (Ensemble {ensemble_prob:.3f} → Rescue {rescue_prob:.3f}), indicating staining artifact not bacteria"
+                        elif prob_change < -0.1:
+                            status = "⚠ Weak FP"
+                            finding = f"Likely false positive - Requires clinical review (Ensemble {ensemble_prob:.3f} → Rescue {rescue_prob:.3f})"
+                        else:
+                            status = "⚠ Borderline"
+                            finding = f"Confirms borderline status (Ensemble {ensemble_prob:.3f} → Rescue {rescue_prob:.3f})"
+                
+                rescue_comparisons.append({
+                    'PatientID': pid,
+                    'Actual': ensemble_actual,
+                    'Ensemble_Pred': ensemble_pred_val,
+                    'Ensemble_Prob': ensemble_prob,
+                    'Rescue_Prob': rescue_prob,
+                    'Prob_Change': prob_change,
+                    'Pct_Change': pct_change,
+                    'Status': status,
+                    'Finding': finding
+                })
+        
+        if rescue_comparisons:
+            rescue_comp_df = pd.DataFrame(rescue_comparisons)
+            
+            print("\n📋 Summary of Rescue Impact on Target Patients:\n")
+            for _, row in rescue_comp_df.iterrows():
+                print(f"{row['Status']:<20} {row['PatientID']:<12} {row['Finding']}")
+
     print("\n--- Individual Folds ---")
     for i, df in enumerate(all_dfs):
         fold_metrics = calculate_metrics(df['Actual'].values, df['Predicted'].values)
@@ -770,6 +847,13 @@ def main():
         min_run = min(run_ids)
         max_run = max(run_ids)
         run_label = f"{min_run}-{max_run}"
+    
+    # Save rescue comparison report if rescue data exists
+    if rescue_map and rescue_comparisons:
+        rescue_comp_df = pd.DataFrame(rescue_comparisons)
+        comp_csv = os.path.join(output_dir, f"ensemble_voting_rescue_comparison_{run_label}.csv")
+        rescue_comp_df.to_csv(comp_csv, index=False)
+        print(f"\n✓ Rescue comparison report saved: [{comp_csv}]({comp_csv})")
         
     out_name = os.path.join(output_dir, f"ensemble_voting_report_{run_label}.csv")
     

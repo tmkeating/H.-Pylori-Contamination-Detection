@@ -240,8 +240,16 @@ def rescue_inference(model_path, output_dir="results", target_patients=None, str
     from pathlib import Path
     Path(output_dir).mkdir(parents=True, exist_ok=True)
     
-    # Generate output filename with model fold information
-    model_name = Path(model_path).stem  # e.g., "302_25.1_106069_f0_convnext_tiny_model_brain"
+    # Generate output filename with model fold information (simplified naming)
+    model_stem = Path(model_path).stem  # e.g., "01_34.4_9077_f0_convnext_tiny_model_brain"
+    # Extract RunID_Iteration_JobID_Fold from the stem
+    # Pattern: {RunID}_{Iteration}_{JobID}_{fold}_{rest}
+    parts = model_stem.split('_')
+    if len(parts) >= 4:
+        # Reconstruct as: rescue_{RunID}_{Iteration}_{JobID}_{fold}.csv
+        model_name = f"{parts[0]}_{parts[1]}_{parts[2]}_{parts[3]}"
+    else:
+        model_name = model_stem
     output_csv = Path(output_dir) / f"rescue_{model_name}.csv"
     
     df.to_csv(output_csv, index=False)

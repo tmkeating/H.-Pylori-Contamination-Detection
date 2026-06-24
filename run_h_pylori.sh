@@ -23,12 +23,12 @@
 #SBATCH --job-name=h_pylori_fast
 #SBATCH -D .
 #SBATCH -n 1                           # One task
-#SBATCH -c 8                          # Request 8 CPU cores per task for fast data loading
+#SBATCH -c 4                          # Request 4 CPU cores per task for fast data loading
 #SBATCH -N 1
-#SBATCH -t 0-06:00                     # It will likely finish in < 6 hours now
+#SBATCH -t 0-12:00                     # It will likely finish in < 12 hours now
 #SBATCH -p pg1tfg12
-#SBATCH --mem=32G                      # Increased from 20G to handle TTA evaluation with 114 patients
-#SBATCH --gres=shard:l40s:27600       # GPU sharding: 138000/5 = 27600 shards per job for concurrent execution
+#SBATCH --mem=30G                      # Increased from 20G to handle TTA evaluation with 114 patients
+#SBATCH --gres=shard:l40s:12000      # GPU sharding: Max 12000 shards per job for concurrent execution
 #SBATCH -o results/output_%j.txt
 #SBATCH -e results/error_%j.txt
 
