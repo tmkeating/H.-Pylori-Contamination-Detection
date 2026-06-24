@@ -973,27 +973,27 @@ def main():
     meta_metrics = meta_results['metrics']
     
     # ROC/PR curves for meta_classifier
-    meta_roc_pr_path = f"results/meta_classifier_roc_pr_{run_label}.png"
+    meta_roc_pr_path = os.path.join(output_dir, f"meta_classifier_roc_pr_{run_label}.png")
     plot_ensemble_roc_pr_curves(meta_y_true, meta_y_pred_proba, meta_y_pred_proba, meta_roc_pr_path)
     print(f"✓ Meta-Classifier ROC/PR curves saved: {meta_roc_pr_path}")
     
     # Threshold analysis for meta_classifier
-    meta_threshold_path = f"results/meta_classifier_threshold_analysis_{run_label}.png"
+    meta_threshold_path = os.path.join(output_dir, f"meta_classifier_threshold_analysis_{run_label}.png")
     plot_threshold_analysis(meta_y_true, meta_y_pred_proba, meta_threshold_path)
     print(f"✓ Meta-Classifier threshold analysis saved: {meta_threshold_path}")
     
     # Save meta_classifier results CSV
-    meta_fusion_name = f"results/meta_classifier_results_{run_label}.csv"
+    meta_fusion_name = os.path.join(output_dir, f"meta_classifier_results_{run_label}.csv")
     meta_results['results_df'].to_csv(meta_fusion_name, index=False)
     print(f"✓ Meta-Classifier results saved: {meta_fusion_name}")
     
     # Also save with explicit holdout_predictions name for clarity
-    meta_holdout_name = f"results/meta_classifier_holdout_predictions_{run_label}.csv"
+    meta_holdout_name = os.path.join(output_dir, f"meta_classifier_holdout_predictions_{run_label}.csv")
     meta_results['results_df'].to_csv(meta_holdout_name, index=False)
     print(f"✓ Meta-Classifier holdout predictions also saved: {meta_holdout_name}")
     
     # Save meta_classifier summary with same format as ensemble_voting
-    meta_summary_name = f"results/meta_classifier_summary_{run_label}.csv"
+    meta_summary_name = os.path.join(output_dir, f"meta_classifier_summary_{run_label}.csv")
     meta_summary_data = {
         "Metric": [
             "Recall", "Precision", "Accuracy", "F1_Score",
@@ -1024,7 +1024,7 @@ def main():
     )
     
     # Create bootstrap CI CSV for meta_classifier
-    meta_bootstrap_ci_name = f"results/meta_classifier_bootstrap_ci_{run_label}.csv"
+    meta_bootstrap_ci_name = os.path.join(output_dir, f"meta_classifier_bootstrap_ci_{run_label}.csv")
     meta_ci_data = {
         "Metric": [
             "Recall", "Precision", "Accuracy", "F1_Score",
@@ -1089,7 +1089,7 @@ def main():
     print(f"✓ Meta-Classifier bootstrap CI saved: {meta_bootstrap_ci_name}")
     
     # Generate bootstrap CI visualization for meta_classifier
-    meta_bootstrap_ci_png_path = f"results/meta_classifier_bootstrap_ci_{run_label}.png"
+    meta_bootstrap_ci_png_path = os.path.join(output_dir, f"meta_classifier_bootstrap_ci_{run_label}.png")
     plot_bootstrap_confidence_intervals(meta_bootstrap_ci_name, meta_bootstrap_ci_png_path)
     print(f"✓ Meta-Classifier bootstrap CI visualization saved: {meta_bootstrap_ci_png_path}")
     
@@ -1106,27 +1106,27 @@ def main():
     hybrid_metrics = hybrid_results['metrics']
     
     # ROC/PR curves for hybrid ensemble
-    hybrid_roc_pr_path = f"results/hybrid_ensemble_roc_pr_{run_label}.png"
+    hybrid_roc_pr_path = os.path.join(output_dir, f"hybrid_ensemble_roc_pr_{run_label}.png")
     plot_ensemble_roc_pr_curves(hybrid_y_true, hybrid_y_pred_proba, hybrid_y_pred_proba, hybrid_roc_pr_path)
     print(f"✓ Hybrid Ensemble ROC/PR curves saved: {hybrid_roc_pr_path}")
     
     # Threshold analysis for hybrid ensemble
-    hybrid_threshold_path = f"results/hybrid_ensemble_threshold_analysis_{run_label}.png"
+    hybrid_threshold_path = os.path.join(output_dir, f"hybrid_ensemble_threshold_analysis_{run_label}.png")
     plot_threshold_analysis(hybrid_y_true, hybrid_y_pred_proba, hybrid_threshold_path)
     print(f"✓ Hybrid Ensemble threshold analysis saved: {hybrid_threshold_path}")
     
     # Save hybrid ensemble results CSV
-    hybrid_fusion_name = f"results/hybrid_ensemble_results_{run_label}.csv"
+    hybrid_fusion_name = os.path.join(output_dir, f"hybrid_ensemble_results_{run_label}.csv")
     hybrid_results['results_df'].to_csv(hybrid_fusion_name, index=False)
     print(f"✓ Hybrid Ensemble results saved: {hybrid_fusion_name}")
     
     # Also save with explicit holdout_predictions name for clarity
-    hybrid_holdout_name = f"results/hybrid_ensemble_holdout_predictions_{run_label}.csv"
+    hybrid_holdout_name = os.path.join(output_dir, f"hybrid_ensemble_holdout_predictions_{run_label}.csv")
     hybrid_results['results_df'].to_csv(hybrid_holdout_name, index=False)
     print(f"✓ Hybrid Ensemble holdout predictions also saved: {hybrid_holdout_name}")
     
     # Save hybrid ensemble summary
-    hybrid_summary_name = f"results/hybrid_ensemble_summary_{run_label}.csv"
+    hybrid_summary_name = os.path.join(output_dir, f"hybrid_ensemble_summary_{run_label}.csv")
     hybrid_summary_data = {
         "Metric": [
             "Recall", "Precision", "Accuracy", "F1_Score",
@@ -1157,7 +1157,7 @@ def main():
     )
     
     # Create bootstrap CI CSV for hybrid_ensemble
-    hybrid_bootstrap_ci_name = f"results/hybrid_ensemble_bootstrap_ci_{run_label}.csv"
+    hybrid_bootstrap_ci_name = os.path.join(output_dir, f"hybrid_ensemble_bootstrap_ci_{run_label}.csv")
     hybrid_ci_data = {
         "Metric": [
             "Recall", "Precision", "Accuracy", "F1_Score",
@@ -1222,7 +1222,7 @@ def main():
     print(f"✓ Hybrid Ensemble bootstrap CI saved: {hybrid_bootstrap_ci_name}")
     
     # Generate bootstrap CI visualization for hybrid_ensemble
-    hybrid_bootstrap_ci_png_path = f"results/hybrid_ensemble_bootstrap_ci_{run_label}.png"
+    hybrid_bootstrap_ci_png_path = os.path.join(output_dir, f"hybrid_ensemble_bootstrap_ci_{run_label}.png")
     plot_bootstrap_confidence_intervals(hybrid_bootstrap_ci_name, hybrid_bootstrap_ci_png_path)
     print(f"✓ Hybrid Ensemble bootstrap CI visualization saved: {hybrid_bootstrap_ci_png_path}")
     

@@ -813,7 +813,7 @@ def plot_bootstrap_confidence_intervals(bootstrap_ci_csv, output_path, figsize=(
 
 def plot_gradcam_pair(patch_img, heatmap, patient_id, rank, patch_idx, 
                       attention_score, prob, is_false_negative=False, 
-                      output_dir=None):
+                      is_false_positive=False, output_dir=None):
     """
     Create side-by-side visualization of patch and Grad-CAM heatmap.
     
@@ -826,6 +826,7 @@ def plot_gradcam_pair(patch_img, heatmap, patient_id, rank, patch_idx,
         attention_score: Attention weight for this patch
         prob: Model's positive class probability
         is_false_negative: Whether this is a false negative (ghost patient)
+        is_false_positive: Whether this is a false positive (artifact)
         output_dir: Directory to save PNG file
     
     Returns:
@@ -853,8 +854,16 @@ def plot_gradcam_pair(patch_img, heatmap, patient_id, rank, patch_idx,
     plt.subplot(1, 2, 2)
     plt.imshow(orig_img)
     plt.imshow(heatmap, cmap='jet', alpha=0.6)
-    prefix = "FN_" if is_false_negative else ""
-    plt.title(f"{prefix}Grad-CAM (Prob: {prob:.4f})")
+    if is_false_negative:
+        prefix = "FN_"
+        title_prefix = "FN (Ghost) "
+    elif is_false_positive:
+        prefix = "FP_"
+        title_prefix = "FP (Artifact) "
+    else:
+        prefix = ""
+        title_prefix = ""
+    plt.title(f"{title_prefix}Grad-CAM (Prob: {prob:.4f})")
     plt.axis('off')
     
     # Save
@@ -863,8 +872,8 @@ def plot_gradcam_pair(patch_img, heatmap, patient_id, rank, patch_idx,
     
     os.makedirs(output_dir, exist_ok=True)
     
-    if is_false_negative:
-        out_path = os.path.join(output_dir, f"FN_{patient_id}_rank{rank}_patch{patch_idx}.png")
+    if is_false_negative or is_false_positive:
+        out_path = os.path.join(output_dir, f"{prefix}{patient_id}_rank{rank}_patch{patch_idx}.png")
     else:
         out_path = os.path.join(output_dir, f"{patient_id}_rank{rank}_patch{patch_idx}.png")
     

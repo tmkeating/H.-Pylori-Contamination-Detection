@@ -35,6 +35,7 @@
 #   MODEL_NAME:           Backbone architecture (default: convnext_tiny)
 #   ITER:                 Iteration number for tracking (default: 31.0)
 #   SKIP_PRETRAINING:     Skip Phase 1 if backbone already trained (default: False)
+#   SKIP_PRETRAINED_BACKBONE: Skip using pretrained backbone, use base model weights (default: False)
 #   SKIP_TRANSFER_LEARNING: Skip Phase 2 fine-tuning (default: False)
 #   DEEPHP_SUMMARY_JOB_ID: Force specific pre-training job dependency (optional)
 #   FREEZE_BACKBONE:      Keep pre-trained weights frozen (default: False)
@@ -142,12 +143,17 @@ echo "Output directory: $OUTPUT_DIR"
 echo ""
 
 # Backbone Loading with Smart Fallback
-# Priority 1: --backbone_location flag if provided
-# Priority 2: Search in results/ directory for deephp_backbone_final_*_{MODEL}_{ITER}.pth
-# Priority 3: Use pattern (will fail later if doesn't exist)
+# Priority 1: Check SKIP_PRETRAINED_BACKBONE flag - if True, use base model weights only
+# Priority 2: --backbone_location flag if provided
+# Priority 3: Search in results/ directory for deephp_backbone_final_*_{MODEL}_{ITER}.pth
+# Priority 4: Use pattern (will fail later if doesn't exist)
+SKIP_PRETRAINED_BACKBONE=${SKIP_PRETRAINED_BACKBONE:-"False"}
 BACKBONE_LOCATION=${BACKBONE_LOCATION:-""}
 
-if [ -n "$BACKBONE_LOCATION" ] && [ -f "$BACKBONE_LOCATION" ]; then
+if [ "$SKIP_PRETRAINED_BACKBONE" = "True" ] || [ "$SKIP_PRETRAINED_BACKBONE" = "true" ]; then
+    PRETRAINED_BACKBONE=""
+    echo "Skipping pretrained backbone - using base model weights only (ImageNet pre-trained)"
+elif [ -n "$BACKBONE_LOCATION" ] && [ -f "$BACKBONE_LOCATION" ]; then
     PRETRAINED_BACKBONE="$BACKBONE_LOCATION"
     echo "Using specified backbone: $PRETRAINED_BACKBONE"
 else
@@ -379,7 +385,7 @@ else
     PRESYNC_SBATCH_FLAGS="--dependency=afterok:$DEEPHP_SUMMARY_JOB_ID --nodelist=dcc-gr1"
 fi
 
-PRE_SYNC_JOB=$(sbatch $PRESYNC_SBATCH_FLAGS -p pg1tfg12 --job-name=transfer_presync --output=$OUTPUT_DIR/slurm_transfer_presync_%j.txt <<'PRESYNC_EOF'
+PRE_SYNC_JOB=$(sbatch $PRESYNC_SBATCH_FLAGS -p pg1tfg12 --job-name=transfer_presync --output=$OUTPUT_DIR/slurm_transfer_presync_%j.txt <<PRESYNC_EOF
 #!/bin/bash
 #SBATCH -p pg1tfg12
 #SBATCH -t 0-01:00
@@ -731,6 +737,7 @@ export JITTER=$JITTER
 export POOL_TYPE=$POOL_TYPE
 export ITER=$ITER
 export SKIP_PRETRAINING=$SKIP_PRETRAINING
+export SKIP_PRETRAINED_BACKBONE=$SKIP_PRETRAINED_BACKBONE
 export FREEZE_BACKBONE=$FREEZE_BACKBONE
 export BACKBONE_PATH=$BACKBONE_PATH
 export OUTPUT_DIR=$OUTPUT_DIR
@@ -899,7 +906,7 @@ SUMMARY_JOB_ID=$(sbatch --dependency=$DEPENDENCY_STRING \
     --job-name=transfer_summary \
     --output=$OUTPUT_DIR/slurm_transfer_summary_%j.txt \
     --error=$OUTPUT_DIR/slurm_transfer_summary_error_%j.txt \
-    <<'SUMMARY_EOF'
+    <<SUMMARY_EOF
 #!/bin/bash
 #SBATCH -p pg1tfg12
 cd /home/tkeating/model/H.-Pylori-Contamination-Detection
@@ -987,7 +994,7 @@ VISUAL_JOB_ID=$(sbatch --dependency=afterok:$SUMMARY_JOB_ID \
     --job-name=transfer_visuals \
     --output=$OUTPUT_DIR/slurm_transfer_visuals_%j.txt \
     --error=$OUTPUT_DIR/slurm_transfer_visuals_error_%j.txt \
-    <<'VISUAL_EOF'
+    <<VISUAL_EOF
 #!/bin/bash
 #SBATCH -p pg1tfg12
 cd /home/tkeating/model/H.-Pylori-Contamination-Detection

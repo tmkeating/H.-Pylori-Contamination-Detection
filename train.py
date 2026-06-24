@@ -1845,6 +1845,74 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
             del bag_imgs, all_indicators, indicators
             gc.collect()
             torch.cuda.empty_cache()
+
+    # Repeat for False Positives (Artifact/Hallucination cases)
+    fp_indices = [i for i, (prob, label) in enumerate(zip(all_probs_pat, all_labels_pat)) if label == 0 and prob >= 0.5]
+    fp_indices = sorted(fp_indices, key=lambda i: all_probs_pat[i], reverse=True)[:5]
+    
+    # 5. Grad-CAM Audit: False Positives (Artifact Cases)
+    # We target patients where the pathologist confirmed no bacteria (label=0)
+    # but the model incorrectly predicted positive (prob >= 0.5).
+    # This reveals what visual artifacts trigger false alarms.
+    if fp_indices:
+        print(f"Generating Grad-CAM for {len(fp_indices)} False Positive (Artifact) bags...")
+        sys.stdout.flush()
+        for bag_idx in fp_indices:
+            p_id = patient_ids_list[bag_idx]
+            bag_imgs, label, _ = holdout_dataset[bag_idx]
+            
+            # --- 5.1: Find High-Confidence Patches inside the FP Bag ---
+            # We identify patches that triggered the false alarm to visualize
+            # what staining/imaging artifacts the model learned to misinterpret.
+            all_indicators = []
+            with torch.no_grad():
+                for start_idx in range(0, bag_imgs.size(0), vram_bag_limit):
+                    chunk = bag_imgs[start_idx:start_idx + vram_bag_limit].to(device)
+                    chunk = det_preprocess_batch(chunk, training=False)
+                    if pool_type == "attention":
+                        # Extract gated-attention weights
+                        _, indicator = model.forward_bag(chunk)
+                        all_indicators.append(indicator.cpu())
+                    else:
+                        # Fallback for max-pooling: use patch-level confidence
+                        indicator = model(chunk)
+                        all_indicators.append(indicator[:, 1:2].transpose(0, 1).cpu())
+                    
+                    # Cleanup chunk immediately
+                    del chunk
+                    torch.cuda.empty_cache()
+            
+            indicators = torch.cat(all_indicators, dim=1).squeeze(0)
+            # Focus Grad-CAM on the top patches in the FP bag to find the artifact trigger
+            top_patch_vals, top_patch_indices = torch.topk(indicators, k=min(3, bag_imgs.size(0)))
+            
+            for rank, p_idx in enumerate(top_patch_indices):
+                patch_img = bag_imgs[p_idx:p_idx+1].to(device)
+                patch_input = det_preprocess_batch(patch_img, training=False)
+                
+                # --- 5.2: Interpretability Map Generation ---
+                # We enable gradients temporarily to backpropagate through the
+                # backbone and visualize which pixels in the patch triggered
+                # the false positive prediction.
+                with torch.enable_grad():
+                    heatmap, p_probs = generate_gradcam(model.backbone, patch_input)
+                
+                # Plot side-by-side visualization for false positive (artifact)
+                plot_gradcam_pair(
+                    patch_img, heatmap[0, 0], p_id, rank, p_idx,
+                    top_patch_vals[rank].item(), p_probs[0, 1],
+                    is_false_positive=True, output_dir=gradcam_dir
+                )
+                
+                # Full memory sweep between patches to avoid VRAM fragmentation
+                del patch_img, patch_input, heatmap
+                torch.cuda.empty_cache()
+            
+            # CRITICAL: Delete entire bag after processing to prevent memory accumulation
+            # Large FP bags can also consume 2GB+ and accumulate across 5 patients
+            del bag_imgs, all_indicators, indicators
+            gc.collect()
+            torch.cuda.empty_cache()
     
     print(f"Iteration reporting and metrics complete.")
     sys.stdout.flush()
