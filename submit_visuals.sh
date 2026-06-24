@@ -33,11 +33,15 @@
 #
 # Environment Variables:
 #   RUN_ID (optional)      - Experiment run ID (e.g., "62_102498"). Defaults to latest run.
-#   FOLD (optional)        - Which fold to visualize (0-4). Default: 0
+#   FOLD (optional)        - Which fold to visualize (0-4). Default: 0. Ignored if USE_ENSEMBLE_BACKBONE=true
 #   NUM_FOLDS (optional)   - Total folds in CV (usually 5). Default: 5
 #   DATASET (optional)     - Dataset type: "helicodataset", "deephp", or "both". Default: helicodataset
 #   MODEL (optional)       - Backbone model: "convnext_tiny" or "convnext_small". 
 #                           Auto-detected from training checkpoints if not provided.
+#   USE_ENSEMBLE_BACKBONE (optional) - Use ensemble weighted backbone instead of fold-specific. Default: false
+#   BACKBONE_PATH (optional)   - Full path to ensemble backbone file (e.g., results/deephp_backbone_final_01_convnext_tiny_34.4.pth)
+#                           If provided, overrides fold-specific model loading. Must exist or job will fail.
+#   ITERATION (optional)   - DEPRECATED: Use --backbone_path instead. Legacy iteration parameter.
 #   PIPELINE_MODE (optional) - Generate calibration + dashboard visualizations. Default: true
 #   GRADCAM_ONLY (optional) - Generate only Grad-CAM (skip other plots). Default: false
 # =====================================================
@@ -108,8 +112,13 @@ NUM_FOLDS=${NUM_FOLDS:-5}
 DATASET=${DATASET:-helicodataset}
 # Model will be auto-detected below if not provided
 MODEL=${MODEL_NAME:-${MODEL:-}}
+USE_ENSEMBLE_BACKBONE=${USE_ENSEMBLE_BACKBONE:-false}
+ITERATION=${ITERATION:-}     # Required if USE_ENSEMBLE_BACKBONE=true
+BACKBONE_PATH=${BACKBONE_PATH:-}  # Direct path to ensemble backbone (bypasses parsing)
 PIPELINE_MODE=${PIPELINE_MODE:-true}  # Default to true (full visualizations including calibration + dashboard)
 GRADCAM_ONLY=${GRADCAM_ONLY:-false}    # true = Grad-CAM visualizations only
+GENERATE_ENSEMBLE_GRADCAM=${GENERATE_ENSEMBLE_GRADCAM:-false}  # Generate ensemble Grad-CAM after fold completes
+GENERATE_ENSEMBLE_GRADCAM=${GENERATE_ENSEMBLE_GRADCAM:-false}  # Generate ensemble Grad-CAM after fold completes
 
 # Function to detect model name from checkpoint files
 detect_model_from_checkpoints() {
@@ -162,20 +171,67 @@ while [[ $# -gt 0 ]]; do
             RUN_ID="${1#*=}"
             shift
             ;;
+        --RUN_ID|--run_id)
+            shift
+            RUN_ID="$1"
+            shift
+            ;;
         --FOLD=*|--fold=*)
             FOLD="${1#*=}"
+            shift
+            ;;
+        --FOLD|--fold)
+            shift
+            FOLD="$1"
             shift
             ;;
         --NUM_FOLDS=*|--num_folds=*)
             NUM_FOLDS="${1#*=}"
             shift
             ;;
+        --NUM_FOLDS|--num_folds)
+            shift
+            NUM_FOLDS="$1"
+            shift
+            ;;
         --DATASET=*|--dataset=*)
             DATASET="${1#*=}"
             shift
             ;;
+        --DATASET|--dataset)
+            shift
+            DATASET="$1"
+            shift
+            ;;
         --MODEL=*|--model=*|--MODEL_NAME=*|--model_name=*)
             MODEL="${1#*=}"
+            shift
+            ;;
+        --MODEL|--model|--MODEL_NAME|--model_name)
+            shift
+            MODEL="$1"
+            shift
+            ;;
+        --USE_ENSEMBLE_BACKBONE|--use_ensemble_backbone)
+            USE_ENSEMBLE_BACKBONE="true"
+            shift
+            ;;
+        --ITERATION=*|--iteration=*)
+            ITERATION="${1#*=}"
+            shift
+            ;;
+        --ITERATION|--iteration)
+            shift
+            ITERATION="$1"
+            shift
+            ;;
+        --BACKBONE_PATH=*|--backbone_path=*)
+            BACKBONE_PATH="${1#*=}"
+            shift
+            ;;
+        --BACKBONE_PATH|--backbone_path)
+            shift
+            BACKBONE_PATH="$1"
             shift
             ;;
         --PIPELINE_MODE|--pipeline_mode)
@@ -184,6 +240,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --GRADCAM_ONLY|--gradcam_only)
             GRADCAM_ONLY="true"
+            shift
+            ;;
+        --ENSEMBLE|--ensemble)
+            GENERATE_ENSEMBLE_GRADCAM="true"
             shift
             ;;
         *)
@@ -196,6 +256,14 @@ done
 # Create results directory
 mkdir -p results
 
+# Auto-detect dataset from backbone file if provided
+if [ -n "$BACKBONE_PATH" ] && grep -q "deephp" <<< "$BACKBONE_PATH"; then
+    if [ "$DATASET" = "helicodataset" ]; then
+        DATASET="deephp"
+        echo "✓ Auto-detected dataset from backbone file: $DATASET"
+    fi
+fi
+
 # Auto-detect model name if not explicitly provided
 if [ -z "$MODEL" ]; then
     MODEL=$(detect_model_from_checkpoints "$RUN_ID" "$FOLD")
@@ -206,18 +274,41 @@ echo "========================================================================="
 echo "H. Pylori Visual Report Generation"
 echo "========================================================================="
 echo "RUN_ID: ${RUN_ID:-latest}"
-echo "FOLD: $FOLD"
+if [ "$USE_ENSEMBLE_BACKBONE" = "true" ]; then
+    echo "BACKBONE: Ensemble Weighted (Iteration: $ITERATION)"
+else
+    echo "FOLD: $FOLD"
+fi
 echo "NUM_FOLDS: $NUM_FOLDS"
 echo "DATASET: $DATASET"
 echo "MODEL: $MODEL"
 echo "PIPELINE_MODE: $PIPELINE_MODE"
 echo "GRADCAM_ONLY: $GRADCAM_ONLY"
+echo "GENERATE_ENSEMBLE_GRADCAM: $GENERATE_ENSEMBLE_GRADCAM"
 echo "========================================================================="
 echo ""
 
 # Build python command with unbuffered output
 PYTHON_CMD="python3 -u generate_visuals.py"
-PYTHON_CMD="$PYTHON_CMD --fold $FOLD"
+
+if [ "$USE_ENSEMBLE_BACKBONE" = "true" ] || [ -n "$BACKBONE_PATH" ]; then
+    # Ensemble weighted backbone mode
+    if [ -z "$BACKBONE_PATH" ]; then
+        echo "ERROR: BACKBONE_PATH required when USE_ENSEMBLE_BACKBONE=true"
+        echo "Example: sbatch submit_visuals.sh --backbone_path results/deephp_backbone_final_01_convnext_tiny_34.4.pth"
+        exit 1
+    fi
+    if [ ! -f "$BACKBONE_PATH" ]; then
+        echo "ERROR: Ensemble backbone not found: $BACKBONE_PATH"
+        exit 1
+    fi
+    PYTHON_CMD="$PYTHON_CMD --backbone_path $BACKBONE_PATH"
+    PYTHON_CMD="$PYTHON_CMD --fold 0"  # Use fold 0 for validation data
+else
+    # Standard fold-specific backbone mode
+    PYTHON_CMD="$PYTHON_CMD --fold $FOLD"
+fi
+
 PYTHON_CMD="$PYTHON_CMD --num_folds $NUM_FOLDS"
 PYTHON_CMD="$PYTHON_CMD --dataset $DATASET"
 PYTHON_CMD="$PYTHON_CMD --model_name $MODEL"
@@ -244,6 +335,42 @@ if $PYTHON_CMD; then
     echo "  Outputs saved to: results/*_gradcam_samples/"
     echo "  Exit Code: $EXIT_CODE"
     echo "========================================================================="
+    
+    # Submit ensemble Grad-CAM job if requested
+    if [ "$GENERATE_ENSEMBLE_GRADCAM" = "true" ]; then
+        echo ""
+        echo "Submitting ensemble Grad-CAM generation job..."
+        
+        ENSEMBLE_CMD="sbatch -p pg1tfg12"
+        ENSEMBLE_CMD="$ENSEMBLE_CMD --job-name=h_pylori_ensemble_gradcam"
+        ENSEMBLE_CMD="$ENSEMBLE_CMD -n 1 -N 1 -t 0-04:00 --mem=32G --gres=gpu:1"
+        ENSEMBLE_CMD="$ENSEMBLE_CMD -o results/ensemble_gradcam_%j.out"
+        ENSEMBLE_CMD="$ENSEMBLE_CMD -e results/ensemble_gradcam_%j.err"
+        
+        # Build Grad-CAM command
+        if [ -n "$BACKBONE_PATH" ]; then
+            ENSEMBLE_CMD="$ENSEMBLE_CMD --wrap='python3 generate_deephp_gradcam.py --backbone_path $BACKBONE_PATH --fold 0-4 --model $MODEL'"
+        else
+            ENSEMBLE_CMD="$ENSEMBLE_CMD --wrap='python3 generate_deephp_gradcam.py --run ${RUN_ID:-latest} --fold 0-4 --model $MODEL'"
+        fi
+        
+        # If running under SLURM, add dependency on current job
+        if [ -n "$SLURM_JOB_ID" ]; then
+            ENSEMBLE_CMD="$ENSEMBLE_CMD --dependency=afterok:$SLURM_JOB_ID"
+        fi
+        
+        ENSEMBLE_OUTPUT=$(eval $ENSEMBLE_CMD 2>&1)
+        ENSEMBLE_EXIT=$?
+        
+        if [ $ENSEMBLE_EXIT -eq 0 ]; then
+            echo "$ENSEMBLE_OUTPUT"
+            echo "✓ Ensemble Grad-CAM job submitted successfully"
+        else
+            echo "✗ Failed to submit ensemble Grad-CAM job"
+            echo "Error output: $ENSEMBLE_OUTPUT"
+        fi
+    fi
+    
     echo "End Time: $(date)" >> "${ERROR_LOG:-/dev/null}" 2>&1
 else
     EXIT_CODE=$?

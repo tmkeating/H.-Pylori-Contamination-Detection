@@ -1417,17 +1417,30 @@ def build_patient_bag_index_cache(dataset, cache_file):
     return patient_bag_map
 
 
-def find_model_path(run_id, fold, model_name):
+def find_model_path(run_id, fold, model_name, slurm_id=None):
     """Find model file for given run_id and fold. Uses metadata to pick the correct model.
-    If specified fold doesn't exist, searches for any available fold."""
+    If specified fold doesn't exist, searches for any available fold.
+    
+    Args:
+        run_id: Run identifier (e.g., '01_34.4')
+        fold: Fold index (0-4)
+        model_name: Model name (e.g., 'convnext_tiny')
+        slurm_id: Optional SLURM job ID to disambiguate when multiple runs exist
+    """
     import re
     import json
     results_dir = "results"
     
-    # Pattern: {run_id}_{anything}_f{fold}_{model_name}_model_brain.pth  
-    swa_pattern = re.compile(rf"^{run_id}_.*_f{fold}_{model_name}_swa_model_brain\.pth$")
-    model_pattern = re.compile(rf"^{run_id}_.*_f{fold}_{model_name}_model_brain\.pth$")
-    metadata_pattern = re.compile(rf"^{run_id}_.*_f{fold}_{model_name}_model_selection\.json$")
+    # Pattern: {run_id}_{anything}_f{fold}_{model_name}_model_brain.pth
+    # With optional SLURM ID: {run_id}_{iteration}_{slurm_id}_f{fold}_{model_name}_model_brain.pth
+    if slurm_id:
+        swa_pattern = re.compile(rf"^{run_id}_{re.escape(str(slurm_id))}.*_f{fold}_{model_name}_swa_model_brain\.pth$")
+        model_pattern = re.compile(rf"^{run_id}_{re.escape(str(slurm_id))}.*_f{fold}_{model_name}_model_brain\.pth$")
+        metadata_pattern = re.compile(rf"^{run_id}_{re.escape(str(slurm_id))}.*_f{fold}_{model_name}_model_selection\.json$")
+    else:
+        swa_pattern = re.compile(rf"^{run_id}_.*_f{fold}_{model_name}_swa_model_brain\.pth$")
+        model_pattern = re.compile(rf"^{run_id}_.*_f{fold}_{model_name}_model_brain\.pth$")
+        metadata_pattern = re.compile(rf"^{run_id}_.*_f{fold}_{model_name}_model_selection\.json$")
     
     swa_models = []
     regular_models = []
@@ -1465,8 +1478,12 @@ def find_model_path(run_id, fold, model_name):
         return swa_models[0], fold
     
     # If specified fold not found, search for any available fold for this run_id
-    fold_pattern = re.compile(rf"^{run_id}_.*_f(\d+)_{model_name}_swa_model_brain\.pth$")
-    fold_pattern_regular = re.compile(rf"^{run_id}_.*_f(\d+)_{model_name}_model_brain\.pth$")
+    if slurm_id:
+        fold_pattern = re.compile(rf"^{run_id}_{re.escape(str(slurm_id))}.*_f(\d+)_{model_name}_swa_model_brain\.pth$")
+        fold_pattern_regular = re.compile(rf"^{run_id}_{re.escape(str(slurm_id))}.*_f(\d+)_{model_name}_model_brain\.pth$")
+    else:
+        fold_pattern = re.compile(rf"^{run_id}_.*_f(\d+)_{model_name}_swa_model_brain\.pth$")
+        fold_pattern_regular = re.compile(rf"^{run_id}_.*_f(\d+)_{model_name}_model_brain\.pth$")
     
     available_folds = set()
     if os.path.exists(results_dir):
@@ -1532,6 +1549,9 @@ if __name__ == "__main__":
     parser.add_argument("--gradcam_only", action="store_true",
                        help="FAST MODE: Only generate Grad-CAM visualizations for misclassified and suspicious samples. "
                             "Skips all other visualizations. Useful for detailed model interpretation.")
+    parser.add_argument("--backbone_path", type=str, default=None,
+                       help="Full path to ensemble weighted backbone checkpoint (e.g., deephp_backbone_final_01_34.4_convnext_tiny_34.4.pth). "
+                            "If provided, uses ensemble backbone instead of fold-specific checkpoints.")
     parser.add_argument("--combine_learning_curves", action="store_true",
                        help="Combine multiple learning curve images into a single composite visualization. "
                             "Requires --pretraining_run and --dataset_run. Layout controlled by --learning_curves_layout.")
@@ -1774,8 +1794,8 @@ if __name__ == "__main__":
                         eval_report = f"results/{run_id}_{run_id}_f{fold_idx}_{model_name}_evaluation_report.csv"
                         if os.path.exists(eval_report):
                             df = pd.read_csv(eval_report)
-                        if 'accuracy' in df.columns:
-                            fold_accs.append(df['accuracy'].values[0])
+                            if 'accuracy' in df.columns:
+                                fold_accs.append(df['accuracy'].values[0])
                     
                     if fold_accs:
                         avg_acc = np.mean(fold_accs)
@@ -1893,15 +1913,24 @@ if __name__ == "__main__":
         args.include_training_trajectory = True
         args.include_training_efficiency = True
     
-    # Find model path (prefers SWA model, falls back to any available fold if needed)
-    model_path, actual_fold = find_model_path(run_id, args.fold, args.model_name)
-    
-    if model_path is None:
-        print(f"Error: Model not found for run_id={run_id}, fold={args.fold}, model={args.model_name}")
-        sys.exit(1)
-    
-    if actual_fold is None:
-        sys.exit(1)
+    # Use ensemble backbone if provided, otherwise find fold-specific model
+    if args.backbone_path:
+        if not os.path.exists(args.backbone_path):
+            print(f"Error: Ensemble backbone not found: {args.backbone_path}")
+            sys.exit(1)
+        model_path = args.backbone_path
+        actual_fold = args.fold  # Use specified fold for dataset loading
+        print(f"Using ensemble backbone: {os.path.basename(args.backbone_path)}")
+    else:
+        # Find model path (prefers SWA model, falls back to any available fold if needed)
+        model_path, actual_fold = find_model_path(run_id, args.fold, args.model_name)
+        
+        if model_path is None:
+            print(f"Error: Model not found for run_id={run_id}, fold={args.fold}, model={args.model_name}")
+            sys.exit(1)
+        
+        if actual_fold is None:
+            sys.exit(1)
         
     if os.path.exists(model_path):
         print(f"Using model: {os.path.basename(model_path)}")
