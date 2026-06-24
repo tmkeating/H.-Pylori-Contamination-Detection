@@ -49,10 +49,11 @@
 #SBATCH -D .
 #SBATCH -n 4
 #SBATCH -N 1
-#SBATCH -t 0-02:00
+#SBATCH -t 0-06:00
 #SBATCH -p pg1tfg12
 #SBATCH --mem=30G
 #SBATCH --gres=gpu:1
+#SBATCH --gres=shard:l40s:12000
 #SBATCH -o results/visuals_output_%j.txt
 #SBATCH -e results/visuals_error_%j.txt
 # Note: Output directory can be overridden via --output_dir parameter
@@ -120,6 +121,7 @@ BACKBONE_PATH=${BACKBONE_PATH:-}  # Direct path to ensemble backbone (bypasses p
 PIPELINE_MODE=${PIPELINE_MODE:-true}  # Default to true (full visualizations including calibration + dashboard)
 GRADCAM_ONLY=${GRADCAM_ONLY:-false}    # true = Grad-CAM visualizations only
 GENERATE_ENSEMBLE_GRADCAM=${GENERATE_ENSEMBLE_GRADCAM:-false}  # Generate ensemble Grad-CAM after fold completes
+DRY_RUN=${DRY_RUN:-false}    # If true, just print the command without executing
 
 # Function to detect model name from checkpoint files
 detect_model_from_checkpoints() {
@@ -257,6 +259,10 @@ while [[ $# -gt 0 ]]; do
             GENERATE_ENSEMBLE_GRADCAM="true"
             shift
             ;;
+        --DRY_RUN|--dry_run|--dry-run)
+            DRY_RUN="true"
+            shift
+            ;;
         *)
             echo "Unknown option: $1"
             shift
@@ -337,7 +343,16 @@ fi
 echo "Running: $PYTHON_CMD"
 echo ""
 
-# Execute visual generation with error handling
+# Execute visual generation with error handling (or dry run)
+if [ "$DRY_RUN" = "true" ] || [ "$DRY_RUN" = "True" ]; then
+    echo "[DRY_RUN] Command would execute as:"
+    echo "  $PYTHON_CMD"
+    echo ""
+    echo "To execute this command, run without --dry_run flag or set DRY_RUN=false"
+    echo ""
+    exit 0
+fi
+
 if $PYTHON_CMD; then
     EXIT_CODE=$?
     echo ""
