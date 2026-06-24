@@ -25,6 +25,30 @@ TECHNICAL APPROACH:
 - **Consensus Voting**: Average of 16 TTA predictions anchors the final score, 
   reducing noise and improving robustness to stain variation
 
+METHODOLOGICAL NOTE - HOLDOUT SET REUSE:
+-----------------------------------------
+⚠️  Rescue inference processes the SAME holdout set used for baseline ensemble evaluation.
+   This is NOT a data leakage violation (model weights unchanged, no retraining), but you are
+   applying a better inference strategy to the same test data after seeing baseline results.
+   
+   IMPLICATIONS:
+   - ✅ No training/test contamination: Model trained only on training set
+   - ✅ No model retraining: Weights frozen, only inference parameters change
+   - ⚠️  Potential overfitting to holdout characteristics: Results may not generalize to truly
+        new patients beyond the 114 holdout patients
+   - ⚠️  Sequential testing problem: Using holdout to diagnose failures, then re-testing same
+        holdout with improved method inflates apparent performance improvement
+   
+   RECOMMENDATION FOR FINAL DEPLOYMENT:
+   For clinical deployment or publication, apply rescue inference to a completely separate
+   held-out test set (never used for baseline evaluation) to avoid optimistic bias.
+   
+   CURRENT USAGE - ACCEPTABLE FOR:
+   - Post-hoc clinical analysis: "If we re-scanned these patients, would we catch them?"
+   - Research ablations: Demonstrating inference technique improvements
+   - Quality assurance: Deep-dive investigation on borderline/failed cases
+   - But NOT for claiming final generalization performance
+
 USAGE:
 ------
   # Basic usage (process all patients)

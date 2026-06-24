@@ -390,6 +390,21 @@ After rescue completes, examine:
 - Resource constraints prevent running dense-stride inference (10-20x slower than standard stride)
 - Standard clinical workflow requires rapid turnaround (rescue adds 30-60 minutes per patient set)
 
+**⚠️ METHODOLOGICAL CAVEAT - Holdout Set Reuse:**
+
+Rescue inference operates on the **same holdout set** used for baseline ensemble evaluation. This does NOT violate data integrity (no model retraining, weights frozen) but means you're applying an improved inference strategy to data where you've already seen baseline results:
+
+- ✅ **Data Integrity**: PRESERVED (no training/test leakage, no model retraining)
+- ⚠️ **Generalization Risk**: Results may be optimistic for truly new patients beyond the 114 holdout set
+- ⚠️ **Sequential Testing**: You've diagnosed which patients failed, then applied better method to same data
+
+**For final deployment or publication**, apply rescue inference to a completely separate held-out test set (never evaluated with baseline) to avoid optimistic bias.
+
+**Acceptable current use cases**:
+- Post-hoc clinical analysis and troubleshooting
+- Research ablations demonstrating inference technique improvements
+- Quality assurance deep-dives on specific borderline cases
+
 *For more details, see `rescue_inference.py` documentation.*
 
 ---

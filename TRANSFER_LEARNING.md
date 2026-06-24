@@ -678,6 +678,22 @@ python3 ensemble_voting.py --runs 34-34
 - ✗ Resource constraints prevent running dense-stride inference (10-20x slower than standard stride)
 - ✗ Only a few patients warrant investigation (individual manual inspection more efficient)
 
+### ⚠️ Methodological Caveat - Holdout Set Reuse
+
+**Important**: Rescue inference operates on the **same holdout set** used for baseline ensemble evaluation. This does NOT violate data integrity (no model retraining, weights frozen) but has important implications:
+
+- ✅ **Data Integrity**: PRESERVED (no training/test leakage, no model retraining)
+- ⚠️ **Generalization Risk**: Results may be optimistic for truly new patients beyond the holdout set
+- ⚠️ **Sequential Testing**: You've diagnosed which patients failed, then applied better inference method to same data
+
+**For final deployment or publication**, apply rescue inference to a completely separate held-out test set (never evaluated with baseline) to avoid optimistic bias on generalization performance.
+
+**Acceptable current use cases**:
+- Post-hoc clinical analysis and troubleshooting on known edge cases
+- Research ablations demonstrating inference technique improvements
+- Quality assurance deep-dives on specific borderline cases
+- Internal validation workflows before clinical sign-off
+
 ### Computational Cost
 
 | Metric | Value |
