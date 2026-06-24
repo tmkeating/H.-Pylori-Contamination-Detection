@@ -2,7 +2,7 @@
 DeepHP Dataset Loader - H&E Stained Histology Patches with Experiment-Level 5-Fold Cross-Validation
 
 Provides a patch-level dataset for pre-training the backbone on H&E-stained
-images from the DeepHP database (394,926 - 1 (blacklisted) total patches: 111K positive, 283K negative).
+images from the DeepHP database (394,925 total patches: 120,374 positive, 274,551 negative).
 
 STRATIFICATION - CONFIG 87771:
 Uses an optimized hardcoded experiment-to-fold assignment from 500,000 random greedy searches.
@@ -22,9 +22,9 @@ DATASET COMPOSITION:
     - 1 mixed experiment (Experiment-67: 22,291 positive + 9,370 negative patches)
   
   - Patches organized into two folders:
-    - Positive/: 111,005 patches (mostly from positive experiments)
-    - Negative/: 283,921 patches (mostly from negative experiments)
-    - Overall ratio: ~2.28:1 (negative:positive)
+    - Positive/: 120,374 patches (mostly from positive experiments)
+    - Negative/: 274,551 patches (mostly from negative experiments)
+    - Overall ratio: 1:2.28 (positive:negative)
 
 STRATIFICATION STRATEGY - Experiment-Level 5-Fold Cross-Validation (CONFIG 87771):
   
@@ -62,7 +62,7 @@ STRATIFICATION STRATEGY - Experiment-Level 5-Fold Cross-Validation (CONFIG 87771
   BENEFITS OF THIS STRATEGY:
   ✓ EXPERIMENT INTEGRITY: No experiment split between train/val (prevents leakage)
   ✓ TRUE 5-FOLD CV: Each fold validates on different experiments (proper cross-validation)
-  ✓ BALANCED RATIOS: All folds maintain ~2.3:1 neg:pos ratio (target 2.28:1)
+  ✓ BALANCED RATIOS: All folds maintain 1:2.06 to 1:2.81 positive:negative ratio (target 1:2.28)
   ✓ NO FOLD ARTIFACTS: Models can't learn fold identity - each fold has unique experiments
   ✓ REALISTIC EPOCH 1: Accuracy ~50% (not 0%-99% variance from leakage)
   ✓ OPTIMIZED: Selected from 500,000 mathematically evaluated configurations
@@ -215,18 +215,18 @@ class DeepHPDataset(Dataset):
     - 20 pure positive experiments (all patches labeled 1)
     - 12 pure negative experiments (all patches labeled 0)
     - 1 mixed experiment (Experiment-67: 22,291 pos + 9,370 neg)
-    - Overall ratio: 2.28:1 (negative:positive)
+    - Overall ratio: 1:2.28 (positive:negative)
     
     STRATIFICATION STRATEGY - CONFIG 87771 (Experiment-Level 5-Fold CV):
     
     CONFIG 87771 METRICS:
     - Configuration metric: 0.6441 (10% better than previous config 3385)
-    - Fold 0: 7 experiments, 87,532 patches, 2.33:1 ratio
-    - Fold 1: 10 experiments, 89,516 patches, 2.06:1 ratio
-    - Fold 2: 5 experiments, 20,347 patches, 2.31:1 ratio
-    - Fold 3: 4 experiments, 99,120 patches, 2.81:1 ratio
-    - Fold 4: 7 experiments, 98,410 patches, 2.29:1 ratio
-    - All folds ratios within ±0.25:1 of target 2.28:1 (balanced)
+    - Fold 0: 7 experiments, 87,532 patches, 1:2.33 ratio
+    - Fold 1: 10 experiments, 89,516 patches, 1:2.06 ratio
+    - Fold 2: 5 experiments, 20,347 patches, 1:2.31 ratio
+    - Fold 3: 4 experiments, 99,120 patches, 1:2.81 ratio
+    - Fold 4: 7 experiments, 98,410 patches, 1:2.29 ratio
+    - All folds ratios within ±0.25:1 of target 1:2.28 (balanced)
     
     HOW IT WORKS:
     
@@ -262,7 +262,7 @@ class DeepHPDataset(Dataset):
     KEY PROPERTIES:
     ✓ EXPERIMENT INTEGRITY: No experiment split between train/val folds (prevents leakage)
     ✓ TRUE 5-FOLD CV: Each fold validates on different experiments (proper cross-validation)
-    ✓ BALANCED RATIOS: All folds maintain ~2.3:1 neg:pos ratio (target 2.28:1)
+    ✓ BALANCED RATIOS: All folds maintain ~1:2.3 positive:negative ratio (target 1:2.28)
     ✓ NO FOLD ARTIFACTS: All folds see same experiment diversity → no fold patterns
     ✓ REALISTIC METRICS: Epoch 1 accuracy ~50% (verified no 0%-99% variance)
     ✓ OPTIMIZED: CONFIG 87771 selected from 500,000 configurations
@@ -775,11 +775,11 @@ class DeepHPDataset(Dataset):
         if self.train:
             if train_labels.size > 0 and np.sum(train_labels == 1) > 0:
                 train_ratio = np.sum(train_labels == 0) / np.sum(train_labels == 1)
-                print(f"[DEBUG] Train ratio (Neg:Pos): {train_ratio:.2f}:1 (overall: {overall_ratio:.2f}:1)")
+                print(f"[DEBUG] Train ratio (Pos:Neg): 1:{train_ratio:.2f} (overall: 1:{overall_ratio:.2f})")
             
             if val_labels.size > 0 and np.sum(val_labels == 1) > 0:
                 val_ratio = np.sum(val_labels == 0) / np.sum(val_labels == 1)
-                print(f"[DEBUG] Val ratio (Neg:Pos):   {val_ratio:.2f}:1 (overall: {overall_ratio:.2f}:1)")
+                print(f"[DEBUG] Val ratio (Pos:Neg):   1:{val_ratio:.2f} (overall: 1:{overall_ratio:.2f})")
         
         return {'train': train_indices, 'val': val_indices}
     
@@ -803,17 +803,17 @@ class DeepHPDataset(Dataset):
         EXPECTED VALUES (CONFIG 87771):
         Training splits (gets experiments from folds 1-4):
           - Total: ~307,393 patches (all experiments except this fold's)
-          - Ratio: ~2.28:1 (should match overall dataset ratio)
+          - Ratio: ~1:2.28 (should match overall dataset ratio)
         
         Validation splits (gets experiments assigned to this fold):
-          - Fold 0 val: 87,532 patches, ratio 2.33:1 (7 experiments: 4 pos, 3 neg)
-          - Fold 1 val: 89,516 patches, ratio 2.06:1 (10 experiments: 3 pos, 7 neg)
-          - Fold 2 val: 20,347 patches, ratio 2.31:1 (5 experiments: 4 pos, 1 neg)
-          - Fold 3 val: 99,120 patches, ratio 2.81:1 (4 experiments: 4 pos, 0 neg)
-          - Fold 4 val: 98,410 patches, ratio 2.29:1 (7 experiments: 6 pos, 1 neg)
+          - Fold 0 val: 87,532 patches, ratio 1:2.33 (7 experiments: 4 pos, 3 neg)
+          - Fold 1 val: 89,516 patches, ratio 1:2.06 (10 experiments: 3 pos, 7 neg)
+          - Fold 2 val: 20,347 patches, ratio 1:2.31 (5 experiments: 4 pos, 1 neg)
+          - Fold 3 val: 99,120 patches, ratio 1:2.81 (4 experiments: 4 pos, 0 neg)
+          - Fold 4 val: 98,410 patches, ratio 1:2.29 (7 experiments: 6 pos, 1 neg)
         
         KEY PROPERTY:
-        All folds should have similar ratios (2.06:1 to 2.81:1) showing balanced stratification.
+        All folds should have similar ratios (1:2.06 to 1:2.81) showing balanced stratification.
         If ratios vary wildly, indicates potential fold-specific artifact learning.
         
         USAGE:
@@ -958,7 +958,7 @@ class DeepHPDataset(Dataset):
         print(f"Total patches:        {stats['total']:,}")
         print(f"  Positive (H. pylori):  {stats['positive']:,}")
         print(f"  Negative (Normal):     {stats['negative']:,}")
-        print(f"Imbalance ratio (Neg:Pos): {stats['imbalance_ratio']:.2f}:1")
+        print(f"Imbalance ratio (Pos:Neg): 1:{stats['imbalance_ratio']:.2f}")
         print(f"{'='*60}\n")
 
 

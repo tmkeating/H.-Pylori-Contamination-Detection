@@ -39,7 +39,7 @@ HOW IT WORKS:
 
 5. RANKING:
    - Calculate distance metrics for each fold's training/validation sets:
-     * Ratio distance: |target_ratio (2.28:1) - actual_ratio|
+     * Ratio distance: |target_ratio (1:2.28) - actual_ratio|
      * Patch distance: normalized difference from expected patch count
      * Exp distance: normalized difference from expected experiment count
    - Sort configs by total distance (sum across all 5 folds)
@@ -58,7 +58,7 @@ OUTPUT:
 
 KEY METRICS:
 -----------
-- TARGET_RATIO: 2.28:1 (negative:positive, matches full dataset)
+- TARGET_RATIO: 1:2.28 (positive:negative, matches full dataset)
 - VAL_FOLD_MIN_PATCHES: 20,000 (minimum validation set size)
 - VAL_FOLD_MAX_PATCHES: 140,000 (maximum validation set size)
 - VAL_FOLD_MIN_EXPS: 4 (minimum experiments per fold)
@@ -75,15 +75,15 @@ OUTPUT EXAMPLE:
 1. OVERALL: Total Distance = 0.6441
    Breakdown: Ratio=0.1290 + Patch=0.1548 + Exp=0.3603
 
-   Fold 0: 87,532 patches (4+ 3-), ratio 2.33:1
-   Fold 1: 89,516 patches (3+ 7-), ratio 2.06:1
-   Fold 2: 20,347 patches (4+ 1-), ratio 2.31:1
-   Fold 3: 99,120 patches (4+ 0-), ratio 2.81:1
-   Fold 4: 98,410 patches (6+ 1-), ratio 2.29:1
+   Fold 0: 87,532 patches (4+ 3-), ratio 1:2.33
+   Fold 1: 89,516 patches (3+ 7-), ratio 1:2.06
+   Fold 2: 20,347 patches (4+ 1-), ratio 1:2.31
+   Fold 3: 99,120 patches (4+ 0-), ratio 1:2.81
+   Fold 4: 98,410 patches (6+ 1-), ratio 1:2.29
 
    When Fold 0 is VAL:
-     VAL (Fold 0):   87,532 patches (4+ 3-), ratio 2.33:1
-     TRAIN (Folds 1,2,3,4): 307,393 patches (26+ 17-), ratio 2.27:1
+     VAL (Fold 0):   87,532 patches (4+ 3-), ratio 1:2.33
+     TRAIN (Folds 1,2,3,4): 307,393 patches (26+ 17-), ratio 1:2.27
 """
 
 import random
@@ -378,7 +378,7 @@ for rank, config in enumerate(valid_configs[:100], 1):
         pos = len([e for e in fold_exps if e['label'] == 'positive'])
         neg = len([e for e in fold_exps if e['label'] == 'negative'])
         ratio = sum(e['patch_count'] for e in fold_exps if e['label'] == 'negative') / max(sum(e['patch_count'] for e in fold_exps if e['label'] == 'positive'), 1)
-        print(f"       Fold {fold_idx}: {patches:6,} patches ({pos:2d}+ {neg:2d}-), ratio {ratio:.2f}:1")
+        print(f"       Fold {fold_idx}: {patches:6,} patches ({pos:2d}+ {neg:2d}-), ratio 1:{ratio:.2f}")
     print()
     
     # Show each fold as VAL with its training set
@@ -420,10 +420,10 @@ for rank, config in enumerate(valid_configs[:100], 1):
         fold_exp = fold_dist.get('exp', 0)
         
         print(f"     When Fold {val_fold_idx} is VAL:")
-        print(f"       VAL (Fold {val_fold_idx}):   {val_patches:6,} patches ({val_pos}+ {val_neg}-), ratio {val_ratio:.2f}:1")
+        print(f"       VAL (Fold {val_fold_idx}):   {val_patches:6,} patches ({val_pos}+ {val_neg}-), ratio 1:{val_ratio:.2f}")
         print(f"                    {', '.join(val_exp_ids)}")
         print(f"       VAL Distance: {val_ratio_distance + val_patch_distance + val_exp_distance:.4f} (Ratio={val_ratio_distance:.4f} + Patch={val_patch_distance:.4f} + Exp={val_exp_distance:.4f})")
-        print(f"       TRAIN (Folds {','.join(str(i) for i in range(NUM_FOLDS) if i != val_fold_idx)}): {train_patches:6,} patches ({train_pos}+ {train_neg}-), ratio {train_ratio:.2f}:1")
+        print(f"       TRAIN (Folds {','.join(str(i) for i in range(NUM_FOLDS) if i != val_fold_idx)}): {train_patches:6,} patches ({train_pos}+ {train_neg}-), ratio 1:{train_ratio:.2f}")
         print(f"                    {', '.join(train_exp_ids)}")
         print(f"       TRAIN Distance: {fold_total:.4f} (Ratio={fold_ratio:.4f} + Patch={fold_patch:.4f} + Exp={fold_exp:.4f})")
         print()

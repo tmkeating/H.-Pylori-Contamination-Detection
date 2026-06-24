@@ -14,22 +14,22 @@
 #   CONFIG 87771 HARDCODED EXPERIMENT ASSIGNMENTS:
 #   Each of the 33 experiments assigned to exactly ONE fold (zero data leakage):
 #   
-#   - Fold 0 val: 7 experiments (4 pos, 3 neg) → 87,532 patches, ratio 2.33:1
-#   - Fold 1 val: 10 experiments (3 pos, 7 neg) → 89,516 patches, ratio 2.06:1
-#   - Fold 2 val: 5 experiments (4 pos, 1 neg) → 20,347 patches, ratio 2.31:1
-#   - Fold 3 val: 4 experiments (4 pos, 0 neg) → 99,120 patches, ratio 2.81:1
-#   - Fold 4 val: 7 experiments (6 pos, 1 neg) → 98,410 patches, ratio 2.29:1
+#   - Fold 0 val: 7 experiments (4 pos, 3 neg) → 87,532 patches, ratio 1:2.33
+#   - Fold 1 val: 10 experiments (3 pos, 7 neg) → 89,516 patches, ratio 1:2.06
+#   - Fold 2 val: 5 experiments (4 pos, 1 neg) → 20,347 patches, ratio 1:2.31
+#   - Fold 3 val: 4 experiments (4 pos, 0 neg) → 99,120 patches, ratio 1:2.81
+#   - Fold 4 val: 7 experiments (6 pos, 1 neg) → 98,410 patches, ratio 1:2.29
 #   
 #   All 33 experiments assigned to exactly ONE fold (total: 394,925 patches)
 #   Training data for each fold: All experiments NOT assigned to this fold (~307K patches)
 #   
-#   TOTAL DISTANCE: 0.6441 (sum of distances from target ratio 2.28:1)
+#   TOTAL DISTANCE: 0.6441 (sum of distances from target ratio 1:2.28)
 #
 # RESULT:
 #   - Each fold validates on UNIQUE experiments (prevents fold-specific artifact learning)
 #   - Each fold trains on diverse experiments (same ~307K patches across all folds)
 #   - Experiment integrity: No experiment split between train and val (prevents leakage)
-#   - Balanced ratios: All folds 2.06:1 to 2.81:1 (target 2.28:1)
+#   - Balanced ratios: All folds 1:2.06 to 1:2.81 (target 1:2.28)
 #   - Realistic metrics: ~50% epoch 1 accuracy across all folds (no 0%-99% variance)
 #   - Cross-leakage audits: image-level (VERIFIED_UNIQUE) + experiment distribution verification
 #   - Grad-CAM visualizations: guaranteed TP/FP/FN/TN coverage
@@ -269,11 +269,11 @@ echo ""
 echo "After sync, training folds will use CONFIG 87771 stratification:"
 echo "  - Each fold validates on unique experiments (prevents fold-specific artifacts)"
 echo "  - Each fold trains on all other experiments (~307K patches, diverse)"
-echo "  - Fold 0 val: 7 exps (4 pos, 3 neg) → 87,532 patches (2.33:1 ratio)"
-echo "  - Fold 1 val: 10 exps (3 pos, 7 neg) → 89,516 patches (2.06:1 ratio)"
-echo "  - Fold 2 val: 5 exps (4 pos, 1 neg) → 20,347 patches (2.31:1 ratio)"
-echo "  - Fold 3 val: 4 exps (4 pos, 0 neg) → 99,120 patches (2.81:1 ratio)"
-echo "  - Fold 4 val: 7 exps (6 pos, 1 neg) → 98,410 patches (2.29:1 ratio)"
+echo "  - Fold 0 val: 7 exps (4 pos, 3 neg) → 87,532 patches (1:2.33 ratio)"
+echo "  - Fold 1 val: 10 exps (3 pos, 7 neg) → 89,516 patches (1:2.06 ratio)"
+echo "  - Fold 2 val: 5 exps (4 pos, 1 neg) → 20,347 patches (1:2.31 ratio)"
+echo "  - Fold 3 val: 4 exps (4 pos, 0 neg) → 99,120 patches (1:2.81 ratio)"
+echo "  - Fold 4 val: 7 exps (6 pos, 1 neg) → 98,410 patches (1:2.29 ratio)"
 echo ""
 DEEPHP_ROOT=$(python3 -c "from config import DEEPHP_DATASET_ROOT; print(DEEPHP_DATASET_ROOT)")
 echo "✓ Source dataset root: $DEEPHP_ROOT"
@@ -459,7 +459,7 @@ PRE_SYNC_DEPENDENCY="afterok:$PRE_SYNC_JOB_ID"
 # - Train on ~307K patches from all experiments NOT assigned to this fold
 # - Validate on unique experiments assigned to this fold (~87K patches)
 # - See diverse experiments across all folds (prevents fold-specific artifacts)
-# - Maintain balanced class ratio (~2.3:1) across folds
+# - Maintain balanced class ratio (~1:2.3) across folds
 # - Achieve realistic epoch 1 metrics (~50% accuracy, no 0%-99% variance)
 #
 # Each fold generates:

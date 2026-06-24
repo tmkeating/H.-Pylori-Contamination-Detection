@@ -28,6 +28,7 @@
 # Usage:
 #   PROFILE=SEARCHER MODEL_NAME=convnext_tiny ITER=30.0 ./submit_transfer_learning.sh
 #   PROFILE_DEEPHP=SEARCHERDEEPHP PROFILE=SEARCHER ./submit_transfer_learning.sh
+#   GPU_TYPE=a40 PROFILE=SEARCHER MODEL_NAME=convnext_tiny ./submit_transfer_learning.sh  # Run on A40 partition
 #
 # Environment Variables:
 #   PROFILE:              Model profile for transfer learning (default: SEARCHER)
@@ -43,6 +44,7 @@
 #   USE_DANN:             Enable Domain Adversarial training (default: False)
 #   DANN_LAMBDA:          Gradient reversal scaling factor (default: 1.0)
 #   DANN_WEIGHT:          Weight for adversary loss (default: 0.5)
+#   GPU_TYPE:             GPU type for SLURM partition (default: l40s, options: l40s, a40)
 #
 # Outputs:
 #   DeepHP Pre-training (Phase 1) via submit_train_deepHP.sh:
@@ -176,6 +178,20 @@ DEEPHP_SUMMARY_JOB_ID=${DEEPHP_SUMMARY_JOB_ID:-""}
 USE_DANN=${USE_DANN:-"False"}
 DANN_LAMBDA=${DANN_LAMBDA:-1.0}
 DANN_WEIGHT=${DANN_WEIGHT:-0.5}
+GPU_TYPE=${GPU_TYPE:-"l40s"}  # GPU type for SLURM partition (l40s or a40)
+
+# Map GPU type to partition
+# NOTE: A40 partition (pg3tfg12) requires q_pg3tfg12 QOS authorization from cluster admin
+#       L40S partition (pg1tfg12) uses q_pg1tfg12 QOS (default)
+if [ "$GPU_TYPE" = "a40" ]; then
+    PARTITION="pg3tfg12"
+    GPU_GRES="gpu:nvidia_a40:1"
+    SHARD_GRES="shard:nvidia_a40:12000"
+else
+    PARTITION="pg1tfg12"
+    GPU_GRES="gpu:l40s:1"
+    SHARD_GRES="shard:l40s:12000"
+fi
 
 echo "=========================================================================="
 echo "TRANSFER LEARNING: Complete End-to-End Pipeline"
@@ -368,6 +384,7 @@ export NUM_EPOCHS NEG_WEIGHT POS_WEIGHT GAMMA USE_FOCAL_LOSS SAVER_METRIC
 export FREEZE_BN FREEZE_BACKBONE CLIP_GRAD PCT_START WEIGHT_DECAY
 export USE_SWA SWA_START JITTER POOL_TYPE DEEPHP_EPOCHS
 export VENV_ROOT PROFILE MODEL_NAME ITER PRETRAINED_BACKBONE
+export PARTITION GPU_GRES SHARD_GRES GPU_TYPE
 
 # 1. Pre-sync handling: only submit if SKIP_PRETRAINING=true
 #    If pre-training is enabled, DeepHP presync runs first, then transfer folds depend on DeepHP summary
@@ -385,9 +402,8 @@ else
     PRESYNC_SBATCH_FLAGS="--dependency=afterok:$DEEPHP_SUMMARY_JOB_ID --nodelist=dcc-gr1"
 fi
 
-PRE_SYNC_JOB=$(sbatch $PRESYNC_SBATCH_FLAGS -p pg1tfg12 --job-name=transfer_presync --output=$OUTPUT_DIR/slurm_transfer_presync_%j.txt <<PRESYNC_EOF
+PRE_SYNC_JOB=$(sbatch $PRESYNC_SBATCH_FLAGS -p $PARTITION --job-name=transfer_presync --output=$OUTPUT_DIR/slurm_transfer_presync_%j.txt <<PRESYNC_EOF
 #!/bin/bash
-#SBATCH -p pg1tfg12
 #SBATCH -t 0-01:00
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=2G
@@ -705,14 +721,14 @@ do
     
     echo "Submitting fold $FOLD..."
     
-    JOB_OUT=$(sbatch -p pg1tfg12 \
+    JOB_OUT=$(sbatch -p $PARTITION \
         --dependency=$FOLD_DEPENDENCY \
         --job-name=transfer_f${FOLD} \
         --output=$OUTPUT_DIR/slurm_transfer_f${FOLD}_%j.txt \
         --error=$OUTPUT_DIR/slurm_transfer_error_f${FOLD}_%j.txt \
         --ntasks=1 \
         --cpus-per-task=4 \
-        --gres=gpu:l40s:1 --gres=shard:l40s:12000 \
+        --gres=$GPU_GRES --gres=$SHARD_GRES \
         --mem=30G \
         --time=48:00:00 \
         <<TRAIN_EOF
@@ -898,17 +914,16 @@ if [ -z "$DEPENDENCY_STRING" ]; then
 fi
 
 SUMMARY_JOB_ID=$(sbatch --dependency=$DEPENDENCY_STRING \
-    -p pg1tfg12 \
+    -p $PARTITION \
     --time=0-02:00 \
     --mem=8G \
     --cpus-per-task=1 \
-    --gres=gpu:l40s:1 --gres=shard:l40s:12000 \
+    --gres=$GPU_GRES --gres=$SHARD_GRES \
     --job-name=transfer_summary \
     --output=$OUTPUT_DIR/slurm_transfer_summary_%j.txt \
     --error=$OUTPUT_DIR/slurm_transfer_summary_error_%j.txt \
     <<SUMMARY_EOF
 #!/bin/bash
-#SBATCH -p pg1tfg12
 cd /home/tkeating/model/H.-Pylori-Contamination-Detection
 # Activate virtual environment for Python dependencies
 VENV_ROOT=$(python3 -c "from config import VENV_ROOT; print(VENV_ROOT)")
@@ -986,17 +1001,16 @@ echo "Submitting automatic visualization generation job..."
 echo "  Generates: Calibration curves, performance dashboards, learning curves"
 
 VISUAL_JOB_ID=$(sbatch --dependency=afterok:$SUMMARY_JOB_ID \
-    -p pg1tfg12 \
+    -p $PARTITION \
     --time=0-02:00 \
     --mem=16G \
     --cpus-per-task=1 \
-    --gres=gpu:l40s:1 --gres=shard:l40s:12000 \
+    --gres=$GPU_GRES --gres=$SHARD_GRES \
     --job-name=transfer_visuals \
     --output=$OUTPUT_DIR/slurm_transfer_visuals_%j.txt \
     --error=$OUTPUT_DIR/slurm_transfer_visuals_error_%j.txt \
     <<VISUAL_EOF
 #!/bin/bash
-#SBATCH -p pg1tfg12
 cd /home/tkeating/model/H.-Pylori-Contamination-Detection
 # Activate virtual environment for Python dependencies
 VENV_ROOT=$(python3 -c "from config import VENV_ROOT; print(VENV_ROOT)")

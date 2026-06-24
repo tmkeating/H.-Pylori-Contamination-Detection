@@ -28,11 +28,11 @@ SOLUTION - CONFIG 87771 (Optimized from 500,000 random greedy searches):
 CONFIG 87771 HARDCODED EXPERIMENT ASSIGNMENTS:
 Each of the 33 experiments assigned to exactly ONE fold (zero data leakage):
 
-- Fold 0 val: 7 experiments (4 pos, 3 neg) → 87,532 patches, ratio 2.33:1
-- Fold 1 val: 10 experiments (3 pos, 7 neg) → 89,516 patches, ratio 2.06:1
-- Fold 2 val: 5 experiments (4 pos, 1 neg) → 20,347 patches, ratio 2.31:1
-- Fold 3 val: 4 experiments (4 pos, 0 neg) → 99,120 patches, ratio 2.81:1
-- Fold 4 val: 7 experiments (6 pos, 1 neg) → 98,410 patches, ratio 2.29:1
+- Fold 0 val: 7 experiments (4 pos, 3 neg) → 87,532 patches, ratio 1:2.33
+- Fold 1 val: 10 experiments (3 pos, 7 neg) → 89,516 patches, ratio 1:2.06
+- Fold 2 val: 5 experiments (4 pos, 1 neg) → 20,347 patches, ratio 1:2.31
+- Fold 3 val: 4 experiments (4 pos, 0 neg) → 99,120 patches, ratio 1:2.81
+- Fold 4 val: 7 experiments (6 pos, 1 neg) → 98,410 patches, ratio 1:2.29
 
 All 33 experiments assigned to exactly ONE fold (total: 394,925 patches)
 Training data for each fold: All experiments NOT assigned to this fold (~307K patches)
@@ -45,7 +45,7 @@ BENEFITS:
 ✓ Each fold validates on different experiments (prevents fold-specific artifact learning)
 ✓ Training data diverse across all folds (same experiments, different patches)
 ✓ Experiment integrity: No experiment split between train and val (prevents leakage)
-✓ Balanced ratios: All folds 2.06:1 to 2.81:1 (target 2.28:1)
+✓ Balanced ratios: All folds 1:2.06 to 1:2.81 (target 1:2.28)
 ✓ Realistic metrics: ~50% epoch 1 accuracy across all folds (no 0%-99% variance)
 ✓ Mathematically optimized: Selected from 500,000+ configurations
 
@@ -340,19 +340,19 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
     Each fold validates on a unique set of experiments while training on all other experiments.
     
     CONFIG 87771 METRICS:
-    - Fold 0 val: 7 experiments (4 pos, 3 neg) → 87,532 patches, ratio 2.33:1
-    - Fold 1 val: 10 experiments (3 pos, 7 neg) → 89,516 patches, ratio 2.06:1
-    - Fold 2 val: 5 experiments (4 pos, 1 neg) → 20,347 patches, ratio 2.31:1
-    - Fold 3 val: 4 experiments (4 pos, 0 neg) → 99,120 patches, ratio 2.81:1
-    - Fold 4 val: 7 experiments (6 pos, 1 neg) → 98,410 patches, ratio 2.29:1
+    - Fold 0 val: 7 experiments (4 pos, 3 neg) → 87,532 patches, ratio 1:2.33
+    - Fold 1 val: 10 experiments (3 pos, 7 neg) → 89,516 patches, ratio 1:2.06
+    - Fold 2 val: 5 experiments (4 pos, 1 neg) → 20,347 patches, ratio 1:2.31
+    - Fold 3 val: 4 experiments (4 pos, 0 neg) → 99,120 patches, ratio 1:2.81
+    - Fold 4 val: 7 experiments (6 pos, 1 neg) → 98,410 patches, ratio 1:2.29
     
     Training data for each fold: All 33 experiments except those assigned to this fold (~307K patches)
-    Total Distance: 0.6441 (sum of distances from target ratio 2.28:1)
+    Total Distance: 0.6441 (sum of distances from target ratio 1:2.28)
     
     KEY ADVANTAGES:
     - Each fold validates on UNIQUE experiments → prevents fold-specific artifact learning
     - Experiment-level assignment ensures proper biological unit stratification
-    - All folds maintain similar ratios (2.06:1 to 2.81:1 around target 2.28:1)
+    - All folds maintain similar ratios (1:2.06 to 1:2.81 around target 1:2.28)
     - All folds train on same diverse set of experiments (breaks artifact learning)
     - Zero data leakage: no experiment split between folds, no image overlap
     
@@ -1356,8 +1356,8 @@ def train_deephp_backbone(fold_idx=0, num_folds=5, model_name="convnext_tiny", n
     print(f"Expected Validation Set:")
     print(f"  Total patches: {stats.get('patches', 'N/A'):,}")
     print(f"  Experiments: {stats.get('pos_exps', 0)} positive + {stats.get('neg_exps', 0)} negative")
-    print(f"  Neg:Pos ratio: {stats.get('ratio', 'N/A'):.2f}:1")
-    print(f"  Distance from target (2.28:1): {stats.get('distance', 'N/A'):.2f}")
+    print(f"  Pos:Neg ratio: 1:{stats.get('ratio', 'N/A'):.2f}")
+    print(f"  Distance from target (1:2.28): {stats.get('distance', 'N/A'):.2f}")
     print(f"\nTotal Configuration Score:")
     print(f"  Overall distance: 0.6441 (sum of per-fold distances)")
     print(f"  Selected from: 500,000+ random greedy searches")

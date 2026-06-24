@@ -1,10 +1,10 @@
 # H. Pylori Contamination Detection (Iteration 34.0: Hybrid Ensemble Fusion)
 
-This project implements a **High-Resolution Multi-Stage MIL Pipeline** for the automated detection of *H. pylori* contamination in histology tissue samples. It features a **Searcher-Rescue** architecture designed to identify sparse bacterium clusters in high-resolution whole-slide imaging, combined with an **intelligent Hybrid Ensemble** that achieves 92.11% accuracy with perfect precision.
+This project implements a **High-Resolution Multi-Stage MIL Pipeline** for the automated detection of *H. pylori* contamination in histology tissue samples. It features architecture designed to identify sparse bacterium clusters in high-resolution whole-slide imaging, combined with an **intelligent Hybrid Ensemble**.
 
 **Transfer Learning with DeepHP H&E Pre-training** (Available for backbone initialization)
 
-The pipeline supports backbone pre-training on the **DeepHP dataset** (394,926 H&E-stained histology patches, 111K positive / 283K negative) before fine-tuning on the patient-level IHC data from HelicoDataSet.
+The pipeline supports backbone pre-training on the **DeepHP dataset** (33 experiments, 394,926 H&E-stained histology patches, 120,374 positive / 274,551 negative, ratio 1:2.28) before fine-tuning on the patient-level IHC data from HelicoDataSet (268 patients total: 154 training / 114 holdout; 216,326 IHC-stained histology patches: 128,724 training [62,800 pos / 65,924 neg, ratio 1:1.05] + 87,602 holdout [40,642 pos / 46,960 neg, ratio 1:1.16])
 
 ### Benefits of Transfer Learning
 - ✅ **Backbone initialization** from large-scale histology patches instead of random weights
@@ -103,11 +103,11 @@ After integrity checks pass, sync the vetted datasets to local node storage for 
 - 394,926 clean patches (verified 0 duplicates)
 - **CONFIG 87771 Stratification**: Hardcoded experiment-level 5-fold cross-validation:
   - Each of 33 experiments assigned to exactly ONE fold (zero data leakage)
-  - Fold 0 val: 7 experiments (4 pos, 3 neg) → 87,532 patches, ratio 2.33:1
-  - Fold 1 val: 10 experiments (3 pos, 7 neg) → 89,516 patches, ratio 2.06:1
-  - Fold 2 val: 5 experiments (4 pos, 1 neg) → 20,347 patches, ratio 2.31:1
-  - Fold 3 val: 4 experiments (4 pos, 0 neg) → 99,120 patches, ratio 2.81:1
-  - Fold 4 val: 7 experiments (6 pos, 1 neg) → 98,410 patches, ratio 2.29:1
+  - Fold 0 val: 7 experiments (4 pos, 3 neg) → 87,532 patches, ratio 1:2.33
+  - Fold 1 val: 10 experiments (3 pos, 7 neg) → 89,516 patches, ratio 1:2.06
+  - Fold 2 val: 5 experiments (4 pos, 1 neg) → 20,347 patches, ratio 1:2.31
+  - Fold 3 val: 4 experiments (4 pos, 0 neg) → 99,120 patches, ratio 1:2.81
+  - Fold 4 val: 7 experiments (6 pos, 1 neg) → 98,410 patches, ratio 1:2.29
   - Each fold trains on ALL experiments except its validation experiments (~307K patches)
   - Mathematically optimized from 500,000+ greedy configuration searches
 - **Critical Data Integrity**: The Macenko normalization reference patch is automatically excluded from all 5 folds **before** k-fold assignment (not after), mathematically guaranteeing zero leakage between training and validation sets
@@ -126,12 +126,19 @@ This script automatically orchestrates:
    - Each fold validates on unique experiments (prevents fold-specific artifact learning)
    - Each fold trains on ~307K patches from all other experiments
    - Fold validation sets: 87,532 / 89,516 / 20,347 / 99,120 / 98,410 patches respectively
-   - Fold ratios: 2.33:1 / 2.06:1 / 2.31:1 / 2.81:1 / 2.29:1 (target 2.28:1, total distance 0.6441)
+   - Fold ratios: 1:2.33 / 1:2.06 / 1:2.31 / 1:2.81 / 1:2.29 (target 1:2.28, total distance 0.6441)
    - **Domain Adversarial Neural Networks (DANN)**: Optionally enabled with `--use_dann` flag
      - Prevents learning of experiment-specific staining artifacts
      - Adversary head predicts experiment ID from features → forces experiment-invariant representations
      - Gradient reversal layer negates gradients during backprop → confuses adversary
      - Parameters: `--dann_lambda 1.0` (gradient scaling), `--dann_weight 1.0` (loss weighting)
+   - **Per-Fold Training Weights (Optional)**: Support for fold-specific class weighting during training
+     - By default, all folds use the same `--pos_weight` parameter (e.g., 1.5)
+     - For fine-tuning, specify comma-separated per-fold weights: `--pos_weight 1.5,1.8,1.6,1.4,1.7`
+     - Fold 0 trains with pos_weight=1.5, Fold 1 with pos_weight=1.8, etc.
+     - Use case: Compensate for per-fold class imbalance or fold-specific convergence issues
+     - Automatically distributed by `submit_train_deepHP.sh` to each SLURM job
+     - Example: Folds with more negative patches can use higher pos_weight to balance gradient magnitudes
    - Generates per-fold cross-leakage audits and experiment distribution audit
    - Includes automatic Macenko reference image check (creates if missing)
    - Applies Macenko stain normalization during DeepHP pre-training
@@ -155,6 +162,33 @@ This script automatically orchestrates:
 3. **Summary & Ensemble Fusion** (automatically runs after all folds complete)
 
 *Note: This approach trains models from random initialization without pre-trained backbone weights.*
+
+### 2.5 Advanced Configuration Options (Optional)
+
+Both training pipelines support additional environment variables for fine-tuning DeepHP pre-training behavior:
+
+**Per-Fold Positive Class Weights** (for class imbalance compensation):
+```bash
+# Use same pos_weight for all folds (default: 1.5)
+PROFILE=SEARCHER MODEL_NAME=convnext_tiny ITER=34.0 POS_WEIGHT=2.0 ./submit_transfer_learning.sh
+
+# Use fold-specific pos_weights (comma-separated: fold0,fold1,fold2,fold3,fold4)
+PROFILE=SEARCHER MODEL_NAME=convnext_tiny ITER=34.0 POS_WEIGHT=1.5,1.8,1.6,1.4,1.7 ./submit_transfer_learning.sh
+```
+
+**Focal Loss Configuration** (for hard example mining):
+```bash
+# Enable Focal Loss with gamma parameter (controls focus on hard examples)
+PROFILE=SEARCHER MODEL_NAME=convnext_tiny ITER=34.0 USE_FOCAL_LOSS=True GAMMA=3.0 ./submit_transfer_learning.sh
+```
+
+**Domain Adversarial Neural Networks** (for experiment-invariant features):
+```bash
+# Enable DANN with gradient scaling and loss weighting
+PROFILE=SEARCHER MODEL_NAME=convnext_tiny ITER=34.0 USE_DANN=True DANN_LAMBDA=1.0 DANN_WEIGHT=0.5 ./submit_transfer_learning.sh
+```
+
+All parameters are automatically propagated to all 5 SLURM training jobs and per-fold threshold calibration.
 
 ### 3. Post-Processing Pipeline (Automatic)
 Both training pipelines (`submit_transfer_learning.sh` - RECOMMENDED and `submit_all_folds.sh` - ALTERNATIVE) automatically execute a complete post-processing pipeline after all training folds complete. **No manual step required.**
@@ -186,10 +220,44 @@ The automated post-processing job orchestrates four sequential stages:
 
 #### 3.3 Backbone Weighted Ensemble (DeepHP Pre-training)
 **Stage 3: `ensemble_voting_deepHP.py`** (after DeepHP pre-training only)
-- Fuses predictions from all 5 DeepHP folds using weighted voting
-- Each fold receives weight based on its validation performance (F1 score)
-- Generates averaged backbone ready for transfer learning to HelicoDataSet
-- Outputs: `deephp_backbone_final_{run_id}_convnext_tiny_{iter}.pth` + backbone ensemble predictions
+
+**Strategy: F1-Score Weighted Backbone Fusion**
+
+After training all 5 folds on DeepHP H&E patches, the backbone weights are combined using a weighted ensemble approach based on per-fold validation F1 scores:
+
+1. **Per-Fold Performance Evaluation**
+   - Each fold is evaluated on its validation set (unique experiments not seen during training)
+   - F1 score computed as: F1 = 2 × (Precision × Recall) / (Precision + Recall)
+   - F1 score represents the fold's ability to correctly identify H. pylori patches on unseen experiments
+   - Higher F1 → better fold performance → higher weight in final ensemble
+
+2. **Weight Calculation**
+   - Fold weights normalized so they sum to 1.0:
+     - `weight_fold_i = F1_score_fold_i / sum(F1_scores_all_folds)`
+   - Example: If fold F1 scores are [0.25, 0.22, 0.28, 0.24, 0.26], weights become [0.25, 0.22, 0.28, 0.24, 0.26]
+   - Folds with superior validation performance receive proportionally higher influence in the averaged backbone
+
+3. **Weighted Backbone Averaging**
+   - For each model parameter θ (weights and biases), compute weighted average:
+     - `θ_ensemble = Σ(weight_i × θ_i)` for each fold i
+   - Example: ConvNeXt-Tiny backbone has ~28M parameters
+   - Each parameter averaged across 5 folds, weighted by respective F1 scores
+   - Result: Unified backbone that captures the best-performing feature extractors from all 5 folds
+
+4. **Advantages Over Simple Equal-Weight Averaging**
+   - ✅ **Better generalization**: Folds with poor validation performance have reduced influence
+   - ✅ **Data-driven optimization**: Weights automatically adjust based on actual fold performance
+   - ✅ **Noise reduction**: High-variance folds (unstable performance) have lower weight
+   - ✅ **Experiment-robust features**: Folds that generalize better to unseen experiments dominate
+   - ✅ **Prevents bad fold contamination**: A poorly-trained fold won't degrade final backbone
+
+5. **Output**
+   - `deephp_backbone_final_{run_id}_convnext_tiny_{iter}.pth`: F1-weighted averaged backbone ready for transfer learning
+   - `{run_id}_{iter}_ensemble_weights_f1.json`: Per-fold weights used in averaging (for reproducibility)
+   - Can be loaded directly into fine-tuning pipeline with `--pretrained_backbone_path` argument
+   - Generates ensemble predictions on validation sets for further analysis
+
+**Rationale**: Simple equal-weight averaging assumes all folds contribute equally, but in practice, folds with different experiment distributions may learn at different rates. F1-weighted averaging lets the data speak: folds that better generalize to unseen experiments receive proportionally more weight in the final backbone, resulting in a transfer-learning-ready feature extractor optimized for H. pylori morphology recognition.
 
 #### 3.4 Weighted Ensemble Voting (HelicoDataSet Fine-tuning)
 **Stage 4: `ensemble_voting.py`** (after HelicoDataSet fine-tuning only)
@@ -267,49 +335,11 @@ sbatch run_visuals.sh
 
 ## 📊 Final Clinical Performance
 
-### Hybrid Ensemble (Best Method) - Three Fusion Approaches Compared
-
-| Metric | Ensemble Voting | Meta-Classifier | **Hybrid Ensemble** ⭐ |
-| :--- | :--- | :--- | :--- |
-| **Accuracy** | 86.84% | 91.23% | **92.11%** |
-| **Precision** | 85.00% | 97.96% | **100.00%** |
-| **Recall** | 89.47% | 84.21% | 84.21% |
-| **Specificity** | 84.21% | 98.25% | **100.00%** |
-| **F1 Score** | 87.18% | 90.57% | **91.43%** |
-| **False Positives** | 9 | 1 | **0** |
-| **False Negatives** | 6 | 9 | 9 |
-
-### Architecture Comparison: ConvNeXt-Tiny vs ConvNeXt-Small
-
-**Test Results (5-Fold Cross-Validation Hybrid Ensemble)**
-
-| Metric | **ConvNeXt-Tiny** ⭐ | ConvNeXt-Small |
-| :--- | :--- | :--- |
-| **Accuracy** | **92.11%** | 87.72% |
-| **Precision** | **100.00%** (0 FP) | 92.16% (4 FP) |
-| **Recall** | 84.21% (48 TP) | 82.46% (47 TP) |
-| **Specificity** | **100.00%** | 92.98% |
-| **F1 Score** | **91.43%** | 87.04% |
-| **MCC** | **0.8528** | 0.7586 |
-| **Kappa** | **0.8421** | 0.7544 |
-| **False Positives** | **0** | 4 |
-| **False Negatives** | 9 | 10 |
-| **Parameters** | 28M | 50M (+80%) |
-| **Training Time** | ~1x | ~1.5x |
-
-**Recommendation: ConvNeXt-Tiny** ✅
-- **Better overall accuracy**: +4.4% absolute improvement
-- **Perfect precision**: Zero false positives (critical for clinical safety)
-- **Perfect specificity**: All negative patients correctly identified
-- **Better F1 Score**: +4.4% absolute improvement (91.43% vs 87.04%)
-- **More efficient**: 56% fewer parameters, faster training/inference
-- **Superior trade-off**: Better balance of sensitivity and specificity
-
-ConvNeXt-Small's additional parameters did not translate to improved performance on this task, suggesting **ConvNeXt-Tiny is the optimal choice for H. pylori detection** in this dataset.
+To Do
 
 
 ## 🛠️ Key Pipeline Features
-- **CONFIG 87771 Stratification (DeepHP Pre-training)**: Hardcoded experiment-level 5-fold cross-validation optimized from 500,000+ greedy configuration searches. Each of 33 experiments assigned to exactly ONE fold, preventing data leakage and fold-specific artifact learning. Folds validate on different experiments (87.5K / 89.5K / 20.3K / 99.1K / 98.4K patches) with balanced ratios (2.06:1 to 2.81:1, target 2.28:1, total distance 0.6441). All folds train on ~307K patches from all other experiments.
+- **CONFIG 87771 Stratification (DeepHP Pre-training)**: Hardcoded experiment-level 5-fold cross-validation optimized from 500,000+ greedy configuration searches. Each of 33 experiments assigned to exactly ONE fold, preventing data leakage and fold-specific artifact learning. Folds validate on different experiments (87.5K / 89.5K / 20.3K / 99.1K / 98.4K patches) with balanced ratios (1:2.06 to 1:2.81, target 1:2.28, total distance 0.6441). All folds train on ~307K patches from all other experiments.
 - **Domain Adversarial Neural Networks (DANN - Optional)**: Advanced technique for DeepHP pre-training that prevents models from learning experiment-specific staining artifacts. Adversary head predicts experiment ID from features while gradient reversal layer forces the backbone to ignore experiment signals. Result: experiment-invariant representations that generalize across different H&E staining protocols and scanners. Enable with `--use_dann` flag (default: disabled for faster training).
 - **Deterministic Validation Sets (Reproducible Cross-Validation)**: All folds use stratified k-fold splitting with fixed random seeds (`seed = 42 + fold_index`), ensuring validation sets are identical across training runs. This enables reliable model comparison and debugging without randomness in fold assignment. For example, Fold 0 always contains the same 20% of data as validation, while Folds 1-4 use their own consistent partitions. Training and validation indices are strictly disjoint with no overlap.
 - **Macenko Stain Normalization**: Applied exclusively during DeepHP H&E pre-training to normalize color variations across different staining protocols and tissue scanners, improving backbone generalization. Reference image is automatically created/verified on login node before training starts.
@@ -317,7 +347,7 @@ ConvNeXt-Small's additional parameters did not translate to improved performance
 - **Centralized Configuration**: All paths and environment variables in `config.py` support dynamic resolution and environment variable overrides for portability across different systems.
 - **Stride-128 Rescue Pass**: Dense-window overlap to "catch" sparse bacteria that fall in gaps at default strides.
 - **Top-3 Mixed MIL**: Balances sensitivity with noise resilience by averaging the top 3 most confident tissue chunks.
-- **Contrast-Boosted TTA**: 16-way transforms (8 spatial + 1.1x contrast jitter) to "pop" faint IHC signals.
+- **Contrast-Boosted TTA**: 16-way transforms (8 spatial + 1.25x contrast jitter) to "pop" faint IHC signals.
 - **Modern PyTorch API**: Uses current `torch.amp.GradScaler` with automatic device detection instead of deprecated `torch.cuda.amp.GradScaler`, ensuring forward compatibility with future PyTorch versions.
 - **Per-Fold Threshold Calibration (Post-Processing)**: After training all 5 folds, each fold's validation predictions are analyzed to compute optimal classification thresholds that maximize F1 score. These per-fold thresholds are then applied to test predictions before ensemble fusion, improving decision boundary quality and eliminating unnecessary false positives.
 - **Weighted Ensemble Voting (Post-Processing)**: Combines predictions from all 5 folds using fold-performance-weighted voting. Folds with higher validation F1 scores receive greater weight, ensuring the most reliable folds contribute more to the final patient-level decision. This hierarchical confidence weighting significantly improves robustness and generalization.
@@ -325,7 +355,6 @@ ConvNeXt-Small's additional parameters did not translate to improved performance
   - **High Confidence Zone (>0.95)**: Uses weighted ensemble voting
   - **Uncertainty Zone (0.35-0.55)**: Uses meta-classifier fallback for difficult cases
   - **Medium Confidence (0.55-0.95)**: Intelligently blends both methods (60% ensemble + 40% meta)
-  - **Result**: Best-in-class accuracy with zero false positives for clinical safety
 
 ---
 
