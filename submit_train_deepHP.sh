@@ -59,8 +59,19 @@ fi
 
 MODEL_NAME=${MODEL_NAME:-"convnext_tiny"}
 PROFILE=${PROFILE:-"SEARCHER"}
+PROFILE_DEEPHP=${PROFILE_DEEPHP:-"$PROFILE"}  # Default to PROFILE if not specified
 ITER=${ITER:-"31.0"}
 FOLD_BATCH_SIZE=${FOLD_BATCH_SIZE:-"0"}  # 0=all parallel (default), N=batch in groups of N
+
+# ===================================================================
+# OUTPUT DIRECTORY SETUP
+# ===================================================================
+# Naming convention: deephp_{MODEL}_{ITER}_{PROFILE_DEEPHP}
+OUTPUT_DIR="results/deephp_${MODEL_NAME}_${ITER}_${PROFILE_DEEPHP}"
+mkdir -p "$OUTPUT_DIR"
+
+echo "Output directory: $OUTPUT_DIR"
+echo ""
 
 # RUN_ID for parallel job safety (optional; auto-generated if not provided)
 RUN_ID=${RUN_ID:-""}
@@ -196,7 +207,7 @@ export VENV_ROOT PROFILE MODEL_NAME ITER PRETRAINED_BACKBONE RUN_ID
 
 # 1. Submit pre-sync job (prepares scratch directory for data)
 echo "Submitting pre-sync job to prepare environment..."
-PRE_SYNC_JOB=$(sbatch -p pg1tfg12 --job-name=deephp_presync --output=results/slurm_deephp_presync_%j.txt <<'PRESYNC_EOF'
+PRE_SYNC_JOB=$(sbatch -p pg1tfg12 --job-name=deephp_presync --output=$OUTPUT_DIR/slurm_deephp_presync_%j.txt <<'PRESYNC_EOF'
 #!/bin/bash
 #SBATCH -p pg1tfg12
 #SBATCH -t 0-02:00
@@ -486,8 +497,8 @@ do
     JOB_OUT=$(sbatch -p pg1tfg12 \
         --dependency=$FOLD_DEPENDENCY \
         --job-name=deephp_f${FOLD} \
-        --output=results/slurm_deephp_f${FOLD}_%j.txt \
-        --error=results/slurm_deephp_error_f${FOLD}_%j.txt \
+        --output=$OUTPUT_DIR/slurm_deephp_f${FOLD}_%j.txt \
+        --error=$OUTPUT_DIR/slurm_deephp_error_f${FOLD}_%j.txt \
         --ntasks=1 \
         --cpus-per-task=4 \
         --gres=shard:l40s:12000 \
@@ -555,6 +566,7 @@ python3 -u train_deepHP_patches.py \
     --clip_grad \$CLIP_GRAD \
     --saver_metric \$SAVER_METRIC \
     --iter \$ITER \
+    --output_dir $OUTPUT_DIR \
     --run_id \$RUN_ID \
     --use_dann \$USE_DANN \
     --dann_lambda \$DANN_LAMBDA \
@@ -639,8 +651,8 @@ SUMMARY_JOB_OUT=$(sbatch --dependency=$DEPENDENCY_STRING \
     --cpus-per-task=1 \
     --gres=shard:l40s:4000 \
     --job-name=deephp_summary \
-    --output=results/slurm_deephp_summary_%j.txt \
-    --error=results/slurm_deephp_summary_error_%j.txt \
+    --output=$OUTPUT_DIR/slurm_deephp_summary_%j.txt \
+    --error=$OUTPUT_DIR/slurm_deephp_summary_error_%j.txt \
     <<'SUMMARY_EOF'
 #!/bin/bash
 #SBATCH -p pg1tfg12
@@ -1112,7 +1124,7 @@ echo ""
 POST_PROCESS_JOB=$(sbatch --dependency=afterok:$SUMMARY_JOB_ID \
     --export=ALL \
     -p pg1tfg12 --time=0-00:30 --mem=16G --cpus-per-task=2 \
-    --job-name=deephp_postprocess --output=results/slurm_postprocess_%j.txt \
+    --job-name=deephp_postprocess --output=$OUTPUT_DIR/slurm_postprocess_%j.txt \
     <<'POSTPROCESS_EOF'
 #!/bin/bash
 # Get virtual environment path from config

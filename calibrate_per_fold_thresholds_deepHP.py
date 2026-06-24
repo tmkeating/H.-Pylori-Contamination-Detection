@@ -89,10 +89,11 @@ def main():
     parser = argparse.ArgumentParser(description='Calibrate per-fold thresholds for DeepHP predictions')
     parser.add_argument('--run', default='', help='Run ID (e.g., 01_34.1). If not provided, auto-detects most recent run')
     parser.add_argument('--model', default='convnext_tiny', help='Model name')
+    parser.add_argument('--output_dir', default='results', help='Output directory for results (default: results)')
     args = parser.parse_args()
     
     # Find all probabilities files
-    prob_files = sorted(glob.glob('/home/tkeating/model/H.-Pylori-Contamination-Detection/results/*probabilities.json'))
+    prob_files = sorted(glob.glob(str(Path(args.output_dir) / '*probabilities.json')))
     
     if not prob_files:
         print("ERROR: No probabilities JSON files found!")
@@ -156,7 +157,7 @@ def main():
               f"Recall={metrics['recall']:.4f}, Precision={metrics['precision']:.4f}")
     
     # Save thresholds
-    output_path = f"/home/tkeating/model/H.-Pylori-Contamination-Detection/results/{run_id}_calibrated_thresholds.json"
+    output_path = Path(args.output_dir) / f"{run_id}_calibrated_thresholds.json"
     with open(output_path, 'w') as f:
         json.dump(thresholds_data, f, indent=2)
     

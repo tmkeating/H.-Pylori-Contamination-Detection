@@ -306,6 +306,8 @@ def main():
     )
     parser.add_argument("--run", type=str, default=None, 
                        help="Run ID with iteration (e.g., '01_34.4'). Required if --backbone_path not provided.")
+    parser.add_argument("--output_dir", type=str, default="results",
+                       help="Output directory for Grad-CAM visualizations (default: results/)")
     parser.add_argument("--fold", type=str, default="0",
                        help="Fold index or range (e.g., '0', '0-4', '0,2,4')")
     parser.add_argument("--model", type=str, default="convnext_tiny",
@@ -419,9 +421,9 @@ def main():
         # Use backbone filename if custom backbone provided, otherwise use run_id
         if args.backbone_path:
             backbone_name = os.path.splitext(os.path.basename(args.backbone_path))[0]
-            output_dir = f"results/{backbone_name}_f{fold_idx}_gradcam"
+            output_dir = os.path.join(args.output_dir, f"{backbone_name}_f{fold_idx}_gradcam")
         else:
-            output_dir = f"results/{args.run}_f{fold_idx}_{args.model}_gradcam"
+            output_dir = os.path.join(args.output_dir, f"{args.run}_f{fold_idx}_{args.model}_gradcam")
         
         generate_and_save_gradcams(
             all_images, all_labels, all_predictions, all_heatmaps, 

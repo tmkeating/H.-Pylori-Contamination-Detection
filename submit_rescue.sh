@@ -29,10 +29,10 @@
 #SBATCH -o results/rescue_ensemble/slurm_rescue_%j.txt
 #SBATCH -e results/rescue_ensemble/error_rescue_%j.txt
 
-# Create output directory
-mkdir -p results/rescue_ensemble
-
 set -e  # Exit on error
+
+# Create default output directory
+mkdir -p results/rescue_ensemble
 
 # Verify virtual environment before proceeding
 if [ -f "./verify_venv.sh" ]; then
@@ -49,7 +49,10 @@ source $VENV_ROOT/bin/activate
 STRIDE=${STRIDE:-128}
 TARGETS=${TARGETS:-"B22-206,B22-262,B22-69,B22-81,B22-85,B22-01"}
 MODEL_DIR="results/"
-OUTPUT_DIR="results/rescue_ensemble"
+OUTPUT_DIR=${OUTPUT_DIR:-"results/rescue_ensemble"}
+
+# Ensure output directory exists
+mkdir -p "$OUTPUT_DIR"
 
 # Explicit fold list from current Searcher Iteration (25.1)
 # High-resolution pass (Stride 128) for the identified 'Unreachable Six' patients.
@@ -66,13 +69,12 @@ echo "Targets: $TARGETS"
 
 for FOLD_BASE in "${FOLDS[@]}"; do
     MODEL_PATH="${MODEL_DIR}/${FOLD_BASE}_convnext_tiny_model_brain.pth"
-    OUTPUT_CSV="${OUTPUT_DIR}/rescue_${FOLD_BASE}.csv"
     
     echo "-------------------------------------------"
     echo "Processing $FOLD_BASE..."
     python3 rescue_inference.py \
         --model "$MODEL_PATH" \
-        --output "$OUTPUT_CSV" \
+        --output_dir "$OUTPUT_DIR" \
         --stride $STRIDE \
         --targets "$TARGETS"
 done

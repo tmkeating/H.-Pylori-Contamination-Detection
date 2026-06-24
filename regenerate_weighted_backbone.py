@@ -21,13 +21,14 @@ def main():
     parser.add_argument('--run', type=str, required=True, help='Run ID (e.g., 01_34.4)')
     parser.add_argument('--model', type=str, default='convnext_tiny', help='Model name (default: convnext_tiny)')
     parser.add_argument('--strategy', type=str, default='f1', help='Ensemble strategy to use (default: f1)')
+    parser.add_argument('--output_dir', type=str, default='results', help='Output directory (default: results)')
     args = parser.parse_args()
     
     run_id = args.run
     model_name = args.model
     strategy = args.strategy
     
-    results_dir = Path('results')
+    results_dir = Path(args.output_dir)
     
     print("="*80)
     print(f"Regenerating Backbone with Weighted Ensemble Averaging")
@@ -60,7 +61,7 @@ def main():
     
     # Find fold checkpoints
     # Pattern: {run_id}_{slurm_id}_f{fold}_{model}_model_brain.pth
-    print(f"Searching for fold checkpoints...")
+    print(f"Searching for fold checkpoints in {results_dir}...")
     fold_paths = []
     for fold_idx in range(5):
         # Search for pattern: 01_34.4_*_f{fold}_convnext_tiny_model_brain.pth
@@ -86,10 +87,10 @@ def main():
     parts = run_id.rsplit('_', 1)
     if len(parts) == 2:
         run_part, iter_part = parts
-        output_path = f"results/deephp_backbone_final_{run_part}_{model_name}_{iter_part}.pth"
+        output_path = str(results_dir / f"deephp_backbone_final_{run_part}_{model_name}_{iter_part}.pth")
     else:
         # Fallback if parsing fails
-        output_path = f"results/deephp_backbone_final_{run_id}_{model_name}.pth"
+        output_path = str(results_dir / f"deephp_backbone_final_{run_id}_{model_name}.pth")
     
     print(f"Regenerating backbone with weighted averaging...")
     weighted_average_backbone_weights(fold_paths, fold_weights, output_path)

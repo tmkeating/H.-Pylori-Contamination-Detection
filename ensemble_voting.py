@@ -398,7 +398,11 @@ def main():
 
     parser = argparse.ArgumentParser(description="Ensemble Voting for H. Pylori")
     parser.add_argument("--runs", type=str, help="Run ID range to aggregate (e.g., '292-296'). If omitted, finds 5 most recent.")
+    parser.add_argument("--dir", type=str, default="results", help="Directory containing consensus files (default: results/)")
     args = parser.parse_args()
+    
+    output_dir = args.dir
+    os.makedirs(output_dir, exist_ok=True)
 
     if args.runs:
         # Iteration 26.2: Support comma-separated RunIDs (e.g., "302,303,299,300,301")
@@ -407,7 +411,7 @@ def main():
             files = []
             # Optimization: Search in both results/ and finalResults/searcher/ 
             # to support hybrid historical ensembles.
-            search_dirs = ["results", "finalResults/searcher"]
+            search_dirs = [output_dir, "finalResults/searcher"]
             for rid in run_list:
                 found = False
                 for s_dir in search_dirs:
@@ -425,7 +429,7 @@ def main():
             # Optimization: Search across multiple directories for historical stability
             # Added subfolders found in finalResults/
             search_dirs = [
-                "results", 
+                output_dir, 
                 "finalResults", 
                 "finalResults/297-301", 
                 "finalResults/302-306",
@@ -445,10 +449,10 @@ def main():
                 except ValueError:
                     continue
         else:
-            files = glob.glob(os.path.join("results", f"{args.runs}_*_holdout_consensus.csv"))
+            files = glob.glob(os.path.join(output_dir, f"{args.runs}_*_holdout_consensus.csv"))
     else:
-        # Iteration 25.0: Dynamically find the 5 most recent consensus files in results/
-        pattern = os.path.join("results", "*_holdout_consensus.csv")
+        # Iteration 25.0: Dynamically find the 5 most recent consensus files in output_dir
+        pattern = os.path.join(output_dir, "*_holdout_consensus.csv")
         all_files = glob.glob(pattern)
         all_files.sort(key=os.path.getmtime, reverse=True)
         
@@ -461,8 +465,8 @@ def main():
     # Re-sort files by filename so they appear in Fold 0, 1, 2, 3, 4 order
     files.sort()
     
-    # Iteration 26.3: Point to the rescue directory in results/
-    rescue_dir = "results/rescue_ensemble"
+    # Iteration 26.3: Point to the rescue directory in output_dir
+    rescue_dir = os.path.join(output_dir, "rescue_ensemble")
     rescue_map = {} # (PatientID, Fold) -> Max_Prob
     if os.path.exists(rescue_dir):
         print(f"Loading High-Resolution Rescue features from {rescue_dir}...")
@@ -510,7 +514,7 @@ def main():
     if not all_dfs:
         print(f"\nError: No evaluation report files found. Cannot create ensemble voting summary.")
         print(f"Expected to find holdout consensus CSV files matching pattern: *_holdout_consensus.csv")
-        print(f"Checked location: results/")
+        print(f"Checked location: {output_dir}/")
         return
         
     # Validate that all files have the same patients and labels
@@ -767,7 +771,7 @@ def main():
         max_run = max(run_ids)
         run_label = f"{min_run}-{max_run}"
         
-    out_name = f"results/ensemble_voting_report_{run_label}.csv"
+    out_name = os.path.join(output_dir, f"ensemble_voting_report_{run_label}.csv")
     
     ensemble_df = pd.DataFrame({
         'PatientID': pids,
@@ -781,13 +785,13 @@ def main():
     print(f"\nDetailed report saved to [{out_name}]({out_name})")
     
     # Also save with explicit holdout_predictions name for clarity
-    holdout_pred_name = f"results/ensemble_voting_holdout_predictions_{run_label}.csv"
+    holdout_pred_name = os.path.join(output_dir, f"ensemble_voting_holdout_predictions_{run_label}.csv")
     ensemble_df.to_csv(holdout_pred_name, index=False)
     print(f"Holdout predictions also saved to [{holdout_pred_name}]({holdout_pred_name})")
 
 
     # Iteration 24.9: Save a concise summary for easy automated consumption
-    summary_name = f"results/ensemble_voting_summary_{run_label}.csv"
+    summary_name = os.path.join(output_dir, f"ensemble_voting_summary_{run_label}.csv")
     summary_data = {
         "Metric": [
             "Recall", "Precision", "Accuracy", "F1_Score",
@@ -861,7 +865,7 @@ def main():
 
     # ===== CONFIDENCE INTERVALS & BOOTSTRAP RESULTS CSV =====
     # Create comprehensive CI report for thesis publication
-    bootstrap_ci_name = f"results/ensemble_voting_bootstrap_ci_{run_label}.csv"
+    bootstrap_ci_name = os.path.join(output_dir, f"ensemble_voting_bootstrap_ci_{run_label}.csv")
     
     ci_data = {
         "Metric": [
@@ -944,18 +948,18 @@ def main():
     print(f"  - Includes: Bootstrap percentile method + Wilson score intervals")
     
     # Generate bootstrap CI visualization with error bars
-    bootstrap_ci_png_path = f"results/ensemble_voting_bootstrap_ci_{run_label}.png"
+    bootstrap_ci_png_path = os.path.join(output_dir, f"ensemble_voting_bootstrap_ci_{run_label}.png")
     plot_bootstrap_confidence_intervals(bootstrap_ci_name, bootstrap_ci_png_path)
     print(f"✓ Bootstrap CI visualization saved: {bootstrap_ci_png_path}")
 
     # ===== ENSEMBLE ROC/PR CURVE VISUALIZATIONS =====
     print(f"\n--- Generating Ensemble ROC/PR Curve Visualizations ---")
-    roc_pr_path = f"results/ensemble_voting_roc_pr_{run_label}.png"
+    roc_pr_path = os.path.join(output_dir, f"ensemble_voting_roc_pr_{run_label}.png")
     plot_ensemble_roc_pr_curves(labels, ensemble_mean_prob, ensemble_max_prob, roc_pr_path)
     print(f"✓ Ensemble ROC/PR curves saved: {roc_pr_path}")
     
     # Threshold analysis for ensemble voting
-    ensemble_threshold_path = f"results/ensemble_voting_threshold_analysis_{run_label}.png"
+    ensemble_threshold_path = os.path.join(output_dir, f"ensemble_voting_threshold_analysis_{run_label}.png")
     plot_threshold_analysis(labels, ensemble_mean_prob, ensemble_threshold_path)
     print(f"✓ Ensemble threshold analysis saved: {ensemble_threshold_path}")
 

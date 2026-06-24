@@ -436,7 +436,7 @@ def update_swa_bn(loader, swa_model, device):
             bags = bags.unsqueeze(0)
             wrapper(bags)
 
-def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=1.5, neg_weight=1.0, gamma=1.0, num_epochs=20, saver_metric="f1", freeze_bn=True, clip_grad=0.0, pct_start=0.1, weight_decay=0.05, learning_rate=2e-5, use_swa=True, swa_start=12, jitter=0.25, pool_type="attention", iter_name="24.9", pretrained_backbone_path=None, freeze_backbone=False, use_focal_loss=True):
+def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=1.5, neg_weight=1.0, gamma=1.0, num_epochs=20, saver_metric="f1", freeze_bn=True, clip_grad=0.0, pct_start=0.1, weight_decay=0.05, learning_rate=2e-5, use_swa=True, swa_start=12, jitter=0.25, pool_type="attention", iter_name="24.9", output_dir="results", pretrained_backbone_path=None, freeze_backbone=False, use_focal_loss=True):
     """
     Train a deep learning model for H. pylori contamination detection using k-fold cross-validation.
     This function implements a complete machine learning pipeline including:
@@ -480,7 +480,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
         - Hardware: Optimized for NVIDIA L40S (48GB VRAM) with batch_size=128 and accumulation_steps=2
     """
     # --- Step 0: Prepare output directories ---
-    results_dir = "results"
+    results_dir = output_dir
     os.makedirs(results_dir, exist_ok=True)
     
     # Get the numeric run ID and the SLURM job ID (if it exists)
@@ -888,10 +888,16 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
         return gpu_normalize(inputs)
     
     # Enable torch.compile for Kernel Fusion (Optimization 5D)
+    # Only compile if backbone is frozen (inference-only), skip during fine-tuning for VRAM
     if hasattr(torch, "compile"):
-        # Disabling compilation for MIL bags due to high VRAM overhead
-        print(f"Skipping torch.compile for {model_name} to conserve VRAM...")
-        # model = torch.compile(model, mode="reduce-overhead")
+        if freeze_backbone and pretrained_backbone_path:
+            try:
+                model = torch.compile(model, mode="reduce-overhead")
+                print(f"✓ Compiled {model_name} with frozen backbone (inference-optimized, kernel fusion enabled)")
+            except Exception as e:
+                print(f"⚠️  torch.compile failed ({type(e).__name__}), proceeding without compilation")
+        else:
+            print(f"Skipping torch.compile for {model_name} (trainable backbone - conserves VRAM during backprop)")
     
     # --- Step 6.2: Dynamic LR Scheduler ---
     # Iteration 24.9: Shift to ReduceLROnPlateau for generalization (Stability Check)
@@ -1866,13 +1872,48 @@ if __name__ == "__main__":
     parser.add_argument("--pool_type", type=str, default="attention", choices=["attention", "max"], 
                         help="MIL aggregation pooling type (Iteration 22)")
     parser.add_argument("--iter", type=str, default="24.9", help="Iteration version for filename prefixing")
+    parser.add_argument("--output_dir", type=str, default="results", 
+                        help="Output directory for model checkpoints and results (default: results/)")
+    parser.add_argument("--backbone_path", type=str, default=None,
+                        help="Path to pre-trained DeepHP backbone weights (enables transfer learning). If not specified, searches results/")
     parser.add_argument("--pretrained_backbone_path", type=str, default=None, 
-                        help="Path to pre-trained backbone weights from DeepHP (enables transfer learning)")
+                        help="[DEPRECATED: use --backbone_path] Path to pre-trained backbone weights from DeepHP")
     parser.add_argument("--freeze_backbone", type=str, default="False", 
                         help="Freeze backbone during HelicoDataSet fine-tuning (True/False)")
     parser.add_argument("--use_focal_loss", type=str, default="True", help="Use Focal Loss (True/False)")
     
     args = parser.parse_args()
+    
+    # Handle backbone path: priority 1=--backbone_path, priority 2=--pretrained_backbone_path (deprecated), priority 3=search output_dir and results/ recursively
+    backbone_path = args.backbone_path or args.pretrained_backbone_path
+    if backbone_path is None:
+        # Search for matching backbone in this order:
+        # 1. Exact match in output_dir with same iteration
+        # 2. Any match in output_dir with any iteration
+        # 3. Exact match in results/ with same iteration
+        # 4. Any match in results/ with any iteration
+        import glob
+        import os
+        
+        search_dirs = [args.output_dir, "results"]
+        
+        # Try exact iteration match first in output_dir, then results/
+        for search_dir in search_dirs:
+            backbone_pattern = f"{search_dir}/**/deephp_backbone_final_*_{args.model_name}_{args.iter}.pth"
+            found_backbones = sorted(glob.glob(backbone_pattern, recursive=True))
+            if found_backbones:
+                backbone_path = found_backbones[-1]  # Get most recent (last alphabetically)
+                break
+        
+        # If no exact iteration match, try any backbone for this model in these directories
+        if backbone_path is None:
+            for search_dir in search_dirs:
+                backbone_pattern = f"{search_dir}/**/deephp_backbone_final_*_{args.model_name}_*.pth"
+                found_backbones = sorted(glob.glob(backbone_pattern, recursive=True))
+                if found_backbones:
+                    backbone_path = found_backbones[-1]  # Get most recent (last alphabetically)
+                    print(f"NOTE: Using backbone from different iteration: {backbone_path}")
+                    break
     
     train_model(
         fold_idx=args.fold, 
@@ -1893,7 +1934,8 @@ if __name__ == "__main__":
         jitter=args.jitter,
         pool_type=args.pool_type,
         iter_name=args.iter,
-        pretrained_backbone_path=args.pretrained_backbone_path,
+        output_dir=args.output_dir,
+        pretrained_backbone_path=backbone_path,
         freeze_backbone=args.freeze_backbone == "True",
         use_focal_loss=args.use_focal_loss == "True"
     )

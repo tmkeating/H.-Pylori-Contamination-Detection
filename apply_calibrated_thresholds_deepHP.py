@@ -133,6 +133,7 @@ def main():
     parser = argparse.ArgumentParser(description='Apply calibrated thresholds to DeepHP predictions')
     parser.add_argument('--run', default='01_34.0', help='Run ID (e.g., 01_34.0)')
     parser.add_argument('--model', default='convnext_tiny', help='Model name')
+    parser.add_argument('--output_dir', default='results', help='Output directory for results (default: results)')
     args = parser.parse_args()
     
     # Parse run ID and iteration from args.run (format: "{run_id}_{iteration}" e.g., "01_34.0")
@@ -140,12 +141,13 @@ def main():
     run_id = run_parts[0] if len(run_parts) > 0 else ""
     iteration = run_parts[1] if len(run_parts) > 1 else ""
     
+    # Use output_dir parameter
+    output_dir = args.output_dir
+    
     # Load calibrated thresholds
-    threshold_file = f'/home/tkeating/model/H.-Pylori-Contamination-Detection/results/{args.run}_calibrated_thresholds.json'
+    threshold_file = Path(output_dir) / f'{args.run}_calibrated_thresholds.json'
     with open(threshold_file) as f:
         thresholds_data = json.load(f)
-    
-    results_dir = '/home/tkeating/model/H.-Pylori-Contamination-Detection/results'
     
     print("="*80)
     print(f"Applying Calibrated Thresholds to {args.run}")
@@ -155,9 +157,9 @@ def main():
     # Process all folds
     all_metrics = []
     for fold_idx in range(5):
-        prob_files = glob.glob(f'{results_dir}/{args.run}_*_f{fold_idx}_{args.model}_probabilities.json')
+        prob_files = glob.glob(str(Path(output_dir) / f'{args.run}_*_f{fold_idx}_{args.model}_probabilities.json'))
         if prob_files:
-            metrics = apply_thresholds_to_fold(fold_idx, prob_files[0], thresholds_data, results_dir, run_id=run_id, iteration=iteration)
+            metrics = apply_thresholds_to_fold(fold_idx, prob_files[0], thresholds_data, output_dir, run_id=run_id, iteration=iteration)
             if metrics:
                 all_metrics.append(metrics)
     
@@ -171,7 +173,7 @@ def main():
         print("\n" + df[['fold', 'threshold', 'accuracy', 'precision', 'recall', 'f1_score', 'balanced_accuracy']].to_string(index=False))
         
         # Save summary
-        summary_csv = Path(results_dir) / f"{args.run}_calibrated_metrics.csv"
+        summary_csv = Path(output_dir) / f"{args.run}_calibrated_metrics.csv"
         df.to_csv(summary_csv, index=False)
         print(f"\n✓ Saved detailed metrics to {summary_csv}")
         

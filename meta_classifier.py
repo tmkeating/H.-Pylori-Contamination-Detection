@@ -317,6 +317,7 @@ import numpy as np
 import argparse
 import os
 import glob
+from pathlib import Path
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import LeaveOneOut
 from sklearn.metrics import classification_report, accuracy_score, confusion_matrix, precision_score, recall_score, f1_score, matthews_corrcoef, cohen_kappa_score
@@ -589,6 +590,7 @@ def main():
     parser.add_argument("--search_dir", required=True)     # Over-sensitive fold outputs
     parser.add_argument("--audit_dir", required=True)      # Specificity-focused fold outputs
     parser.add_argument("--accuracy_dir", required=True)   # Balanced-training fold outputs
+    parser.add_argument("--output_dir", default="results", help="Output directory for results (default: results)")
     args = parser.parse_args()
     
     # Map input directories to their respective clinical profile roles
@@ -627,7 +629,8 @@ def main():
         print(f"\n✅ 100% RECALL ACHIEVED BY FEATURE FUSION.")
 
     # Persist the fusion results
-    results_df.to_csv("meta_fusion_results.csv", index=False)
+    results_output = Path(args.output_dir) / "meta_fusion_results.csv"
+    results_df.to_csv(results_output, index=False)
     
     # Save a concise summary for easy automated consumption
     summary_data = {
@@ -648,7 +651,8 @@ def main():
             metrics['tp'], metrics['fp'], metrics['fn'], metrics['tn']
         ]
     }
-    pd.DataFrame(summary_data).to_csv("meta_classifier_summary.csv", index=False)
+    summary_output = Path(args.output_dir) / "meta_classifier_summary.csv"
+    pd.DataFrame(summary_data).to_csv(summary_output, index=False)
     print(f"\nSummary metrics saved to [meta_classifier_summary.csv](meta_classifier_summary.csv)")
 
 if __name__ == "__main__":

@@ -55,6 +55,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH -o results/visuals_output_%j.txt
 #SBATCH -e results/visuals_error_%j.txt
+# Note: Output directory can be overridden via --output_dir parameter
 
 set -e  # Exit on error
 set +x  # Disable debug output (comment this line to enable)
@@ -106,6 +107,7 @@ else
 fi
 
 # Set defaults for optional parameters (from environment variables)
+OUTPUT_DIR=${OUTPUT_DIR:-results}       # Output directory for all visualizations
 RUN_ID=${RUN_ID:-}           # Empty = use latest run
 FOLD=${FOLD:-0}
 NUM_FOLDS=${NUM_FOLDS:-5}
@@ -118,17 +120,17 @@ BACKBONE_PATH=${BACKBONE_PATH:-}  # Direct path to ensemble backbone (bypasses p
 PIPELINE_MODE=${PIPELINE_MODE:-true}  # Default to true (full visualizations including calibration + dashboard)
 GRADCAM_ONLY=${GRADCAM_ONLY:-false}    # true = Grad-CAM visualizations only
 GENERATE_ENSEMBLE_GRADCAM=${GENERATE_ENSEMBLE_GRADCAM:-false}  # Generate ensemble Grad-CAM after fold completes
-GENERATE_ENSEMBLE_GRADCAM=${GENERATE_ENSEMBLE_GRADCAM:-false}  # Generate ensemble Grad-CAM after fold completes
 
 # Function to detect model name from checkpoint files
 detect_model_from_checkpoints() {
     local run_id="$1"
     local fold_idx="${2:-0}"
+    local output_dir="${3:-results}"
     
     # If run_id is empty, find the latest run
     if [ -z "$run_id" ]; then
         # Get latest model checkpoint across all folds
-        local latest_ckpt=$(ls -t results/*_f*_*_model_brain.pth 2>/dev/null | head -1)
+        local latest_ckpt=$(ls -t $output_dir/*_f*_*_model_brain.pth 2>/dev/null | head -1)
         if [ -z "$latest_ckpt" ]; then
             echo "convnext_tiny"  # Fallback default
             return
@@ -137,12 +139,12 @@ detect_model_from_checkpoints() {
     fi
     
     # Find checkpoint for this run and fold
-    local ckpt_pattern="results/${run_id}_*_*_f${fold_idx}_*_model_brain.pth"
+    local ckpt_pattern="$output_dir/${run_id}_*_*_f${fold_idx}_*_model_brain.pth"
     local ckpt=$(ls $ckpt_pattern 2>/dev/null | head -1)
     
     if [ -z "$ckpt" ]; then
         # Fallback: try any fold for this run
-        ckpt_pattern="results/${run_id}_*_*_f*_*_model_brain.pth"
+        ckpt_pattern="$output_dir/${run_id}_*_*_f*_*_model_brain.pth"
         ckpt=$(ls $ckpt_pattern 2>/dev/null | head -1)
     fi
     
@@ -167,6 +169,15 @@ source $VENV_ROOT/bin/activate
 # Parse command-line arguments (override environment variables)
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --OUTPUT_DIR=*|--output_dir=*)
+            OUTPUT_DIR="${1#*=}"
+            shift
+            ;;
+        --OUTPUT_DIR|--output_dir)
+            shift
+            OUTPUT_DIR="$1"
+            shift
+            ;;
         --RUN_ID=*|--run_id=*)
             RUN_ID="${1#*=}"
             shift
@@ -253,8 +264,8 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Create results directory
-mkdir -p results
+# Create output directory
+mkdir -p "$OUTPUT_DIR"
 
 # Auto-detect dataset from backbone file if provided
 if [ -n "$BACKBONE_PATH" ] && grep -q "deephp" <<< "$BACKBONE_PATH"; then
@@ -266,14 +277,13 @@ fi
 
 # Auto-detect model name if not explicitly provided
 if [ -z "$MODEL" ]; then
-    MODEL=$(detect_model_from_checkpoints "$RUN_ID" "$FOLD")
+    MODEL=$(detect_model_from_checkpoints "$RUN_ID" "$FOLD" "$OUTPUT_DIR")
     echo "✓ Auto-detected model: $MODEL"
 fi
 
 echo "========================================================================="
 echo "H. Pylori Visual Report Generation"
-echo "========================================================================="
-echo "RUN_ID: ${RUN_ID:-latest}"
+echo "========================================================================="echo "OUTPUT_DIR: $OUTPUT_DIR"echo "RUN_ID: ${RUN_ID:-latest}"
 if [ "$USE_ENSEMBLE_BACKBONE" = "true" ]; then
     echo "BACKBONE: Ensemble Weighted (Iteration: $ITERATION)"
 else
@@ -312,6 +322,7 @@ fi
 PYTHON_CMD="$PYTHON_CMD --num_folds $NUM_FOLDS"
 PYTHON_CMD="$PYTHON_CMD --dataset $DATASET"
 PYTHON_CMD="$PYTHON_CMD --model_name $MODEL"
+PYTHON_CMD="$PYTHON_CMD --output_dir $OUTPUT_DIR"
 
 if [ -n "$RUN_ID" ]; then
     PYTHON_CMD="$PYTHON_CMD --run_id $RUN_ID"
@@ -332,7 +343,7 @@ if $PYTHON_CMD; then
     echo ""
     echo "========================================================================="
     echo "✓ Visual report generation complete!"
-    echo "  Outputs saved to: results/*_gradcam_samples/"
+    echo "  Outputs saved to: $OUTPUT_DIR/*_gradcam_samples/"
     echo "  Exit Code: $EXIT_CODE"
     echo "========================================================================="
     
@@ -344,14 +355,14 @@ if $PYTHON_CMD; then
         ENSEMBLE_CMD="sbatch -p pg1tfg12"
         ENSEMBLE_CMD="$ENSEMBLE_CMD --job-name=h_pylori_ensemble_gradcam"
         ENSEMBLE_CMD="$ENSEMBLE_CMD -n 1 -N 1 -t 0-04:00 --mem=32G --gres=gpu:1"
-        ENSEMBLE_CMD="$ENSEMBLE_CMD -o results/ensemble_gradcam_%j.out"
-        ENSEMBLE_CMD="$ENSEMBLE_CMD -e results/ensemble_gradcam_%j.err"
+        ENSEMBLE_CMD="$ENSEMBLE_CMD -o $OUTPUT_DIR/ensemble_gradcam_%j.out"
+        ENSEMBLE_CMD="$ENSEMBLE_CMD -e $OUTPUT_DIR/ensemble_gradcam_%j.err"
         
-        # Build Grad-CAM command
+        # Build Grad-CAM command with output directory
         if [ -n "$BACKBONE_PATH" ]; then
-            ENSEMBLE_CMD="$ENSEMBLE_CMD --wrap='python3 generate_deephp_gradcam.py --backbone_path $BACKBONE_PATH --fold 0-4 --model $MODEL'"
+            ENSEMBLE_CMD="$ENSEMBLE_CMD --wrap='python3 generate_deephp_gradcam.py --output_dir $OUTPUT_DIR --backbone_path $BACKBONE_PATH --fold 0-4 --model $MODEL'"
         else
-            ENSEMBLE_CMD="$ENSEMBLE_CMD --wrap='python3 generate_deephp_gradcam.py --run ${RUN_ID:-latest} --fold 0-4 --model $MODEL'"
+            ENSEMBLE_CMD="$ENSEMBLE_CMD --wrap='python3 generate_deephp_gradcam.py --output_dir $OUTPUT_DIR --run ${RUN_ID:-latest} --fold 0-4 --model $MODEL'"
         fi
         
         # If running under SLURM, add dependency on current job
@@ -383,7 +394,7 @@ else
     echo "=========================================================================" >&2
     echo "ERROR: Visual report generation failed with exit code $EXIT_CODE" >&2
     echo "=========================================================================" >&2
-    echo "Check output log for details: ${OUTPUT_LOG:-results/visuals_output_*.txt}" >&2
+    echo "Check output log for details: ${OUTPUT_LOG:-$OUTPUT_DIR/visuals_output_*.txt}" >&2
     echo "End Time: $(date)" >&2
     exit $EXIT_CODE
 fi

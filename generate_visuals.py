@@ -1266,14 +1266,14 @@ def full_visual_report(RUN_ID, MODEL_PATH, MODEL_NAME="convnext_tiny", fold_idx=
 
     print(f"Visual report finished. Results in results/{full_prefix}_*")
 
-def get_latest_run_id():
-    """Find the latest run ID from results directory by parsing model filenames."""
+def get_latest_run_id(output_dir="results"):
+    """Find the latest run ID from output directory by parsing model filenames."""
     import re
-    if not os.path.exists("results"):
+    if not os.path.exists(output_dir):
         return None
     
     run_ids = set()
-    for filename in os.listdir("results"):
+    for filename in os.listdir(output_dir):
         # Match pattern: {run_id}_{anything}_model_brain.pth
         # Run ID is just the leading digits
         match = re.match(r"^(\d+)_.*_model_brain\.pth$", filename)
@@ -1505,6 +1505,8 @@ def find_model_path(run_id, fold, model_name, slurm_id=None):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="H. Pylori Visual Generation")
     parser.add_argument("--run_id", type=str, default=None, help="Run ID (e.g., 313). Defaults to latest run.")
+    parser.add_argument("--output_dir", type=str, default="results", 
+                       help="Output directory for model checkpoints and results (default: results/)")
     parser.add_argument("--fold", type=int, default=0, help="Fold index (default: 0)")
     parser.add_argument("--num_folds", type=int, default=5, help="Total number of folds")
     parser.add_argument("--model_name", type=str, default="convnext_tiny", choices=["resnet50", "convnext_tiny", "convnext_small"],
@@ -1568,9 +1570,9 @@ if __name__ == "__main__":
     # If no run_id provided, use the latest one
     run_id = args.run_id
     if run_id is None:
-        run_id = get_latest_run_id()
+        run_id = get_latest_run_id(args.output_dir)
         if run_id is None:
-            print("Error: No run ID provided and no models found in results directory")
+            print(f"Error: No run ID provided and no models found in {args.output_dir} directory")
             sys.exit(1)
         print(f"Using latest run: {run_id}")
     

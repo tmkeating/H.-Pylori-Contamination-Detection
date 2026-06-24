@@ -130,10 +130,38 @@ PROFILE=${PROFILE:-"SEARCHER"}
 PROFILE_DEEPHP=${PROFILE_DEEPHP:-"$PROFILE"}  # Default to PROFILE if not specified
 ITER=${ITER:-"31.0"}
 FOLD_BATCH_SIZE=${FOLD_BATCH_SIZE:-"0"}  # 0=all parallel (default), N=batch in groups of N (e.g., 3 = 3+2)
-PRETRAINED_BACKBONE=$(ls -t results/deephp_backbone_final_*_${MODEL_NAME}_${ITER}.pth 2>/dev/null | head -1)
-if [ -z "$PRETRAINED_BACKBONE" ]; then
-    PRETRAINED_BACKBONE="results/deephp_backbone_final_${MODEL_NAME}_${ITER}.pth"  # Fallback (won't exist yet)
+
+# ===================================================================
+# OUTPUT DIRECTORY SETUP
+# ===================================================================
+# Naming convention: transfer_{MODEL}_{ITER}_{PROFILE}
+OUTPUT_DIR="results/transfer_${MODEL_NAME}_${ITER}_${PROFILE}"
+mkdir -p "$OUTPUT_DIR"
+
+echo "Output directory: $OUTPUT_DIR"
+echo ""
+
+# Backbone Loading with Smart Fallback
+# Priority 1: --backbone_location flag if provided
+# Priority 2: Search in results/ directory for deephp_backbone_final_*_{MODEL}_{ITER}.pth
+# Priority 3: Use pattern (will fail later if doesn't exist)
+BACKBONE_LOCATION=${BACKBONE_LOCATION:-""}
+
+if [ -n "$BACKBONE_LOCATION" ] && [ -f "$BACKBONE_LOCATION" ]; then
+    PRETRAINED_BACKBONE="$BACKBONE_LOCATION"
+    echo "Using specified backbone: $PRETRAINED_BACKBONE"
+else
+    # Search in results/ for first matching backbone
+    PRETRAINED_BACKBONE=$(ls -t results/deephp_backbone_final_*_${MODEL_NAME}_${ITER}.pth 2>/dev/null | head -1)
+    if [ -z "$PRETRAINED_BACKBONE" ]; then
+        # Fallback pattern
+        PRETRAINED_BACKBONE="results/deephp_backbone_final_${MODEL_NAME}_${ITER}.pth"
+        echo "Note: Using backbone pattern (will verify exists when needed): $PRETRAINED_BACKBONE"
+    else
+        echo "Located backbone: $PRETRAINED_BACKBONE"
+    fi
 fi
+
 FREEZE_BACKBONE=${FREEZE_BACKBONE:-"False"}
 SKIP_PRETRAINING=${SKIP_PRETRAINING:-"False"}
 SKIP_TRANSFER_LEARNING=${SKIP_TRANSFER_LEARNING:-"False"}
@@ -351,7 +379,7 @@ else
     PRESYNC_SBATCH_FLAGS="--dependency=afterok:$DEEPHP_SUMMARY_JOB_ID --nodelist=dcc-gr1"
 fi
 
-PRE_SYNC_JOB=$(sbatch $PRESYNC_SBATCH_FLAGS -p pg1tfg12 --job-name=transfer_presync --output=results/slurm_transfer_presync_%j.txt <<'PRESYNC_EOF'
+PRE_SYNC_JOB=$(sbatch $PRESYNC_SBATCH_FLAGS -p pg1tfg12 --job-name=transfer_presync --output=$OUTPUT_DIR/slurm_transfer_presync_%j.txt <<'PRESYNC_EOF'
 #!/bin/bash
 #SBATCH -p pg1tfg12
 #SBATCH -t 0-01:00
@@ -641,13 +669,41 @@ do
         # First batch or all-parallel mode: depend on pre-sync
         FOLD_DEPENDENCY="$PRE_SYNC_DEPENDENCY"
     fi
+    
+    # FIND BACKBONE BEFORE SUBMITTING JOB (so it runs on login node with access to results/)
+    BACKBONE_FILE=""
+    
+    # Try exact iteration match first
+    for f in results/deephp_backbone_final_*_${MODEL_NAME}_${ITER}.pth results/*/deephp_backbone_final_*_${MODEL_NAME}_${ITER}.pth; do
+        if [ -f "$f" ]; then
+            BACKBONE_FILE="$f"
+            break
+        fi
+    done
+    
+    # If no exact match, try any iteration of this model
+    if [ -z "$BACKBONE_FILE" ]; then
+        for f in results/deephp_backbone_final_*_${MODEL_NAME}_*.pth results/*/deephp_backbone_final_*_${MODEL_NAME}_*.pth; do
+            if [ -f "$f" ]; then
+                BACKBONE_FILE="$f"
+            fi
+        done
+    fi
+    
+    # Show what we found
+    if [ -n "$BACKBONE_FILE" ]; then
+        echo "  ✓ Found backbone: $BACKBONE_FILE"
+    else
+        echo "  ⚠️  No backbone found - will use ImageNet pre-trained"
+    fi
+    
     echo "Submitting fold $FOLD..."
     
     JOB_OUT=$(sbatch -p pg1tfg12 \
         --dependency=$FOLD_DEPENDENCY \
         --job-name=transfer_f${FOLD} \
-        --output=results/slurm_transfer_f${FOLD}_%j.txt \
-        --error=results/slurm_transfer_error_f${FOLD}_%j.txt \
+        --output=$OUTPUT_DIR/slurm_transfer_f${FOLD}_%j.txt \
+        --error=$OUTPUT_DIR/slurm_transfer_error_f${FOLD}_%j.txt \
         --ntasks=1 \
         --cpus-per-task=4 \
         --gres=gpu:l40s:1 --gres=shard:l40s:12000 \
@@ -676,18 +732,20 @@ export POOL_TYPE=$POOL_TYPE
 export ITER=$ITER
 export SKIP_PRETRAINING=$SKIP_PRETRAINING
 export FREEZE_BACKBONE=$FREEZE_BACKBONE
+export BACKBONE_PATH=$BACKBONE_PATH
+export OUTPUT_DIR=$OUTPUT_DIR
 
 # Activate virtual environment with dependencies
 source $VENV_ROOT/bin/activate
 
 # Dynamically resolve project directory
-PROJECT_DIR=$(python3 -c "import os; print(os.path.dirname(os.path.abspath('${PWD}/train.py')))" 2>/dev/null || echo "/home/tkeating/model/H.-Pylori-Contamination-Detection")
-cd "$PROJECT_DIR"
+PROJECT_DIR=\$(python3 -c "import os; print(os.path.dirname(os.path.abspath('$PWD/train.py')))" 2>/dev/null || echo "/home/tkeating/model/H.-Pylori-Contamination-Detection")
+cd "\$PROJECT_DIR"
 
 # Force all folds to use GPU 0 for memory consolidation
 export CUDA_VISIBLE_DEVICES=0
 
-# Build train.py command with conditional backbone path
+# Build train.py command with optional backbone path
 TRAIN_CMD="python3 -u train.py \
     --fold \$FOLD \
     --num_folds 5 \
@@ -705,17 +763,12 @@ TRAIN_CMD="python3 -u train.py \
     --swa_start \$SWA_START \
     --jitter \$JITTER \
     --pool_type \$POOL_TYPE \
-    --iter \$ITER"
+    --iter \$ITER \
+    --output_dir \$OUTPUT_DIR"
 
-# Always include backbone path if it exists (whether from current pre-training or previous run)
-BACKBONE_FILE=\$(ls -t results/deephp_backbone_final_*_\${MODEL_NAME}_\${ITER}.pth 2>/dev/null | head -1)
-if [ -n "\$BACKBONE_FILE" ]; then
-    TRAIN_CMD="\$TRAIN_CMD --pretrained_backbone_path \$BACKBONE_FILE"
-    echo "[DEBUG] Using pre-trained backbone: \$BACKBONE_FILE"
-else
-    echo "WARNING: No pre-trained backbone found for MODEL_NAME=\$MODEL_NAME, ITER=\$ITER"
-    echo "Expected pattern: results/deephp_backbone_final_*_\${MODEL_NAME}_\${ITER}.pth"
-    echo "Will initialize from ImageNet pre-trained weights instead"
+# Add backbone path if found (passed from login node)
+if [ -n "\$BACKBONE_PATH" ]; then
+    TRAIN_CMD="\$TRAIN_CMD --backbone_path \$BACKBONE_PATH"
 fi
 
 TRAIN_CMD="\$TRAIN_CMD --freeze_backbone \$FREEZE_BACKBONE"
@@ -844,8 +897,8 @@ SUMMARY_JOB_ID=$(sbatch --dependency=$DEPENDENCY_STRING \
     --cpus-per-task=1 \
     --gres=gpu:l40s:1 --gres=shard:l40s:12000 \
     --job-name=transfer_summary \
-    --output=results/slurm_transfer_summary_%j.txt \
-    --error=results/slurm_transfer_summary_error_%j.txt \
+    --output=$OUTPUT_DIR/slurm_transfer_summary_%j.txt \
+    --error=$OUTPUT_DIR/slurm_transfer_summary_error_%j.txt \
     <<'SUMMARY_EOF'
 #!/bin/bash
 #SBATCH -p pg1tfg12
@@ -861,12 +914,12 @@ echo "All fine-tuning folds complete. Generating comprehensive ensemble analysis
 echo "=========================================================================="
 echo ""
 
-# Extract iteration from latest checkpoint files
+# Extract iteration from latest checkpoint files in OUTPUT_DIR
 ITER=$(python3 -c "
 import glob
 from pathlib import Path
-# Search for model files matching the current model architecture
-model_pattern = 'results/*_${MODEL_NAME}_model_brain.pth'
+# Search for model files in OUTPUT_DIR
+model_pattern = '$OUTPUT_DIR/*_${MODEL_NAME}_model_brain.pth'
 files = sorted(glob.glob(model_pattern))
 if files:
     # Extract iteration from filename like: 31_25.0_107840_f0_convnext_tiny_model_brain.pth
@@ -885,11 +938,11 @@ echo ""
 
 # Run performance summarization
 echo "Step 1: Running cross-validation performance summary..."
-python3 summarize_results.py --dir results --last 5 2>&1
+python3 summarize_results.py --dir $OUTPUT_DIR --last 5 2>&1
 
 echo ""
 echo "Step 2: Running HelicoDataSet ensemble voting and hybrid fusion analysis..."
-python3 ensemble_voting.py 2>&1
+python3 ensemble_voting.py --dir $OUTPUT_DIR 2>&1
 
 echo ""
 echo "=========================================================================="
@@ -932,8 +985,8 @@ VISUAL_JOB_ID=$(sbatch --dependency=afterok:$SUMMARY_JOB_ID \
     --cpus-per-task=1 \
     --gres=gpu:l40s:1 --gres=shard:l40s:12000 \
     --job-name=transfer_visuals \
-    --output=results/slurm_transfer_visuals_%j.txt \
-    --error=results/slurm_transfer_visuals_error_%j.txt \
+    --output=$OUTPUT_DIR/slurm_transfer_visuals_%j.txt \
+    --error=$OUTPUT_DIR/slurm_transfer_visuals_error_%j.txt \
     <<'VISUAL_EOF'
 #!/bin/bash
 #SBATCH -p pg1tfg12
@@ -948,12 +1001,12 @@ echo "Generating comprehensive visual reports for model analysis..."
 echo "=========================================================================="
 echo ""
 
-# Extract run ID (iteration) from latest checkpoint
+# Extract run ID (iteration) from latest checkpoint in OUTPUT_DIR
 RUN_ID=$(python3 -c "
 import glob
 from pathlib import Path
-# Search for model files matching the current model architecture
-model_pattern = 'results/*_${MODEL_NAME}_model_brain.pth'
+# Search for model files in OUTPUT_DIR
+model_pattern = '$OUTPUT_DIR/*_${MODEL_NAME}_model_brain.pth'
 files = sorted(glob.glob(model_pattern))
 if files:
     # Extract run_id from filename like: 31_25.0_107840_f0_convnext_tiny_model_brain.pth
@@ -975,7 +1028,7 @@ echo "Step 1: Generating novel visualizations (calibration curve + performance d
 echo "  (Skipping ROC/PR/confusion matrix - already generated during training)"
 
 # Build visualization command with conditional Grad-CAM flag
-VISUAL_CMD="python3 generate_visuals.py --run_id $RUN_ID --model_name $MODEL_NAME --dataset helicodataset"
+VISUAL_CMD="python3 generate_visuals.py --run_id $RUN_ID --model_name $MODEL_NAME --dataset helicodataset --output_dir $OUTPUT_DIR"
 if [ "$GRADCAM_ONLY" = "True" ] || [ "$GRADCAM_ONLY" = "true" ]; then
     echo "  [Grad-CAM Only Mode: Skipping other visualizations]"
     VISUAL_CMD="$VISUAL_CMD --gradcam_only"

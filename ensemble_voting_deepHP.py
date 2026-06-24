@@ -33,16 +33,15 @@ from sklearn.metrics import (
 )
 
 
-def load_fold_predictions(run_id, model_name='convnext_tiny'):
+def load_fold_predictions(run_id, output_dir='results', model_name='convnext_tiny'):
     """
     Load predictions and labels for all folds from corrected JSON files.
     Uses the new naming convention: {run_id}_f{fold_idx}_predictions_corrected.json
     """
-    results_dir = '/home/tkeating/model/H.-Pylori-Contamination-Detection/results'
     
     fold_data = {}
     for fold_idx in range(5):
-        pred_file = Path(results_dir) / f"{run_id}_f{fold_idx}_predictions_corrected.json"
+        pred_file = Path(output_dir) / f"{run_id}_f{fold_idx}_predictions_corrected.json"
         if not pred_file.exists():
             print(f"WARNING: {pred_file} not found, skipping fold {fold_idx}")
             continue
@@ -214,10 +213,11 @@ def main():
     parser.add_argument('--strategy', default='f1', 
                        choices=['uniform', 'accuracy', 'f1', 'balanced_accuracy', 'inverse_difficulty'],
                        help='Weighting strategy')
+    parser.add_argument('--output_dir', default='results', help='Output directory for results (default: results)')
     args = parser.parse_args()
     
     # Load predictions
-    fold_data = load_fold_predictions(args.run)
+    fold_data = load_fold_predictions(args.run, output_dir=args.output_dir)
     
     if len(fold_data) < 5:
         print(f"ERROR: Only found {len(fold_data)} folds, expected 5")
@@ -266,8 +266,7 @@ def main():
     print(f"  TP: {tp:.0f}, FP: {fp:.0f}, FN: {fn:.0f}, TN: {tn:.0f}")
     
     # Save ensemble metrics
-    output_csv = Path('/home/tkeating/model/H.-Pylori-Contamination-Detection/results') / \
-                 f"{args.run}_ensemble_metrics_{args.strategy}.csv"
+    output_csv = Path(args.output_dir) / f"{args.run}_ensemble_metrics_{args.strategy}.csv"
     
     ensemble_df = pd.DataFrame([{
         'strategy': args.strategy,
@@ -287,8 +286,7 @@ def main():
     print(f"\n✓ Saved ensemble metrics to {output_csv}")
     
     # Save weights
-    weights_file = Path('/home/tkeating/model/H.-Pylori-Contamination-Detection/results') / \
-                   f"{args.run}_ensemble_weights_{args.strategy}.json"
+    weights_file = Path(args.output_dir) / f"{args.run}_ensemble_weights_{args.strategy}.json"
     
     weights_data = {
         'run_id': args.run,
@@ -326,8 +324,7 @@ def main():
     print("\n" + comp_df.to_string(index=False))
     
     # Save comparison
-    comp_csv = Path('/home/tkeating/model/H.-Pylori-Contamination-Detection/results') / \
-               f"{args.run}_ensemble_strategy_comparison.csv"
+    comp_csv = Path(args.output_dir) / f"{args.run}_ensemble_strategy_comparison.csv"
     comp_df.to_csv(comp_csv, index=False)
     print(f"\n✓ Saved strategy comparison to {comp_csv}")
 

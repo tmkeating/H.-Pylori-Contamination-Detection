@@ -27,7 +27,7 @@ from model import get_model
 from torchvision.transforms import v2
 import gc
 
-def rescue_inference(model_path, output_csv, target_patients=None, stride=128):
+def rescue_inference(model_path, output_dir="results", target_patients=None, stride=128):
     """
     Perform a High-Resolution 'Rescue' Inference for sparse bacteremia.
 
@@ -189,17 +189,27 @@ def rescue_inference(model_path, output_csv, target_patients=None, stride=128):
             torch.cuda.empty_cache()
 
     df = pd.DataFrame(results)
+    
+    # Ensure output directory exists
+    from pathlib import Path
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+    
+    # Generate output filename with model fold information
+    model_name = Path(model_path).stem  # e.g., "302_25.1_106069_f0_convnext_tiny_model_brain"
+    output_csv = Path(output_dir) / f"rescue_{model_name}.csv"
+    
     df.to_csv(output_csv, index=False)
     print(f"--- Rescue Completed. Saved to {output_csv} ---")
 
 if __name__ == "__main__":
     import argparse
+    from pathlib import Path
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, required=True)
-    parser.add_argument("--output", type=str, required=True)
+    parser.add_argument("--output_dir", type=str, default="results", help="Output directory (default: results)")
     parser.add_argument("--stride", type=int, default=128)
     parser.add_argument("--targets", type=str, default="B22-206,B22-262,B22-69,B22-81,B22-85,B22-01")
     args = parser.parse_args()
     
     target_list = args.targets.split(",")
-    rescue_inference(args.model, args.output, target_patients=target_list, stride=args.stride)
+    rescue_inference(args.model, output_dir=args.output_dir, target_patients=target_list, stride=args.stride)

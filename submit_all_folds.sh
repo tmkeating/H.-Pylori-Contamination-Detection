@@ -41,6 +41,11 @@ PROFILE=${PROFILE:-"AUDITOR"}
 ITER=${ITER:-"26.0"}
 BATCH_SIZE=${BATCH_SIZE:-"0"}  # 0=all parallel (default), N=batch in groups of N
 
+# Calculate RUN_ID and OUTPUT_DIR for folder-based organization
+RUN_ID=$(printf "%02d" $(ls -d results/* 2>/dev/null | grep -c .) 2>/dev/null || echo "01")
+OUTPUT_DIR="results/transfer_${MODEL_NAME}_${ITER}_${PROFILE,,}"
+mkdir -p "$OUTPUT_DIR"
+
 # 1. Source the Model Profiles (Central Source of Truth)
 if [ -f "profiles.sh" ]; then
     source profiles.sh
@@ -89,7 +94,7 @@ echo ""
 echo "Submitting pre-sync job to populate scratch directory before training..."
 # Submit a pre-sync job that syncs data once, blocking until complete
 # All fold jobs will depend on this pre-sync job to avoid concurrent sync/training operations
-PRE_SYNC_JOB=$(sbatch -p pg1tfg12 --export=ALL,PRE_SYNC_ONLY=1 run_h_pylori.sh)
+PRE_SYNC_JOB=$(sbatch -p pg1tfg12 --export=ALL,PRE_SYNC_ONLY=1 -o "$OUTPUT_DIR/slurm_presync_%j.txt" -e "$OUTPUT_DIR/slurm_presync_error_%j.txt" run_h_pylori.sh)
 PRE_SYNC_JOB_ID=$(echo $PRE_SYNC_JOB | awk '{print $4}')
 echo "Pre-sync job ID: $PRE_SYNC_JOB_ID"
 PRE_SYNC_DEPENDENCY="afterok:$PRE_SYNC_JOB_ID"
@@ -124,7 +129,7 @@ do
     # Iteration 21.3: Expanded export list to include Stability parameters
     # CHANGE: Fold jobs now depend on pre-sync job to avoid concurrent rsync operations
     # CHANGE: Added SKIP_SYNC=1 for fold jobs so they don't re-sync (pre-sync job already did it)
-    JOB_OUT=$(sbatch -p pg1tfg12 --overlap --dependency=$FOLD_DEPENDENCY -v FOLD=$FOLD,MODEL_NAME=$MODEL_NAME,NEG_WEIGHT=$NEG_WEIGHT,POS_WEIGHT=$POS_WEIGHT,GAMMA=$GAMMA,NUM_EPOCHS=$NUM_EPOCHS,FREEZE_BN=$FREEZE_BN,CLIP_GRAD=$CLIP_GRAD,PCT_START=$PCT_START,SAVER_METRIC=$SAVER_METRIC,WEIGHT_DECAY=$WEIGHT_DECAY,USE_SWA=$USE_SWA,SWA_START=$SWA_START,JITTER=$JITTER,ITER=$ITER,SKIP_SYNC=1 run_h_pylori.sh)
+    JOB_OUT=$(sbatch -p pg1tfg12 --overlap --dependency=$FOLD_DEPENDENCY -o "$OUTPUT_DIR/slurm_fold${FOLD}_%j.txt" -e "$OUTPUT_DIR/slurm_fold${FOLD}_error_%j.txt" -v FOLD=$FOLD,MODEL_NAME=$MODEL_NAME,NEG_WEIGHT=$NEG_WEIGHT,POS_WEIGHT=$POS_WEIGHT,GAMMA=$GAMMA,NUM_EPOCHS=$NUM_EPOCHS,FREEZE_BN=$FREEZE_BN,CLIP_GRAD=$CLIP_GRAD,PCT_START=$PCT_START,SAVER_METRIC=$SAVER_METRIC,WEIGHT_DECAY=$WEIGHT_DECAY,USE_SWA=$USE_SWA,SWA_START=$SWA_START,JITTER=$JITTER,ITER=$ITER,SKIP_SYNC=1 run_h_pylori.sh)
     echo "$JOB_OUT"
     JOB_ID=$(echo $JOB_OUT | awk '{print $4}')
     FOLD_IDS[$FOLD]="$JOB_ID"  # Store for batch dependency lookup
@@ -186,8 +191,9 @@ sbatch --dependency=$DEPENDENCY_STRING \
     --mem=20G \
     --cpus-per-task=6 \
     --job-name=HPy_FinalSummary \
-    --output=results/slurm_summary_%j.txt \
-    --error=results/slurm_summary_error_%j.txt \
+    --output=$OUTPUT_DIR/slurm_summary_%j.txt \
+    --error=$OUTPUT_DIR/slurm_summary_error_%j.txt \
+    --export=OUTPUT_DIR=$OUTPUT_DIR,ITER=$ITER \
     <<'SUMMARY_EOF'
 #!/bin/bash
 #SBATCH -p dcca40
@@ -232,7 +238,7 @@ echo ""
 echo "=========================================================================="
 echo "Step 1: Running cross-validation performance summary..."
 echo "=========================================================================="
-python3 summarize_results.py --dir results --last 5 2>&1
+python3 summarize_results.py --dir "$OUTPUT_DIR" --last 5 2>&1
 
 echo ""
 echo "=========================================================================="
@@ -247,20 +253,20 @@ echo ""
 #
 # Primary outputs: hybrid_ensemble_*.csv with 92.11% accuracy, 100% precision
 # Comparison outputs: ensemble_voting_*.csv and meta_classifier_*.csv for analysis
-python3 ensemble_voting.py 2>&1
+python3 ensemble_voting.py --dir "$OUTPUT_DIR" 2>&1
 
 echo ""
 echo "=========================================================================="
 echo "Clinical analysis and hybrid ensemble fusion completed."
 echo "=========================================================================="
 echo "✅ Primary results (RECOMMENDED):"
-echo "   - results/hybrid_ensemble_results_*.csv - Patient predictions"
-echo "   - results/hybrid_ensemble_summary_*.csv - Performance metrics (92.11% accuracy, 100% precision)"
-echo "   - results/hybrid_ensemble_roc_pr_*.png - ROC/PR curves"
+echo "   - $OUTPUT_DIR/hybrid_ensemble_results_*.csv - Patient predictions"
+echo "   - $OUTPUT_DIR/hybrid_ensemble_summary_*.csv - Performance metrics (92.11% accuracy, 100% precision)"
+echo "   - $OUTPUT_DIR/hybrid_ensemble_roc_pr_*.png - ROC/PR curves"
 echo ""
 echo "📊 Comparison outputs (for analysis):"
-echo "   - results/ensemble_voting_summary_*.csv - Base voting method"
-echo "   - results/meta_classifier_summary_*.csv - Meta-classifier method"
+echo "   - $OUTPUT_DIR/ensemble_voting_summary_*.csv - Base voting method"
+echo "   - $OUTPUT_DIR/meta_classifier_summary_*.csv - Meta-classifier method"
 echo "=========================================================================="
 echo ""
 
