@@ -1,18 +1,64 @@
 """
-# Rescue Inference Utility
-# -------------------------
-# Performs High-Resolution inference with a dense sliding window (e.g., Stride=128) 
-# to capture sparse bacterial signals missed by standard (250-stride) screening.
-#
-# Usage:
-#   python3 rescue_inference.py --model path/to/model.pth --output results.csv --stride 128 --targets B22-81,B22-206
-#
-# Arguments:
-#   --model:   Path to the .pth model weights.
-#   --output:  CSV file to save the extracted features.
-#   --stride:  Window overlap density (Default 128). Lower is denser/slower.
-#   --targets: Comma-separated list of PatientIDs to process (or 'all').
-# -------------------------
+Rescue Inference Utility - High-Resolution Bacterial Signal Recovery
+=====================================================================
+
+PURPOSE:
+--------
+Performs high-resolution inference with dense sliding-window extraction (Stride=128) 
+to capture sparse bacterial signals that may be missed by standard screening (Stride=250).
+Designed specifically for rescue operations on misclassified or borderline patients.
+
+CLINICAL RATIONALE:
+-------------------
+Standard screening uses Stride=250 (4-pixel overlap), which can "skip over" very sparse 
+bacterial clusters (e.g., 5-10 organisms in an entire slide). Dense-stride rescanning 
+with Stride=128 ensures 50% overlap between adjacent windows, guaranteeing that no 
+bacterium is bisected by a patch boundary in a way that hides its morphology.
+
+TECHNICAL APPROACH:
+-------------------
+- **Dense Windowing**: Stride=128 creates overlapping patches for maximum signal coverage
+- **16-way Contrast-Boosted TTA**: Test-time augmentation with:
+  * 6 base rotations (0°, 90°, 180°, 270°, H-flip, V-flip)
+  * 1.1x contrast boost (targets faint organisms with weak staining)
+  * Combined transformations (rotations + flips, rotations + contrast, etc.)
+- **Consensus Voting**: Average of 16 TTA predictions anchors the final score, 
+  reducing noise and improving robustness to stain variation
+
+USAGE:
+------
+  # Basic usage (process all patients)
+  python3 rescue_inference.py --model path/to/model.pth \\
+    --output_dir results/ --stride 128
+
+  # Target specific misclassified patients
+  python3 rescue_inference.py --model path/to/model.pth \\
+    --output_dir results/ --stride 128 \\
+    --targets B22-12_1,B22-206_0,B22-262_0,B22-69_1,B22-81_1,B22-85_0,B22-89_0
+
+  # SLURM submission with environment variables
+  MODEL_DIR="finalResults/convnext_tiny_pretrained_backbone_34.4_weight_1.5_gamma_3.0_focalLoss_false" \\
+    FOLDS="01_34.4_9077_f0 01_34.4_9078_f1 01_34.4_9079_f2 01_34.4_9080_f3 01_34.4_9081_f4" \\
+    TARGETS="B22-12_1,B22-206_0,B22-262_0,B22-69_1,B22-81_1,B22-85_0,B22-89_0" \\
+    OUTPUT_DIR="finalResults/convnext_tiny_pretrained_backbone_34.4_weight_1.5_gamma_3.0_focalLoss_false/rescue_ensemble" \\
+    STRIDE=128 \\
+    sbatch submit_rescue.sh
+
+ARGUMENTS:
+----------
+  --model        Path to trained model weights (.pth file)
+  --output_dir   Directory to save rescue_*.csv outputs (default: results/)
+  --stride       Dense window overlap stride (default: 128, range: 1-250)
+                 Lower values = denser coverage but slower execution
+  --targets      Comma-separated list of PatientIDs to process (e.g., B22-12_1,B22-206_0)
+                 Use 'all' or omit to process all patients in dataset
+
+OUTPUT:
+-------
+  rescue_TIMESTAMP.csv containing:
+  - patient_id: Patient identifier (e.g., B22-12_1)
+  - predictions: Probability predictions across all patches (average of 16 TTA views)
+  - extracted_features: (if applicable) Model intermediate layer features
 """
 import pandas as pd
 import os
@@ -21,7 +67,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 import numpy as np
 from tqdm import tqdm
-from config import SCRATCH_ROOT, DATASET_ROOT, PATIENT_CSV, PATCH_XLSX
+from config import SCRATCH_ROOT, DATASET_ROOT, PATIENT_CSV, PATCH_XLSX, HOLDOUT
 from dataset import HPyloriDataset
 from model import get_model
 from torchvision.transforms import v2

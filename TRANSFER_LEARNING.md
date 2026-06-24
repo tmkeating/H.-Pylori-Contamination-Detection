@@ -544,12 +544,159 @@ Run the complete end-to-end pipeline:
 
 ---
 
+## Phase 6: (Optional) Rescue Inference for Edge Cases & Misclassifications
+
+After the complete transfer learning pipeline finishes (DeepHP pre-training + HelicoDataSet fine-tuning + ensemble voting), you may want to investigate specific misclassified or borderline patients. **Rescue Inference** provides a secondary high-resolution pass for targeted clinical validation.
+
+### When to Use Rescue Inference
+
+Rescue inference is an **optional enhancement** for patients that warrant deeper investigation:
+
+1. **Borderline Cases with High Uncertainty**
+   - Patients with ensemble confidence between 0.35-0.65 (least decisive zone)
+   - Predictions barely crossing the decision threshold (e.g., 0.505 when threshold is 0.5)
+   - Cases where different folds strongly disagree (e.g., 2 positive, 3 negative)
+
+2. **Known False Positives**
+   - Ensemble predicts positive but clinical review suggests negative
+   - Faint, irregular signals suspected to be staining artifacts rather than bacteria
+   - Goal: Dense windowing confirms bacteria absence vs. artifact
+
+3. **Known False Negatives**
+   - Ensemble predicts negative but clinical review suggests positive
+   - Suspected sparse bacterium clusters that may have been missed at standard stride
+   - Goal: 16-way TTA + dense windowing recovers faint IHC signals
+
+4. **Quality Assurance & Validation**
+   - Verifying difficult-to-diagnose cases before clinical sign-off
+   - Building secondary evidence for edge cases with borderline pathology
+   - Computational cost justified for small subset (5-20 priority patients)
+
+### How Rescue Inference Works
+
+**Technical Foundation:**
+
+- **Dense-Stride Windowing (Stride=128 vs Standard 250)**:
+  - Standard inference creates windows every 250 pixels (4-pixel overlap)
+  - Rescue uses Stride=128 (50% overlap between adjacent windows)
+  - Guarantees no bacterium is bisected by a patch boundary in a way that hides its morphology
+  - Particularly effective for sparse clusters (5-10 organisms in entire slide)
+
+- **16-Way Contrast-Boosted Test-Time Augmentation (TTA)**:
+  - **Base transforms** (6): Original, H-flip, V-flip, 90°, 180°, 270° rotations
+  - **Contrast boost** (1.1x): Targets faint IHC organisms with weak staining
+  - **Combined** (9): Rotations + contrast, flips + contrast
+  - All 16 predictions averaged for consensus voting, dramatically reducing noise
+  - Especially useful for IHC where stain intensity varies between labs/protocols
+
+- **Outputs**: Dense predictions per patient that can be compared against ensemble baseline
+
+### Example: Rescue the Misclassified Patients from Your Transfer Learning Run
+
+After ensemble voting completes, identify patients that might benefit from rescue. For example, if your run 34 had 7 misclassifications:
+
+| Patient | True Label | Ensemble Pred | Reason |
+|---------|-----------|---|---|
+| B22-12_1 | Negative | 0.497 | False Positive (confidence: 0.497) |
+| B22-89_0 | Negative | 0.927 | Strong False Positive (confidence: 0.927) |
+| B22-206_0 | Positive | 0.178 | False Negative (sparse signal) |
+| B22-262_0 | Positive | 0.230 | False Negative (sparse signal) |
+| B22-69_1 | Positive | 0.312 | False Negative (sparse signal) |
+| B22-81_1 | Positive | 0.090 | False Negative (very sparse signal) |
+| B22-85_0 | Positive | 0.469 | Borderline case (confidence: 0.469) |
+
+**Command to Run Rescue Inference:**
+
+First, find your trained models in `finalResults/`:
+
+```bash
+# List available model runs
+ls finalResults/ | grep convnext_tiny
+
+# Example output:
+# convnext_tiny_pretrained_backbone_34.4_weight_1.5_gamma_3.0_focalLoss_false/
+
+# Target the 7 misclassified patients using that run's models
+MODEL_DIR="finalResults/convnext_tiny_pretrained_backbone_34.4_weight_1.5_gamma_3.0_focalLoss_false" \
+  FOLDS="01_34.4_9077_f0 01_34.4_9078_f1 01_34.4_9079_f2 01_34.4_9080_f3 01_34.4_9081_f4" \
+  TARGETS="B22-12_1,B22-206_0,B22-262_0,B22-69_1,B22-81_1,B22-85_0,B22-89_0" \
+  OUTPUT_DIR="finalResults/convnext_tiny_pretrained_backbone_34.4_weight_1.5_gamma_3.0_focalLoss_false/rescue_ensemble" \
+  STRIDE=128 \
+  sbatch submit_rescue.sh
+```
+
+The script automatically:
+1. ✅ Verifies all 5 fold models exist in MODEL_DIR
+2. ✅ Processes only the specified TARGETS patients (or all if omitted)
+3. ✅ Runs rescue_inference.py with Stride=128 and 16-way TTA for each fold
+4. ✅ Saves outputs to OUTPUT_DIR with organized folder structure
+5. ✅ Generates SLURM logs in OUTPUT_DIR/logs/
+
+### Interpreting Rescue Results
+
+After rescue completes, examine the results:
+
+```bash
+# Check rescue outputs
+ls -la finalResults/convnext_tiny_pretrained_backbone_34.4.../rescue_ensemble/
+
+# View rescue predictions
+head -20 finalResults/.../rescue_ensemble/rescue_*.csv
+
+# Compare against original predictions
+# rescue_probability > 0.65 and ensemble_probability < 0.35 → likely false negative
+# rescue_probability < 0.35 and ensemble_probability > 0.65 → likely staining artifact
+```
+
+**Decision Rules:**
+
+| Original Ensemble | Rescue Result | Conclusion |
+|---|---|---|
+| Positive (~0.8) | Still High (~0.75+) | Likely True Positive ✓ Keep |
+| Positive (~0.8) | Now Low (~0.2) | Likely False Positive ❌ Discard |
+| Negative (~0.2) | Still Low (~0.1) | Likely True Negative ✓ Keep |
+| Negative (~0.2) | Now High (~0.8) | Likely False Negative ✓ Recover |
+| Borderline (~0.5) | High (~0.75+) | Lean toward Positive |
+| Borderline (~0.5) | Low (~0.2) | Lean toward Negative |
+
+### Optional: Integrate Rescue Results Back into Ensemble
+
+After rescue completes, optionally re-run ensemble voting to include rescue data:
+
+```bash
+# Re-run ensemble voting (auto-detects rescue data in rescue_ensemble/ directory)
+python3 ensemble_voting.py --runs 34-34
+
+# This generates updated predictions incorporating rescue signals:
+# hybrid_ensemble_results_34.0_with_rescue.csv
+```
+
+### When NOT to Use Rescue Inference
+
+- ✗ Already confident in ensemble predictions (>0.95 or <0.05 confidence scores)
+- ✗ Standard clinical workflow requires rapid turnaround (rescue adds 30-60 min per patient set)
+- ✗ Resource constraints prevent running dense-stride inference (10-20x slower than standard stride)
+- ✗ Only a few patients warrant investigation (individual manual inspection more efficient)
+
+### Computational Cost
+
+| Metric | Value |
+|--------|-------|
+| Time per patient (all 5 folds) | 5-10 minutes |
+| Time for 5-10 patients | 30-60 minutes |
+| GPU memory | Same as inference (~2-4 GB per fold) |
+| Stride factor (denser) | 1.95× slower than standard (250 vs 128) |
+| TTA factor (16-way) | ~16× more window predictions (but averaged) |
+
+---
+
 ## Next Steps After Transfer Learning
 
 1. **Option 2 Comparison**: If improvement is <2%, try Option 2 (Separate architectures)
 2. **Option 3 Dual Ensemble**: If still not satisfied, implement Option 3 (Ensemble)
-3. **Clinical Validation**: Focus on improving precision/specificity for false positive reduction
-4. **Grad-CAM Analysis**: Visualize what backbone pre-training learned differently
+3. **(Optional) Rescue Inference**: Use dense-stride high-resolution pass on edge cases (Phase 6 above)
+4. **Clinical Validation**: Focus on improving precision/specificity for false positive reduction
+5. **Grad-CAM Analysis**: Visualize what backbone pre-training learned differently
 
 ---
 

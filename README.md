@@ -308,6 +308,90 @@ sbatch run_visuals.sh
 ```
 *Outputs: `results/*_gradcam_samples/` folder containing heatmaps, plus `*_confusion_matrix.png`, `*_roc_curve.png`, and `*_pr_curve.png` metric reports.*
 
+### 4.5 (Optional) Rescue Inference - High-Resolution Recovery for Misclassified Patients
+
+**When to Run Rescue Inference:**
+
+Rescue inference is an **optional post-pipeline enhancement** for patients where the ensemble voting results warrant deeper inspection. Use it in these scenarios:
+
+1. **Borderline Cases with High Uncertainty**
+   - Patients with ensemble confidence between 0.35-0.65 (confidence zone where voting ensemble is least decisive)
+   - Predictions that barely cross the decision threshold (e.g., 0.505 probability when threshold is 0.5)
+   - Cases where different folds strongly disagree (e.g., 2 folds predict positive, 3 predict negative)
+
+2. **Known False Positives** 
+   - Patients incorrectly classified as positive (high ensemble score but clinical review suggests negative)
+   - Faint, irregular signals that may be staining artifacts rather than actual bacteria
+   - Benefit: Dense-stride (Stride=128) windowing with 50% overlap ensures no sparse bacteria clusters are missed if they do exist
+
+3. **Known False Negatives**
+   - Patients incorrectly classified as negative (low ensemble score but clinical review suggests positive)
+   - Sparse bacterium clusters that may have fallen through the gaps of standard Stride=250 windows
+   - Benefit: 16-way contrast-boosted TTA (rotations, flips, 1.1x contrast enhancement) can recover faint IHC signals
+
+4. **Quality Assurance & Validation**
+   - Verifying difficult-to-diagnose cases before clinical sign-off
+   - Building secondary evidence for edge cases with borderline pathology
+   - Computational cost is justified for a small subset of 5-20 priority patients
+
+**How Rescue Inference Works:**
+
+- **Dense-Stride Windowing (Stride=128)**: Standard inference uses Stride=250 (4-pixel overlap), which can miss very sparse bacterial clusters (5-10 organisms in an entire slide). Rescue uses Stride=128 (50% overlap) to guarantee no bacterium is bisected by a patch boundary.
+- **16-Way Contrast-Boosted Test-Time Augmentation (TTA)**:
+  - 6 spatial transforms: Original, H-flip, V-flip, 90°, 180°, 270° rotations
+  - 1.1x contrast boost (targets faint IHC organisms with weak staining)
+  - Combined transforms (rotations + contrast, flips + contrast)
+  - All 16 predictions are averaged for consensus voting, reducing noise
+- **Output**: Dense predictions with per-patient scores that can be compared against ensemble baseline
+
+**Example: Rescue the Seven Misclassified Patients from Iteration 34**
+
+From the ensemble voting report, these 7 patients warrant investigation:
+
+| Patient | True Label | Ensemble Pred | Max Vote | Reason |
+|---------|-----------|---|---|---|
+| B22-12_1 | Negative | 0.497 | Positive | False Positive (confidence: 0.497) |
+| B22-89_0 | Negative | 0.927 | Positive | Strong False Positive (confidence: 0.927) |
+| B22-206_0 | Positive | 0.178 | Negative | False Negative (sparse signal) |
+| B22-262_0 | Positive | 0.230 | Negative | False Negative (sparse signal) |
+| B22-69_1 | Positive | 0.312 | Negative | False Negative (sparse signal) |
+| B22-81_1 | Positive | 0.090 | Negative | False Negative (very sparse signal) |
+| B22-85_0 | Positive | 0.469 | Borderline | Borderline case (confidence: 0.469) |
+
+**Command to Run Rescue:**
+
+```bash
+# Rescue the 7 misclassified patients from a finalResults run
+MODEL_DIR="finalResults/convnext_tiny_pretrained_backbone_34.4_weight_1.5_gamma_3.0_focalLoss_false" \
+  FOLDS="01_34.4_9077_f0 01_34.4_9078_f1 01_34.4_9079_f2 01_34.4_9080_f3 01_34.4_9081_f4" \
+  TARGETS="B22-12_1,B22-206_0,B22-262_0,B22-69_1,B22-81_1,B22-85_0,B22-89_0" \
+  OUTPUT_DIR="finalResults/convnext_tiny_pretrained_backbone_34.4_weight_1.5_gamma_3.0_focalLoss_false/rescue_ensemble" \
+  STRIDE=128 \
+  sbatch submit_rescue.sh
+```
+
+**Interpreting Results:**
+
+After rescue completes, examine:
+1. `rescue_*.csv` files in OUTPUT_DIR containing dense-stride predictions
+2. Compare rescue predictions against original ensemble scores
+3. If rescue still predicts negative for false positives → likely staining artifacts
+4. If rescue now predicts positive for false negatives → sparse bacteria was present but missed
+5. (Optional) Re-run ensemble voting with rescue data included:
+   ```bash
+   python3 ensemble_voting.py --runs 34-34
+   ```
+   This auto-detects rescue data and merges predictions back into ensemble voting
+
+**When NOT to Use Rescue Inference:**
+
+- Already confident in ensemble predictions (>0.95 or <0.05 confidence scores)
+- High false positive rate expected on specific patients (use rescue to differentiate signal vs artifact instead)
+- Resource constraints prevent running dense-stride inference (10-20x slower than standard stride)
+- Standard clinical workflow requires rapid turnaround (rescue adds 30-60 minutes per patient set)
+
+*For more details, see `rescue_inference.py` documentation.*
+
 ---
 
 ## Core Project Structure

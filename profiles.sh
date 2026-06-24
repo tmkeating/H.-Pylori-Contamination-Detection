@@ -250,6 +250,81 @@ function set_profile_SEARCHER24() {
     export DANN_WEIGHT=1.0
 }
 
+function set_profile_SEARCHER25() {
+    export NEG_WEIGHT=1.0
+    export POS_WEIGHT=2.5
+    export GAMMA=3.0
+    export USE_FOCAL_LOSS="False"
+    # Higher WD to prevent 100% Training Accuracy (Overfitting)
+    export WEIGHT_DECAY=0.05
+    export NUM_EPOCHS=20
+    export DEEPHP_EPOCHS=20
+    export LEARNING_RATE=2e-5
+    export SAVER_METRIC="f1"
+    export FREEZE_BN="True"
+    export FREEZE_BACKBONE="False"
+    export CLIP_GRAD=1.0
+    export PCT_START=0.1
+    export USE_SWA="True"
+    export SWA_START=12
+    export JITTER=0.25
+    export DROPOUT=0.25
+    export POOL_TYPE="attention"
+    export USE_DANN="False"
+    export DANN_LAMBDA=1.0
+    export DANN_WEIGHT=1.0
+}
+
+function set_profile_SEARCHER26() {
+    export NEG_WEIGHT=1.0
+    export POS_WEIGHT=2.0
+    export GAMMA=4.0
+    export USE_FOCAL_LOSS="False"
+    # Higher WD to prevent 100% Training Accuracy (Overfitting)
+    export WEIGHT_DECAY=0.05
+    export NUM_EPOCHS=20
+    export DEEPHP_EPOCHS=20
+    export LEARNING_RATE=2e-5
+    export SAVER_METRIC="f1"
+    export FREEZE_BN="True"
+    export FREEZE_BACKBONE="False"
+    export CLIP_GRAD=1.0
+    export PCT_START=0.1
+    export USE_SWA="True"
+    export SWA_START=12
+    export JITTER=0.25
+    export DROPOUT=0.25
+    export POOL_TYPE="attention"
+    export USE_DANN="False"
+    export DANN_LAMBDA=1.0
+    export DANN_WEIGHT=1.0
+}
+
+function set_profile_SEARCHER27() {
+    export NEG_WEIGHT=1.0
+    export POS_WEIGHT=2.5
+    export GAMMA=4.0
+    export USE_FOCAL_LOSS="False"
+    # Higher WD to prevent 100% Training Accuracy (Overfitting)
+    export WEIGHT_DECAY=0.05
+    export NUM_EPOCHS=20
+    export DEEPHP_EPOCHS=20
+    export LEARNING_RATE=2e-5
+    export SAVER_METRIC="f1"
+    export FREEZE_BN="True"
+    export FREEZE_BACKBONE="False"
+    export CLIP_GRAD=1.0
+    export PCT_START=0.1
+    export USE_SWA="True"
+    export SWA_START=12
+    export JITTER=0.25
+    export DROPOUT=0.25
+    export POOL_TYPE="attention"
+    export USE_DANN="False"
+    export DANN_LAMBDA=1.0
+    export DANN_WEIGHT=1.0
+}
+
 function set_profile_SEARCHERDEEPHP() {
     export NEG_WEIGHT=1.0
     export POS_WEIGHT="6.0,2.5,1.5,8.0,2.5"

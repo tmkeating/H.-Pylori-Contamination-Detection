@@ -1949,12 +1949,21 @@ if __name__ == "__main__":
     parser.add_argument("--freeze_backbone", type=str, default="False", 
                         help="Freeze backbone during HelicoDataSet fine-tuning (True/False)")
     parser.add_argument("--use_focal_loss", type=str, default="True", help="Use Focal Loss (True/False)")
+    parser.add_argument("--skip_pretrained_backbone", type=str, default="False", 
+                        help="Skip loading pretrained backbone; use base model weights only (True/False)")
     
     args = parser.parse_args()
     
     # Handle backbone path: priority 1=--backbone_path, priority 2=--pretrained_backbone_path (deprecated), priority 3=search output_dir and results/ recursively
     backbone_path = args.backbone_path or args.pretrained_backbone_path
-    if backbone_path is None:
+    
+    # Check if user explicitly wants to skip pretrained backbone
+    skip_backbone = args.skip_pretrained_backbone == "True"
+    
+    if skip_backbone:
+        backbone_path = None
+        print("[INFO] SKIP_PRETRAINED_BACKBONE=True: Skipping backbone search, using ImageNet pre-trained weights only")
+    elif backbone_path is None:
         # Search for matching backbone in this order:
         # 1. Exact match in output_dir with same iteration
         # 2. Any match in output_dir with any iteration

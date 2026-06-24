@@ -798,6 +798,8 @@ TRAIN_CMD="\$TRAIN_CMD --freeze_backbone \$FREEZE_BACKBONE"
 
 TRAIN_CMD="\$TRAIN_CMD --use_focal_loss \$USE_FOCAL_LOSS"
 
+TRAIN_CMD="\$TRAIN_CMD --skip_pretrained_backbone \$SKIP_PRETRAINED_BACKBONE"
+
 # Execute the constructed command
 eval \$TRAIN_CMD
 
