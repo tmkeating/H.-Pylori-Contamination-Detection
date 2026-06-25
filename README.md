@@ -286,8 +286,6 @@ After training all 5 folds on DeepHP H&E patches, the backbone weights are combi
 - `meta_classifier_summary_*.csv` - Meta-classifier comparison metrics
 - `weighted_ensemble_analysis_*.csv` - Fold weights and contribution analysis
 
-*Key Result: **92.11% Accuracy | 100% Precision (Zero False Positives) | 100% Specificity***
-
 **Manual Run** (if needed):
 
 For **DeepHP Pre-training** post-processing:
