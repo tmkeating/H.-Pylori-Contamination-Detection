@@ -18,7 +18,7 @@
 export DROPOUT=${DROPOUT:-0.25}
 export LEARNING_RATE=${LEARNING_RATE:-2e-5}
 # Only for DeepHP training
-export BATCH_SIZE=${BATCH_SIZE:-32}
+export BATCH_SIZE=${BATCH_SIZE:-32} # Only for DeepHP training
 export USE_COMPILE=${USE_COMPILE:-False}
 
 # Profile: SEARCHER (Iteration 24.9: Robust Generalization - Target 100% Recall)
@@ -51,10 +51,10 @@ function set_profile_SEARCHER() {
 
 function set_profile_SEARCHER1() {
     export NEG_WEIGHT=1.0
-    export POS_WEIGHT=1.5 
+    export POS_WEIGHT=2.0 
     # Maintained 3.0 to focus gradients on 'Hard' sparse bacterial targets
     export GAMMA=3.0
-    export USE_FOCAL_LOSS="True"
+    export USE_FOCAL_LOSS="False"
     # Higher WD to prevent 100% Training Accuracy (Overfitting)
     export WEIGHT_DECAY=0.05
     export NUM_EPOCHS=20
@@ -77,9 +77,9 @@ function set_profile_SEARCHER1() {
 
 function set_profile_SEARCHER2() {
     export NEG_WEIGHT=1.0
-    export POS_WEIGHT=2.0
+    export POS_WEIGHT=2.5
     export GAMMA=3.0
-    export USE_FOCAL_LOSS="True"
+    export USE_FOCAL_LOSS="False"
     # Higher WD to prevent 100% Training Accuracy (Overfitting)
     export WEIGHT_DECAY=0.05
     export NUM_EPOCHS=20
@@ -103,8 +103,8 @@ function set_profile_SEARCHER2() {
 function set_profile_SEARCHER3() {
     export NEG_WEIGHT=1.0
     export POS_WEIGHT=1.5 
-    export GAMMA=4.0
-    export USE_FOCAL_LOSS="True"
+    export GAMMA=3.5
+    export USE_FOCAL_LOSS="False"
     # Higher WD to prevent 100% Training Accuracy (Overfitting)
     export WEIGHT_DECAY=0.05
     export NUM_EPOCHS=20
@@ -127,9 +127,9 @@ function set_profile_SEARCHER3() {
 
 function set_profile_SEARCHER4() {
     export NEG_WEIGHT=1.0
-    export POS_WEIGHT=1.5 
-    export GAMMA=5.0
-    export USE_FOCAL_LOSS="True"
+    export POS_WEIGHT=2.0
+    export GAMMA=3.5
+    export USE_FOCAL_LOSS="False"
     # Higher WD to prevent 100% Training Accuracy (Overfitting)
     export WEIGHT_DECAY=0.05
     export NUM_EPOCHS=20
@@ -152,8 +152,8 @@ function set_profile_SEARCHER4() {
 
 function set_profile_SEARCHER5() {
     export NEG_WEIGHT=1.0
-    export POS_WEIGHT=1.5 
-    export GAMMA=4.0
+    export POS_WEIGHT=2.5 
+    export GAMMA=3.5
     export USE_FOCAL_LOSS="False"
     # Higher WD to prevent 100% Training Accuracy (Overfitting)
     export WEIGHT_DECAY=0.05
@@ -177,8 +177,8 @@ function set_profile_SEARCHER5() {
 
 function set_profile_SEARCHER6() {
     export NEG_WEIGHT=1.0
-    export POS_WEIGHT=2.0
-    export GAMMA=3.0
+    export POS_WEIGHT=1.5
+    export GAMMA=4.0
     export USE_FOCAL_LOSS="False"
     # Higher WD to prevent 100% Training Accuracy (Overfitting)
     export WEIGHT_DECAY=0.05
@@ -252,8 +252,8 @@ function set_profile_SEARCHER8() {
 
 function set_profile_SEARCHER9() {
     export NEG_WEIGHT=1.0
-    export POS_WEIGHT=2.5
-    export GAMMA=3.0
+    export POS_WEIGHT=1.5
+    export GAMMA=4.5
     export USE_FOCAL_LOSS="False"
     # Higher WD to prevent 100% Training Accuracy (Overfitting)
     export WEIGHT_DECAY=0.05
@@ -277,8 +277,8 @@ function set_profile_SEARCHER9() {
 
 function set_profile_SEARCHER10() {
     export NEG_WEIGHT=1.0
-    export POS_WEIGHT=1.5
-    export GAMMA=3.5
+    export POS_WEIGHT=2.0
+    export GAMMA=4.5
     export USE_FOCAL_LOSS="False"
     # Higher WD to prevent 100% Training Accuracy (Overfitting)
     export WEIGHT_DECAY=0.05
@@ -302,82 +302,7 @@ function set_profile_SEARCHER10() {
 
 function set_profile_SEARCHER11() {
     export NEG_WEIGHT=1.0
-    export POS_WEIGHT=1.5
-    export GAMMA=4.5
-    export USE_FOCAL_LOSS="False"
-    # Higher WD to prevent 100% Training Accuracy (Overfitting)
-    export WEIGHT_DECAY=0.05
-    export NUM_EPOCHS=20
-    export DEEPHP_EPOCHS=20
-    export LEARNING_RATE=2e-5
-    export SAVER_METRIC="f1"
-    export FREEZE_BN="True"
-    export FREEZE_BACKBONE="False"
-    export CLIP_GRAD=1.0
-    export PCT_START=0.1
-    export USE_SWA="True"
-    export SWA_START=12
-    export JITTER=0.25
-    export DROPOUT=0.25
-    export POOL_TYPE="attention"
-    export USE_DANN="False"
-    export DANN_LAMBDA=1.0
-    export DANN_WEIGHT=1.0
-}
-
-function set_profile_SEARCHER12() {
-    export NEG_WEIGHT=1.0
-    export POS_WEIGHT=2.0
-    export GAMMA=3.5
-    export USE_FOCAL_LOSS="False"
-    # Higher WD to prevent 100% Training Accuracy (Overfitting)
-    export WEIGHT_DECAY=0.05
-    export NUM_EPOCHS=20
-    export DEEPHP_EPOCHS=20
-    export LEARNING_RATE=2e-5
-    export SAVER_METRIC="f1"
-    export FREEZE_BN="True"
-    export FREEZE_BACKBONE="False"
-    export CLIP_GRAD=1.0
-    export PCT_START=0.1
-    export USE_SWA="True"
-    export SWA_START=12
-    export JITTER=0.25
-    export DROPOUT=0.25
-    export POOL_TYPE="attention"
-    export USE_DANN="False"
-    export DANN_LAMBDA=1.0
-    export DANN_WEIGHT=1.0
-}
-
-function set_profile_SEARCHER13() {
-    export NEG_WEIGHT=1.0
-    export POS_WEIGHT=2.5
-    export GAMMA=3.5
-    export USE_FOCAL_LOSS="False"
-    # Higher WD to prevent 100% Training Accuracy (Overfitting)
-    export WEIGHT_DECAY=0.05
-    export NUM_EPOCHS=20
-    export DEEPHP_EPOCHS=20
-    export LEARNING_RATE=2e-5
-    export SAVER_METRIC="f1"
-    export FREEZE_BN="True"
-    export FREEZE_BACKBONE="False"
-    export CLIP_GRAD=1.0
-    export PCT_START=0.1
-    export USE_SWA="True"
-    export SWA_START=12
-    export JITTER=0.25
-    export DROPOUT=0.25
-    export POOL_TYPE="attention"
-    export USE_DANN="False"
-    export DANN_LAMBDA=1.0
-    export DANN_WEIGHT=1.0
-}
-
-function set_profile_SEARCHER14() {
-    export NEG_WEIGHT=1.0
-    export POS_WEIGHT=2.0
+    export POS_WEIGHT=3.5
     export GAMMA=4.5
     export USE_FOCAL_LOSS="False"
     # Higher WD to prevent 100% Training Accuracy (Overfitting)
@@ -401,33 +326,6 @@ function set_profile_SEARCHER14() {
 }
 
 function set_profile_SEARCHERDEEPHP() {
-    export NEG_WEIGHT=1.0
-    export POS_WEIGHT="6.0,2.5,1.5,8.0,2.5"
-    export GAMMA=4.0
-    export USE_FOCAL_LOSS="False"
-    # Higher WD to prevent 100% Training Accuracy (Overfitting)
-    export WEIGHT_DECAY=0.05
-    export NUM_EPOCHS=20
-    export DEEPHP_EPOCHS=20
-    export BATCH_SIZE=64
-    export LEARNING_RATE=1e-5
-    export SAVER_METRIC="f1"
-    export FREEZE_BN="False"
-    export FREEZE_BACKBONE="False"
-    export CLIP_GRAD=1.0
-    export PCT_START=0.1
-    export USE_SWA="True"
-    export SWA_START=12
-    export JITTER=0.25
-    export DROPOUT=0.4
-    export POOL_TYPE="attention"
-    export USE_DANN="True"
-    export DANN_LAMBDA=1.0
-    export DANN_WEIGHT=1.0
-    export USE_COMPILE="True"
-}
-
-function set_profile_SEARCHERDEEPHP1() {
     export NEG_WEIGHT=1.0
     export POS_WEIGHT="6.0,2.5,1.5,8.0,2.5"
     export GAMMA=4.0
