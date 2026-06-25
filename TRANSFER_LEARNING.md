@@ -31,12 +31,22 @@ This guide implements transfer learning using the **DeepHP dataset** (394,926 H&
 The pre-training uses **CONFIG 87771 hardcoded experiment-level stratification** optimized from 500,000+ greedy configuration searches to prevent data leakage and ensure robust feature learning:
 
 **Strategy** (Experiment-Level 5-Fold Cross-Validation):
-- **Fold 0 Validation**: 7 experiments (4 pos, 3 neg) → 87,532 patches, ratio 2.33:1
-- **Fold 1 Validation**: 10 experiments (3 pos, 7 neg) → 89,516 patches, ratio 2.06:1
-- **Fold 2 Validation**: 5 experiments (4 pos, 1 neg) → 20,347 patches, ratio 2.31:1
-- **Fold 3 Validation**: 4 experiments (4 pos, 0 neg) → 99,120 patches, ratio 2.81:1
-- **Fold 4 Validation**: 7 experiments (6 pos, 1 neg) → 98,410 patches, ratio 2.29:1
-- **All Folds Training**: Each fold trains on ALL experiments except its validation experiments (~307K patches), ensuring diverse feature learning
+- **Fold 0 Training**: 26 experiments (16 pos, 10 neg) → 309,071 patches (1:2.27 ratio)
+- **Fold 1 Training**: 23 experiments (13 pos, 10 neg) → 357,832 patches (1:2.31 ratio)
+- **Fold 2 Training**: 28 experiments (18 pos, 10 neg) → 316,840 patches (1:2.27 ratio)
+- **Fold 3 Training**: 29 experiments (19 pos, 10 neg) → 316,736 patches (1:2.28 ratio)
+- **Fold 4 Training**: 26 experiments (18 pos, 8 neg) → 279,221 patches (1:2.28 ratio)
+- **Total Training Patches**: ~1.58M patches across all 5 folds, ensuring robust feature learning
+
+- **Validation Strategy**: Each fold validates on different experiments with balanced ratios (1:2.06 to 1:2.33), preventing data leakage
+- **Fold 0 Validation**: 7 experiments (5 pos, 2 neg) → 85,854 patches (1:2.33 ratio)
+- **Fold 1 Validation**: 10 experiments (8 pos, 2 neg) → 37,093 patches (1:2.06 ratio)
+- **Fold 2 Validation**: 5 experiments (3 pos, 2 neg) → 78,085 patches (1:2.31 ratio)
+- **Fold 3 Validation**: 4 experiments (2 pos, 2 neg) → 78,189 patches (1:2.29 ratio)
+- **Fold 4 Validation**: 7 experiments (3 pos, 4 neg) → 115,704 patches (1:2.29 ratio)
+- **All Folds Training**: Each fold trains on ALL experiments except its validation experiments (~309K patches), ensuring diverse feature learning
+
+**Result**: Each fold trains on balanced ratios (1:2.27 to 1:2.31, target 1:2.28, very close to target) across ~1.58M total training patches with consistent quality across folds. 
 
 **Domain Adversarial Neural Networks (DANN - Optional Advanced Feature)**:
 When enabled with `--use_dann` flag, the pre-training uses DANN to prevent learning of experiment-specific staining artifacts:
@@ -48,7 +58,7 @@ When enabled with `--use_dann` flag, the pre-training uses DANN to prevent learn
   - `--dann_weight 0.5` (weight of adversary loss in total loss)
 - **Trade-off**: Slightly longer training (~10-15% slower) for more robust features (recommended for challenging transfer tasks)
 
-**Result**: Each fold achieves realistic epoch 1 metrics (~50% accuracy) with balanced ratios (2.06:1 to 2.81:1, target 2.28:1, total distance 0.6441). No fold-specific artifact learning because each fold validates on different experiments.
+
 
 ### Step 1A: Submit Pre-training Jobs (All 5 Folds - Orchestrated)
 
