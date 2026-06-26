@@ -721,13 +721,22 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
         summary_df['PATIENTS_IN_BOTH_GROUPS_LEAKAGE'] = patients_in_both_groups
         summary_df.to_csv(summary_csv_path, index=False)
     
-    # Global Seed Strategy (Iteration 21): Ensure deterministic initialization and splits
+    # Global Seed Strategy: Deterministic but hyperparameter-aware
+    # Same hyperparameters (pos_weight, gamma, fold) = Same seed (reproducible)
+    # Different hyperparameters = Different seed (compare sensitivity)
     import random
-    random.seed(42 + fold_idx)
-    np.random.seed(42 + fold_idx)
-    torch.manual_seed(42 + fold_idx)
+    
+    # Hash based on key hyperparameters that affect loss and learning
+    # Excludes freeze_backbone to allow fair pre-training comparisons
+    param_string = f"{pos_weight}_{gamma}_{fold_idx}"
+    random_seed = hash(param_string) % (2**31)
+    
+    random.seed(random_seed)
+    np.random.seed(random_seed)
+    torch.manual_seed(random_seed)
     if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(42 + fold_idx)
+        torch.cuda.manual_seed_all(random_seed)
+    print(f"Random seed for training (pos_weight={pos_weight}, gamma={gamma}, fold={fold_idx}): {random_seed}")
         
     # Data Split reproducibility: Seed 42 for identity across jobs
     split_rng = np.random.RandomState(42)
@@ -863,7 +872,7 @@ def train_model(fold_idx=0, num_folds=5, model_name="convnext_tiny", pos_weight=
     loss_weights = torch.FloatTensor([neg_weight, pos_weight]).to(device) 
     # Iteration 25.0: Disabled label smoothing (0.0) as per user request.
     if use_focal_loss:
-        criterion = FocalLoss(gamma=gamma, weight=loss_weights, smoothing=0.0)
+        criterion = FocalLoss(alpha=pos_weight, gamma=gamma, weight=loss_weights, smoothing=0.0)
     else:
         criterion = torch.nn.CrossEntropyLoss(weight=loss_weights)
 
