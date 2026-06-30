@@ -1,0 +1,296 @@
+Using device: cuda
+
+================================================================================
+DeepHP Backbone Pre-training: Fold 4/5
+Run ID: 01 (Iter: 34.4, SLURM Job: 9021)
+================================================================================
+Model: convnext_tiny | Epochs: 20 | Batch Size: 64
+Learning Rate: 1e-05 | Weight Decay: 0.05
+Focal Loss: True | Pos Weight: 8.0
+DANN: True | Lambda: 1.0 | Weight: 1.0
+================================================================================
+
+
+============================================================
+Loading dataset from: /home/tkeating/.scratch/deephp_data
+Scratch directory: /home/tkeating/.scratch/deephp_data
+Original directory: /home/tkeating/datasets/8117177
+Using scratch: True
+============================================================
+
+[DEBUG] Blacklist entry 'macenko_reference_patch': Positive/Experiment-6712_b0s11c0x7495-2776y16848-2080m49_17922048x256512.jpeg
+[DEBUG] Original samples count: 394925
+[DEBUG] After blacklist exclusion: 394925, excluded: 0
+[DEBUG]   ⚠ No files were excluded. Checking if they exist...
+[DEBUG]   Path exists: False, In samples: False
+[DEBUG]   /home/tkeating/.scratch/deephp_data/Positive/Experiment-6712_b0s11c0x7495-2776y16848-2080m49_17922048x256512.jpeg
+[DEBUG] Experiment tracking initialized: 33 unique experiments
+[DEBUG] Grouped 394925 patches into 33 experiments
+[DEBUG] Positive: 21 experiments, 120,374 patches
+[DEBUG] Negative: 12 experiments, 274,551 patches
+[DEBUG] Overall ratio (Neg:Pos): 2.28:1
+[DEBUG] Using optimized config 87771 (total_distance 0.6441 - 10% better than 3385)...
+[DEBUG]   Fold 0: Experiment-679 (pos, 118)
+[DEBUG]   Fold 0: Lm_449818_20x_13_03_2019 (pos, 22,312)
+[DEBUG]   Fold 0: Experiment-677 (pos, 1,101)
+[DEBUG]   Fold 0: Experiment-88 (neg, 19,328)
+[DEBUG]   Fold 0: Experiment-6716 (pos, 133)
+[DEBUG]   Fold 0: Experiment-68 (neg, 40,782)
+[DEBUG]   Fold 0: Experiment-671 (pos, 2,080)
+[DEBUG]   Fold 1: Experiment-678 (pos, 1,314)
+[DEBUG]   Fold 1: Experiment-6712 (pos, 1,568)
+[DEBUG]   Fold 1: Experiment-673 (pos, 942)
+[DEBUG]   Fold 1: Experiment-101 (neg, 14,290)
+[DEBUG]   Fold 1: Experiment-6710 (pos, 1,857)
+[DEBUG]   Fold 1: Experiment-6717 (pos, 2,186)
+[DEBUG]   Fold 1: Experiment-676 (pos, 1,891)
+[DEBUG]   Fold 1: Experiment-672 (pos, 1,845)
+[DEBUG]   Fold 1: Experiment-99 (neg, 10,695)
+[DEBUG]   Fold 1: Experiment-6713 (pos, 505)
+[DEBUG]   Fold 2: Experiment-97 (neg, 35,913)
+[DEBUG]   Fold 2: Experiment-674 (pos, 803)
+[DEBUG]   Fold 2: Lm_456061_20x_25_04_2019 (pos, 20,463)
+[DEBUG]   Fold 2: Experiment-675 (pos, 2,347)
+[DEBUG]   Fold 2: Experiment-91 (neg, 18,559)
+[DEBUG]   Fold 3: Experiment-6711 (pos, 1,643)
+[DEBUG]   Fold 3: Experiment-108 (pos, 22,129)
+[DEBUG]   Fold 3: Experiment-105 (neg, 24,273)
+[DEBUG]   Fold 3: Lm_462218_20x_14_03_2019 (neg, 30,144)
+[DEBUG]   Fold 4: Experiment-67 (pos, 31,661)
+[DEBUG]   Fold 4: Experiment-100 (neg, 32,271)
+[DEBUG]   Fold 4: Experiment-102 (neg, 17,012)
+[DEBUG]   Fold 4: Experiment-93 (neg, 14,748)
+[DEBUG]   Fold 4: Snap-151 (neg, 16,536)
+[DEBUG]   Fold 4: Experiment-6715 (pos, 1,651)
+[DEBUG]   Fold 4: Experiment-6714 (pos, 1,825)
+[DEBUG] Config 87771 assignments complete
+[DEBUG] Configuration metrics (config 87771 - optimized for balanced fold ratios):
+[DEBUG]   Total Distance: 0.6441 (Ratio≈0.18 + Patch≈0.25 + Exp≈0.21)
+
+[DEBUG] Fold training set composition (combined folds as training pool):
+[DEBUG]   Fold 0: 16 pos + 10 neg exps, 309,071 patches (ratio 2.27:1)
+[DEBUG]   Fold 1: 13 pos + 10 neg exps, 357,832 patches (ratio 2.31:1)
+[DEBUG]   Fold 2: 18 pos + 10 neg exps, 316,840 patches (ratio 2.27:1)
+[DEBUG]   Fold 3: 19 pos + 10 neg exps, 316,736 patches (ratio 2.28:1)
+[DEBUG]   Fold 4: 18 pos + 8 neg exps, 279,221 patches (ratio 2.28:1)
+
+[DEBUG] Fold validation set composition (after balanced assignment):
+[DEBUG]   Fold 0: 5 pos + 2 neg exps, 85,854 patches (ratio 2.33:1, target 2.28:1)
+[DEBUG]   Fold 1: 8 pos + 2 neg exps, 37,093 patches (ratio 2.06:1, target 2.28:1)
+[DEBUG]   Fold 2: 3 pos + 2 neg exps, 78,085 patches (ratio 2.31:1, target 2.28:1)
+[DEBUG]   Fold 3: 2 pos + 2 neg exps, 78,189 patches (ratio 2.29:1, target 2.28:1)
+[DEBUG]   Fold 4: 3 pos + 4 neg exps, 115,704 patches (ratio 2.29:1, target 2.28:1)
+
+[DEBUG] FOLD 3 SPLIT (proper 5-fold CV):
+[DEBUG]   Val experiments: ['Experiment-105', 'Experiment-108', 'Experiment-6711', 'Lm_462218_20x_14_03_2019']
+[DEBUG]   Train experiments: ['Experiment-100', 'Experiment-101', 'Experiment-102', 'Experiment-67', 'Experiment-671', 'Experiment-6710', 'Experiment-6712', 'Experiment-6713', 'Experiment-6714', 'Experiment-6715', 'Experiment-6716', 'Experiment-6717', 'Experiment-672', 'Experiment-673', 'Experiment-674', 'Experiment-675', 'Experiment-676', 'Experiment-677', 'Experiment-678', 'Experiment-679', 'Experiment-68', 'Experiment-88', 'Experiment-91', 'Experiment-93', 'Experiment-97', 'Experiment-99', 'Lm_449818_20x_13_03_2019', 'Lm_456061_20x_25_04_2019', 'Snap-151']
+[DEBUG]   Train: 316,736 patches (87,232 pos, 229,504 neg)
+[DEBUG]   Val:   78,189 patches (23,772 pos, 54,417 neg)
+[DEBUG] ✓ No patch-level overlap
+
+[DEBUG] Train ratio (Neg:Pos): 2.63:1 (overall: 2.28:1)
+[DEBUG] Val ratio (Neg:Pos):   2.29:1 (overall: 2.28:1)
+
+============================================================
+DeepHP Dataset Statistics (Fold 3, TRAIN)
+============================================================
+Total patches:        316,736
+  Positive (H. pylori):  87,232
+  Negative (Normal):     229,504
+Imbalance ratio (Neg:Pos): 2.63:1
+============================================================
+
+
+============================================================
+DeepHP Dataset Statistics (Fold 3, VAL)
+============================================================
+Total patches:        78,189
+  Positive (H. pylori):  23,772
+  Negative (Normal):     54,417
+Imbalance ratio (Neg:Pos): 2.29:1
+============================================================
+
+
+============================================================
+Blacklist Status (Applied Before Fold Split):
+============================================================
+  ✓ Macenko Reference Excluded:
+    File: Positive/Experiment-6712_b0s11c0x7495-2776y16848-2080m49_17922048x256512.jpeg
+    Quality Score: 0.9551966921899046
+    Reason: Macenko H&E normalization reference - excluded from training/validation to prevent data leakage
+============================================================
+
+
+============================================================
+Generating Cross-Leakage Audit:
+============================================================
+✓ Perfect stratification verified: 0 images in overlap
+✓ Saved cross-leakage audit to results/01_34.4_9021_f3_convnext_tiny_cross_leakage_audit.csv
+  Total images audited: 394925
+  Training set images: 316736
+  Validation set images: 78189
+============================================================
+
+✓ Saved experiment fold audit to results/01_34.4_9021_f3_convnext_tiny_experiment_fold_audit.csv
+  Total unique experiments: 33
+  Experiments in train pool: 29
+  Experiments in val pool: 4
+============================================================
+
+Loading convnext_tiny backbone...
+✓ torch.compile enabled (mode='reduce-overhead')
+Using Focal Loss (gamma=4.0, neg_weight=1.0, pos_weight=8.0)
+Initializing DANN with lambda=1.0, weight=1.0
+DANN initialized with 33 experiments and feature_dim=768
+Initializing Macenko normalizer for H&E stain normalization...
+  Loading pre-computed reference: ./macenko_reference.png
+✓ Macenko normalizer fitted to pre-computed reference
+
+Epoch 1/20
+Train Loss: 2.0738 | Train Acc: 96.73%
+Val Loss: 7.5363 | Val Acc: 68.93% | Prec: 0.4321 | Rec: 0.0693 | F1: 0.1195
+✓ Saved best (f1: 0.1195) model to results/01_34.4_9021_f3_convnext_tiny_model_brain.pth
+
+Epoch 2/20
+Train Loss: 0.9969 | Train Acc: 99.84%
+Val Loss: 8.4442 | Val Acc: 69.69% | Prec: 0.5110 | Rec: 0.0694 | F1: 0.1222
+✓ Saved best (f1: 0.1222) model to results/01_34.4_9021_f3_convnext_tiny_model_brain.pth
+
+Epoch 3/20
+Train Loss: 0.6972 | Train Acc: 99.90%
+Val Loss: 8.9989 | Val Acc: 69.94% | Prec: 0.5439 | Rec: 0.0693 | F1: 0.1230
+✓ Saved best (f1: 0.1230) model to results/01_34.4_9021_f3_convnext_tiny_model_brain.pth
+
+Epoch 4/20
+Train Loss: 0.5575 | Train Acc: 99.93%
+Val Loss: 9.5363 | Val Acc: 71.33% | Prec: 0.8496 | Rec: 0.0694 | F1: 0.1283
+✓ Saved best (f1: 0.1283) model to results/01_34.4_9021_f3_convnext_tiny_model_brain.pth
+
+Epoch 5/20
+Train Loss: 0.4821 | Train Acc: 99.94%
+Val Loss: 8.8449 | Val Acc: 67.59% | Prec: 0.3391 | Rec: 0.0696 | F1: 0.1155
+
+Epoch 6/20
+Train Loss: 0.4322 | Train Acc: 99.95%
+Val Loss: 9.4912 | Val Acc: 71.54% | Prec: 0.9258 | Rec: 0.0693 | F1: 0.1290
+✓ Saved best (f1: 0.1290) model to results/01_34.4_9021_f3_convnext_tiny_model_brain.pth
+
+Epoch 7/20
+Train Loss: 0.3965 | Train Acc: 99.96%
+Val Loss: 9.4808 | Val Acc: 70.21% | Prec: 0.5852 | Rec: 0.0694 | F1: 0.1240
+
+Epoch 8/20
+Train Loss: 0.3739 | Train Acc: 99.97%
+Val Loss: 9.1161 | Val Acc: 71.29% | Prec: 0.8380 | Rec: 0.0692 | F1: 0.1278
+
+Epoch 9/20
+Train Loss: 0.3503 | Train Acc: 99.98%
+Val Loss: 9.4101 | Val Acc: 71.46% | Prec: 0.8979 | Rec: 0.0692 | F1: 0.1284
+
+Epoch 10/20
+Train Loss: 0.3338 | Train Acc: 99.98%
+Val Loss: 10.9096 | Val Acc: 71.17% | Prec: 0.7979 | Rec: 0.0694 | F1: 0.1277
+
+Epoch 11/20
+Train Loss: 0.3249 | Train Acc: 99.98%
+Val Loss: 11.3751 | Val Acc: 70.85% | Prec: 0.7114 | Rec: 0.0692 | F1: 0.1261
+
+Epoch 12/20
+Train Loss: 0.3115 | Train Acc: 99.98%
+Val Loss: 11.7270 | Val Acc: 71.45% | Prec: 0.8926 | Rec: 0.0692 | F1: 0.1285
+
+Epoch 13/20
+Train Loss: 0.3006 | Train Acc: 99.99%
+Val Loss: 11.2370 | Val Acc: 70.41% | Prec: 0.6189 | Rec: 0.0693 | F1: 0.1246
+
+Epoch 14/20
+Train Loss: 0.2944 | Train Acc: 99.99%
+Val Loss: 11.2069 | Val Acc: 69.82% | Prec: 0.5284 | Rec: 0.0692 | F1: 0.1224
+
+Epoch 15/20
+Train Loss: 0.2900 | Train Acc: 99.99%
+Val Loss: 11.2465 | Val Acc: 71.49% | Prec: 0.9074 | Rec: 0.0692 | F1: 0.1287
+
+Epoch 16/20
+Train Loss: 0.2879 | Train Acc: 99.99%
+Val Loss: 11.4553 | Val Acc: 70.75% | Prec: 0.6880 | Rec: 0.0692 | F1: 0.1258
+
+Epoch 17/20
+Train Loss: 0.2849 | Train Acc: 100.00%
+Val Loss: 11.6049 | Val Acc: 70.99% | Prec: 0.7469 | Rec: 0.0693 | F1: 0.1268
+
+Epoch 18/20
+Train Loss: 0.2816 | Train Acc: 99.99%
+Val Loss: 11.9803 | Val Acc: 71.17% | Prec: 0.7990 | Rec: 0.0692 | F1: 0.1274
+
+Epoch 19/20
+Train Loss: 0.2795 | Train Acc: 100.00%
+Val Loss: 12.0182 | Val Acc: 70.87% | Prec: 0.7178 | Rec: 0.0692 | F1: 0.1263
+
+Epoch 20/20
+Train Loss: 0.2789 | Train Acc: 99.99%
+Val Loss: 12.0476 | Val Acc: 71.05% | Prec: 0.7642 | Rec: 0.0692 | F1: 0.1270
+✓ Saved final epoch (fallback) model to results/01_34.4_9021_f3_convnext_tiny_model_brain.pth
+
+✓ Saved learning curves to results/01_34.4_9021_f3_convnext_tiny_learning_curves.png
+✓ Saved learning curves JSON to results/01_34.4_9021_f3_convnext_tiny_learning_curves.json
+
+================================================================================
+Final Evaluation (Fold 4/5)
+================================================================================
+Accuracy:  71.05%
+Precision: 76.31%
+Recall:    6.92%
+Specificity: 99.06%
+F1 Score:  0.1270
+MCC:       0.1681
+Confusion Matrix: TP=1646, FP=511, FN=22126, TN=53906
+================================================================================
+
+✓ Saved evaluation report to results/01_34.4_9021_f3_convnext_tiny_evaluation_report.csv
+✓ Saved probabilities JSON to results/01_34.4_9021_f3_convnext_tiny_probabilities.json
+✓ Saved probability statistics to results/01_34.4_9021_f3_convnext_tiny_probability_summary.json
+✓ Saved bootstrap CI metrics summary to results/01_34.4_9021_f3_convnext_tiny_metrics_summary.csv
+  ✓ Calibration curve saved: results/01_34.4_9021_f3_convnext_tiny_calibration_curve.png
+    - Expected Calibration Error (ECE): 0.4371
+✓ Saved calibration curve to results/01_34.4_9021_f3_convnext_tiny_calibration_curve.png
+✓ Saved ROC curve to results/01_34.4_9021_f3_convnext_tiny_roc_curve.png
+✓ Saved confusion matrix to results/01_34.4_9021_f3_convnext_tiny_confusion_matrix.png
+✓ Saved PR curve to results/01_34.4_9021_f3_convnext_tiny_pr_curve.png
+✓ Saved model selection metrics to results/01_34.4_9021_f3_convnext_tiny_model_selection.json
+
+Generating Grad-CAM visualizations...
+[DEBUG] Grad-CAM: Loading predictions from results/01_34.4_9021_f3_convnext_tiny_probabilities.json...
+[DEBUG] Grad-CAM: Category distribution in validation set:
+  TP (Pred=1, True=1): 1646 samples
+  FP (Pred=1, True=0): 511 samples
+  FN (Pred=0, True=1): 22126 samples
+  TN (Pred=0, True=0): 53906 samples
+[DEBUG] Grad-CAM: Selected 3/1646 TP samples for visualization
+[DEBUG] Grad-CAM: Selected 3/511 FP samples for visualization
+[DEBUG] Grad-CAM: Selected 3/22126 FN samples for visualization
+[DEBUG] Grad-CAM: Selected 3/53906 TN samples for visualization
+[DEBUG] Grad-CAM: Loading 12 selected samples from dataset...
+[DEBUG] Grad-CAM: Loaded 12 samples for visualization (memory-efficient)
+[DEBUG Grad-CAM] Gradient stats: min=0.000004, max=0.012811, mean=0.000554, std=0.000523
+✓ Saved Grad-CAM visualization to results/01_34.4_9021_f3_convnext_tiny_gradcam.png
+
+================================================================================
+FOLD 3 CONFIGURATION (CONFIG 87771 - Mathematically Optimized)
+================================================================================
+Expected Validation Set:
+  Total patches: 99,120
+  Experiments: 4 positive + 0 negative
+  Neg:Pos ratio: 2.81:1
+  Distance from target (2.28:1): 0.53
+
+Total Configuration Score:
+  Overall distance: 0.6441 (sum of per-fold distances)
+  Selected from: 500,000+ random greedy searches
+  Selection criteria: Optimal balance of patch counts, experiment ratios, and ratio stability
+================================================================================
+
+✓ Fold 4/5 Complete!
+
+
+✓ Fold 3 complete: results/deephp_backbone_pretrained_convnext_tiny_f3.pth

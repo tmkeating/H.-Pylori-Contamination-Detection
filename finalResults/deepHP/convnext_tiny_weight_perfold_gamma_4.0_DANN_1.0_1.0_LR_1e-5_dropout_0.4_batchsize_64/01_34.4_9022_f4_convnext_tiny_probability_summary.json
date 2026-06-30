@@ -1,0 +1,28 @@
+{
+  "fold_idx": 4,
+  "model_name": "convnext_tiny",
+  "total_patches": 115704,
+  "positive_patches": 25767,
+  "negative_patches": 89937,
+  "positive_class_stats": {
+    "mean_probability": 0.9617929458618164,
+    "std_probability": 0.13798552751541138,
+    "min_probability": 0.011391956359148026,
+    "max_probability": 0.99937504529953,
+    "median_probability": 0.9961166381835938
+  },
+  "negative_class_stats": {
+    "mean_probability": 0.01116805151104927,
+    "std_probability": 0.019137732684612274,
+    "min_probability": 0.0029370831325650215,
+    "max_probability": 0.9904042482376099,
+    "median_probability": 0.00943430233746767
+  },
+  "overall_stats": {
+    "mean_probability": 0.22286993265151978,
+    "std_probability": 0.4011935293674469,
+    "min_probability": 0.0029370831325650215,
+    "max_probability": 0.99937504529953,
+    "median_probability": 0.010910357348620892
+  }
+}
