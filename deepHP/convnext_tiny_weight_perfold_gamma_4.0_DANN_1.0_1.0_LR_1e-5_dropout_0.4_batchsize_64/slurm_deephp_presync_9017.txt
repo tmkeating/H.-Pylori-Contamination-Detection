@@ -1,0 +1,78 @@
+==========================================================================
+Configuration Summary (DeepHP Pre-training)
+==========================================================================
+Configuration:
+  Profile: SEARCHERDEEPHP
+  Model: convnext_tiny
+  Iteration: 34.4
+
+Training Parameters:
+  Epochs: 20
+  Batch Size: 64
+  Learning Rate: 1e-5
+  Pct Start (LR Warmup): 0.1
+
+Loss & Regularization:
+  Neg Weight: 1.0
+  Pos Weight: 6.0,2.5,1.5,8.0,2.5
+  Use Focal Loss: False
+  Gamma: 4.0
+  Weight Decay: 0.05
+  Clip Grad: 1.0
+  Dropout: 0.4
+
+Augmentation & Normalization:
+  Jitter Intensity: 0.25
+
+Model Selection & SWA:
+  Saver Metric: f1
+  Use SWA: True
+  SWA Start Epoch: 12
+
+Cross-Validation:
+  Fold Batching Mode:  (0=all parallel)
+  5 Folds with Class-First Weighted Round-Robin Stratification
+==========================================================================
+
+Pre-sync job: Setting up DeepHP dataset for training...
+This pre-sync job performs:
+  1. Syncs DeepHP dataset (394,926 patches) to scratch directory
+  2. Applies blacklist exclusions from blacklistDeepHP.json
+  3. Verifies no blacklisted items were synced
+  4. Exports DEEPHP_DATASET_ROOT for all training jobs
+
+After sync, training folds will use CONFIG 87771 stratification:
+  - Each fold validates on unique experiments (prevents fold-specific artifacts)
+  - Each fold trains on all other experiments (~307K patches, diverse)
+  - Fold 0 val: 7 exps (4 pos, 3 neg) → 87,532 patches (2.33:1 ratio)
+  - Fold 1 val: 10 exps (3 pos, 7 neg) → 89,516 patches (2.06:1 ratio)
+  - Fold 2 val: 5 exps (4 pos, 1 neg) → 20,347 patches (2.31:1 ratio)
+  - Fold 3 val: 4 exps (4 pos, 0 neg) → 99,120 patches (2.81:1 ratio)
+  - Fold 4 val: 7 exps (6 pos, 1 neg) → 98,410 patches (2.29:1 ratio)
+
+✓ Source dataset root: /home/tkeating/datasets/8117177
+✓ Created scratch directory: /home/tkeating/.scratch/deephp_data
+Cleaning blacklisted items from scratch...
+Generating exclude filters from blacklistDeepHP.json...
+[FILTER] Excluding from Positive: Experiment-6712_b0s11c0x7495-2776y16848-2080m49_17922048x256512.jpeg
+[FILTER] Wrote exclude filter file: /tmp/deephp_exclude_filters_2491611.txt
+Syncing DeepHP dataset to scratch (with blacklist exclusions)...
+[RSYNC] Syncing Positive patches with exclusion filters...
+[RSYNC] Syncing Negative patches...
+Verifying sync...
+✓ Positive patches synced: 111004
+✓ Negative patches synced: 283921
+✓ Total patches: 394925
+✓ Original dataset total: 394926
+✓ Excluded by blacklist: 1
+✓ DeepHP dataset ready at: /home/tkeating/.scratch/deephp_data
+
+Blacklist Status:
+  ✓ Macenko Reference Excluded from Sync:
+    File: Positive/Experiment-6712_b0s11c0x7495-2776y16848-2080m49_17922048x256512.jpeg
+    Quality Score: 0.9551966921899046
+    Reason: Macenko H&E normalization reference - excluded from training/validation to prevent data leakage
+
+  Verification - Searching for blacklisted file in scratch:
+    ✓ Blacklisted file NOT found in scratch (as expected)
+    ✓ Exclusion filter working correctly
