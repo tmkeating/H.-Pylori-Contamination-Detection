@@ -66,7 +66,7 @@
 | **2** | 5 | 78,085 | 1:2.31 | 28 | 316,840 | 1:2.27 |
 | **3** | 4 | 78,189 | 1:2.29 | 29 | 316,736 | 1:2.28 |
 | **4** | 7 | 115,704 | 1:2.29 | 26 | 279,221 | 1:2.28 |
-| **TOTAL** | **33** | **394,925** | **1:2.28** | **26-29** | **1,579,700**¹ | **~1:2.28** |
+| **TOTAL** | **33** | **394,925** | **1:2.28** | **23-29** | **1,579,700**¹ | **~1:2.28** |
 
 ¹ *Note: The 1,579,700 represents the aggregate of patches used for training when summing all 5 folds. Each unique patch appears in 4 training sets (validation in one fold, training in the other 4). This is not the number of unique training patches, which is 394,925.*
 
